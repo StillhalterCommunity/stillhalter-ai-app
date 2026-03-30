@@ -1,0 +1,77 @@
+"""
+Watchlist mit 11 Sektoren - geparst aus der Masterclass Q1 2026 Liste
+"""
+
+RAW_WATCHLIST = """###1. TECHNOLOGIE (TECHNOLOGY),NYSE:CRM,NASDAQ:INTU,NYSE:SAP,NYSE:ORCL,NASDAQ:ADBE,NASDAQ:PLTR,NYSE:IBM,NYSE:TYL,NASDAQ:GOOG,NASDAQ:MU,NASDAQ:ADP,NASDAQ:MSFT,NASDAQ:ARM,NASDAQ:ALAB,NASDAQ:AVGO,NASDAQ:SNDK,NASDAQ:INTC,NASDAQ:NVDA,NASDAQ:QCOM,NASDAQ:AAPL,NASDAQ:WDC,NASDAQ:TSLA,NASDAQ:AMD,NYSE:TSM,NASDAQ:CRWV,NYSE:HPQ,NASDAQ:NXPI,NASDAQ:ASML,NASDAQ:CSCO,NASDAQ:MRVL,NASDAQ:MCHP,NASDAQ:TXN,NASDAQ:STX,NASDAQ:CRUS,###2. GESUNDHEITSWESEN (HEALTHCARE),NYSE:HIMS,NASDAQ:BNTX,NASDAQ:CRMD,NYSE:SYK,NYSE:ABT,NYSE:LLY,NASDAQ:ISRG,NASDAQ:CRSP,NYSE:MDT,NYSE:EW,NASDAQ:GILD,NYSE:ABBV,NASDAQ:AMGN,NYSE:JNJ,NYSE:MRK,NYSE:NVS,NYSE:DHR,NYSE:RMD,NYSE:NVO,NYSE:UNH,NYSE:BMY,NYSE:PFE,NASDAQ:XRAY,NYSE:ZTS,NYSE:TMO,###3. FINANZDIENSTLEISTUNGEN (FINANCIAL),NYSE:CRCL,NASDAQ:COIN,NYSE:SPGI,NASDAQ:HOOD,NASDAQ:IBKR,NASDAQ:ETOR,NASDAQ:PYPL,NYSE:BX,NASDAQ:FISV,NYSE:KKR,NASDAQ:MSTR,NYSE:HSBC,NYSE:BLK,NYSE:MA,NYSE:BRK.B,NYSE:AXP,NYSE:V,NYSE:GS,NYSE:JPM,NYSE:USB,NYSE:MS,NYSE:MTB,NYSE:BAC,NYSE:C,NYSE:WFC,###4. BASISKONSUMGÜTER (CONSUMER STAPLES),NYSE:CLX,NASDAQ:SBUX,NYSE:MKC,NYSE:GIS,NYSE:CHD,NYSE:BUD,NYSE:UL,NYSE:CL,NASDAQ:KMB,NYSE:PG,NYSE:KO,NASDAQ:KDP,NYSE:KR,NASDAQ:PEP,NYSE:MCD,NASDAQ:CPB,NYSE:TGT,NYSE:MO,NYSE:YUM,NYSE:HRL,NYSE:PM,NASDAQ:KHC,NASDAQ:WMT,NYSE:TJX,NYSE:VFC,###5. ENERGIE (ENERGY),NYSE:TTE,NASDAQ:ENPH,NYSE:VST,NYSE:SHEL,NYSE:CVX,NYSE:COP,NASDAQ:FSLR,NYSE:NEE,NYSE:SU,NYSE:PBR,NYSE:BP,NYSE:XOM,NYSE:CTRA,NASDAQ:APA,NYSE:MPC,###6. INDUSTRIE (INDUSTRIALS),NASDAQ:CTAS,NYSE:APH,NYSE:BA,NYSE:LMT,NASDAQ:RIVN,NYSE:GD,NYSE:RTX,NASDAQ:HON,NYSE:GE,NYSE:KMI,NYSE:EMR,NYSE:ATR,NYSE:ITW,NASDAQ:LIN,NYSE:PWR,NYSE:HAL,NYSE:ECL,NYSE:IEX,NYSE:BALL,NYSE:DE,NYSE:PH,NYSE:CAT,NYSE:APD,NYSE:DD,NYSE:JBL,###7. IMMOBILIEN (REITS),NYSE:AMT,NYSE:PSA,NYSE:SPG,NYSE:O,NYSE:DLR,NYSE:PLD,NASDAQ:EQIX,NYSE:AVB,NYSE:EQR,NYSE:WELL,###8. TELEKOMMUNIKATION (COMMUNICATION SERVICES),NYSE:PINS,NYSE:RDDT,NASDAQ:ROKU,NASDAQ:ZM,NYSE:RBLX,NASDAQ:META,NYSE:SPOT,NYSE:DIS,NASDAQ:WBD,NYSE:T,NASDAQ:CMCSA,NASDAQ:CHTR,NYSE:VZ,NASDAQ:VOD,NASDAQ:TMUS,###9. VERBRAUCHSGÜTER (CONSUMER DISCRETONARY),NASDAQ:SHOP,NYSE:UBER,NASDAQ:NFLX,NASDAQ:ABNB,NYSE:LUV,NASDAQ:AMZN,NASDAQ:EBAY,NASDAQ:MAR,NYSE:BABA,NASDAQ:MNST,NYSE:WH,NASDAQ:MAT,NYSE:HD,NYSE:CCL,NYSE:MMM,NASDAQ:ROST,NASDAQ:URBN,NYSE:ANF,NYSE:NKE,NYSE:RL,###10. VERSORGER (UTILITIES),NYSE:WM,NYSE:AES,NYSE:DUK,NYSE:SO,NYSE:UGI,NASDAQ:AEP,NYSE:PEG,NYSE:D,NASDAQ:XEL,NASDAQ:CEG,###11. GRUNDSTOFFE (BASIC MATERIALS),NASDAQ:APP,NYSE:MP,AMEX:EQX,NYSE:SCCO,NYSE:AEM,NYSE:HL,NYSE:RIO,NYSE:BHP,NYSE:NEM,NYSE:WPM,AMEX:VZLA,NYSE:MT,NYSE:B,NYSE:OXY,NYSE:AA,NYSE:FNV,NYSE:LAC,NASDAQ:LTBR,NYSE:FCX,AMEX:UEC,NYSE:VIST"""
+
+
+def _normalize_ticker(raw: str) -> str:
+    """Entfernt Exchange-Prefix und normalisiert Ticker für yfinance."""
+    ticker = raw.strip()
+    if ":" in ticker:
+        ticker = ticker.split(":", 1)[1]
+    # yfinance verwendet BRK-B statt BRK.B
+    ticker = ticker.replace(".", "-")
+    return ticker
+
+
+def parse_watchlist() -> dict:
+    """Parst die Watchlist in ein Dict: {Sektor: [Ticker, ...]}"""
+    sectors = {}
+    current_sector = None
+
+    parts = RAW_WATCHLIST.split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith("###"):
+            current_sector = part.lstrip("#").strip()
+            sectors[current_sector] = []
+        elif current_sector and ":" in part:
+            ticker = _normalize_ticker(part)
+            sectors[current_sector].append(ticker)
+
+    return sectors
+
+
+def get_all_tickers() -> list[str]:
+    """Gibt alle Ticker aus allen Sektoren zurück (dedupliziert)."""
+    watchlist = parse_watchlist()
+    all_tickers = []
+    seen = set()
+    for tickers in watchlist.values():
+        for t in tickers:
+            if t not in seen:
+                all_tickers.append(t)
+                seen.add(t)
+    return all_tickers
+
+
+def get_sector_for_ticker(ticker: str) -> str:
+    """Gibt den Sektor für einen Ticker zurück."""
+    watchlist = parse_watchlist()
+    for sector, tickers in watchlist.items():
+        if ticker in tickers:
+            return sector
+    return "Unbekannt"
+
+
+# Sektor-Kurzbezeichnungen für die UI
+SECTOR_ICONS = {
+    "1. TECHNOLOGIE (TECHNOLOGY)": "💻",
+    "2. GESUNDHEITSWESEN (HEALTHCARE)": "🏥",
+    "3. FINANZDIENSTLEISTUNGEN (FINANCIAL)": "🏦",
+    "4. BASISKONSUMGÜTER (CONSUMER STAPLES)": "🛒",
+    "5. ENERGIE (ENERGY)": "⚡",
+    "6. INDUSTRIE (INDUSTRIALS)": "🏭",
+    "7. IMMOBILIEN (REITS)": "🏢",
+    "8. TELEKOMMUNIKATION (COMMUNICATION SERVICES)": "📡",
+    "9. VERBRAUCHSGÜTER (CONSUMER DISCRETONARY)": "🛍️",
+    "10. VERSORGER (UTILITIES)": "💡",
+    "11. GRUNDSTOFFE (BASIC MATERIALS)": "⛏️",
+}
+
+
+WATCHLIST = parse_watchlist()
+ALL_TICKERS = get_all_tickers()
