@@ -199,10 +199,10 @@ def _prepare_options(df: pd.DataFrame, current_price: float, option_type: str) -
     df["otm_pct"]      = df.apply(
         lambda r: _otm_pct(float(r["strike"]), current_price, option_type), axis=1
     )
-    df["iv_pct"] = (
-        (df["impliedVolatility"].fillna(0.30) * 100)
-        if "impliedVolatility" in df.columns else 30.0
-    )
+    if "impliedVolatility" in df.columns:
+        df["iv_pct"] = df["impliedVolatility"].fillna(0.30) * 100
+    else:
+        df["iv_pct"] = pd.Series(30.0, index=df.index)
     return df
 
 
@@ -365,6 +365,38 @@ def _screen_strangle(puts_df: pd.DataFrame, calls_df: pd.DataFrame,
                 width = call_strike - put_strike
                 width_pct = width / current_price * 100
 
+                # ── U10: Überarbeitetes Strangle-Scoring ─────────────────────────────
+                # Credit-to-Width Ratio (CWR): Prämie / Breite (höher = besser)
+                cwr = total_premium / width if width > 0 else 0
+                cwr_pct = cwr * 100  # in % der Breite
+
+                # Delta-Balance: idealer Weise |Put-Delta| ≈ |Call-Delta|
+                try:
+                    pd_abs = abs(float(str(put_row.get("Delta", "0.2")).replace("–", "-")))
+                    cd_abs = abs(float(str(call_row.get("Delta", "0.2")).replace("–", "-")))
+                    delta_balance = max(0, 100 - abs(pd_abs - cd_abs) * 500)
+                except Exception:
+                    pd_abs, cd_abs, delta_balance = 0.2, 0.2, 50.0
+
+                # Annualisierte Gesamtrendite auf gebundenes Kapital
+                # Für Short Strangle = Prämie / Breite * 365/DTE * 100
+                ann_yield = cwr * (365 / max(dte, 1)) * 100
+
+                # Sicherheitspuffer (Abstand Kurs zu den Strikes)
+                put_buffer  = (current_price - put_strike) / current_price * 100
+                call_buffer = (call_strike - current_price) / current_price * 100
+                avg_buffer  = (put_buffer + call_buffer) / 2
+
+                # CRV Score für Strangles
+                crv_strangle = (ann_yield * np.sqrt(1 + avg_buffer / 10)) / ((pd_abs + cd_abs) / 2 + 0.05)
+
+                # Gesamtscore: CWR % + Delta-Balance + Puffer
+                total_score = (
+                    min(cwr_pct * 10, 40) +         # max 40 Punkte (CWR)
+                    delta_balance * 0.3 +            # max 30 Punkte (Balance)
+                    min(avg_buffer * 2, 30)          # max 30 Punkte (Puffer)
+                )
+
                 strangles.append({
                     "Verfall": exp,
                     "DTE": dte,
@@ -375,14 +407,20 @@ def _screen_strangle(puts_df: pd.DataFrame, calls_df: pd.DataFrame,
                     "Put Prämie": round(float(put_row.get("Prämie", 0)), 2),
                     "Call Prämie": round(float(call_row.get("Prämie", 0)), 2),
                     "Gesamt-Prämie": round(total_premium, 2),
+                    "CWR %": round(cwr_pct, 2),
+                    "Ann. Rendite %": round(ann_yield, 1),
                     "Prämie/Tag": round(total_premium / max(1, dte), 3),
-                    "Put Delta": put_row.get("Delta", ""),
-                    "Call Delta": call_row.get("Delta", ""),
+                    "Put Delta": round(pd_abs, 3),
+                    "Call Delta": round(cd_abs, 3),
+                    "Delta Balance": round(delta_balance, 0),
+                    "Put Puffer %": round(put_buffer, 1),
+                    "Call Puffer %": round(call_buffer, 1),
                     "IV Put %": put_row.get("IV %", ""),
                     "IV Call %": call_row.get("IV %", ""),
                     "Put OI": put_row.get("Open Interest", ""),
                     "Call OI": call_row.get("Open Interest", ""),
-                    "Score": round((float(put_row.get("Score", 50)) + float(call_row.get("Score", 50))) / 2, 1),
+                    "CRV Score": round(crv_strangle, 1),
+                    "Score": round(total_score, 1),
                 })
 
     if not strangles:
@@ -427,25 +465,28 @@ def _format_output(df: pd.DataFrame, current_price: float, option_type: str) -> 
         ), axis=1
     )
 
+    rendite_per_day = (rendite_laufzeit / df["dte"].clip(lower=1)).round(4)
+
     output = pd.DataFrame({
         "Liq.": liq_label,
         "Strike": df["strike"].round(2),
         "Verfall": df["expiration"],
         "DTE": df["dte"].astype(int),
-        "Bid": df["bid"].round(2)       if "bid" in df.columns else pd.Series("", index=df.index),
-        "Ask": df["ask"].round(2)       if "ask" in df.columns else pd.Series("", index=df.index),
+        "Bid": df["bid"].round(2)       if "bid" in df.columns else pd.Series(float("nan"), index=df.index),
+        "Ask": df["ask"].round(2)       if "ask" in df.columns else pd.Series(float("nan"), index=df.index),
         "Prämie": df["mid_price"].round(2),
         "Kursquelle": df["price_source"] if "price_source" in df.columns else "Mid",
         "Spread %": df["spread_pct"].replace(999.0, float("nan")).round(1)
                     if "spread_pct" in df.columns else pd.Series(float("nan"), index=df.index),
-        "Rendite %": rendite_laufzeit,
-        "Rendite ann. %": roi_ann,
         "Prämie/Tag": df.get("premium_per_day", df["mid_price"] / df["dte"].clip(1)).round(3),
-        "Delta": df["delta"].round(3) if "delta" in df.columns else pd.Series("", index=df.index),
-        "Theta/Tag": df["theta"].round(3) if "theta" in df.columns else pd.Series("", index=df.index),
-        "IV %": (df["impliedVolatility"] * 100).round(1) if "impliedVolatility" in df.columns else pd.Series("", index=df.index),
+        "Rendite % Laufzeit": rendite_laufzeit,
+        "Rendite ann. %": roi_ann,
+        "Rendite %/Tag": rendite_per_day,
+        "Delta": df["delta"].round(3) if "delta" in df.columns else pd.Series(float("nan"), index=df.index),
+        "Theta/Tag": df["theta"].round(3) if "theta" in df.columns else pd.Series(float("nan"), index=df.index),
+        "IV %": (df["impliedVolatility"] * 100).round(1) if "impliedVolatility" in df.columns else pd.Series(float("nan"), index=df.index),
         "OTM %": df["otm_pct"].round(1),
-        "Open Interest": oi_col,
+        "OI": oi_col,
         "Volumen": vol_col,
         "Score": df["score"],
         "_highlight": df["score"] >= df["score"].quantile(0.75),

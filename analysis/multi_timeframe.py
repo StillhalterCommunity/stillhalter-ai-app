@@ -53,19 +53,24 @@ def calc_stoch(high: pd.Series, low: pd.Series, close: pd.Series,
     return k, d
 
 
-def calc_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+def calc_macd(close: pd.Series, fast: int = 10, slow: int = 35, signal: int = 5):
+    """Stillhalter MACD Pro Parameter: 10/35/5 (statt Standard 12/26/9)."""
     ema_fast = calc_ema(close, fast)
     ema_slow = calc_ema(close, slow)
     macd = ema_fast - ema_slow
-    sig = calc_ema(macd, signal)
+    sig  = calc_ema(macd, signal)
     hist = macd - sig
     return macd, sig, hist
 
 
 # ── Crossover Detection ────────────────────────────────────────────────────────
 
-def crossed_above(series: pd.Series, level: float, lookback: int = 3) -> bool:
-    """Series hat 'level' in letzten 'lookback' Kerzen von unten gekreuzt."""
+def crossed_above(series: pd.Series, level: float, lookback: int = 5) -> bool:
+    """
+    Series hat 'level' in letzten 'lookback' Kerzen von unten gekreuzt.
+    U9: lookback auf 5 erhöht für stabilere Signale.
+    Zusätzlich: %K muss auch über %D liegen (Bestätigung).
+    """
     if len(series) < lookback + 1:
         return False
     s = series.dropna().iloc[-(lookback + 1):]
@@ -75,7 +80,7 @@ def crossed_above(series: pd.Series, level: float, lookback: int = 3) -> bool:
     return False
 
 
-def crossed_below(series: pd.Series, level: float, lookback: int = 3) -> bool:
+def crossed_below(series: pd.Series, level: float, lookback: int = 5) -> bool:
     """Series hat 'level' in letzten 'lookback' Kerzen von oben gekreuzt."""
     if len(series) < lookback + 1:
         return False
@@ -86,28 +91,62 @@ def crossed_below(series: pd.Series, level: float, lookback: int = 3) -> bool:
     return False
 
 
-def line_crossed_above(series_a: pd.Series, series_b: pd.Series, lookback: int = 3) -> bool:
+def stoch_cross_above_with_confirm(
+    stoch_k: pd.Series, stoch_d: pd.Series,
+    level: float = 20.0, lookback: int = 5
+) -> bool:
+    """
+    U9: Stochastik kreuzt 'level' aufwärts UND %K > %D (Bestätigung).
+    Verhindert Fehlsignale wenn %K wieder sofort fällt.
+    """
+    basic = crossed_above(stoch_k, level, lookback)
+    if not basic:
+        return False
+    # Bestätigung: aktuell %K > %D
+    try:
+        return float(stoch_k.dropna().iloc[-1]) > float(stoch_d.dropna().iloc[-1])
+    except Exception:
+        return basic
+
+
+def stoch_cross_below_with_confirm(
+    stoch_k: pd.Series, stoch_d: pd.Series,
+    level: float = 80.0, lookback: int = 5
+) -> bool:
+    """U9: Stochastik kreuzt 'level' abwärts UND %K < %D (Bestätigung)."""
+    basic = crossed_below(stoch_k, level, lookback)
+    if not basic:
+        return False
+    try:
+        return float(stoch_k.dropna().iloc[-1]) < float(stoch_d.dropna().iloc[-1])
+    except Exception:
+        return basic
+
+
+def line_crossed_above(series_a: pd.Series, series_b: pd.Series, lookback: int = 5) -> bool:
     """Series A hat Series B von unten gekreuzt (bullishes Cross)."""
     if len(series_a) < lookback + 1 or len(series_b) < lookback + 1:
         return False
-    a = series_a.dropna().iloc[-(lookback + 1):]
-    b = series_b.dropna().iloc[-(lookback + 1):]
-    if len(a) != len(b):
-        return False
+    a = series_a.dropna().reset_index(drop=True)
+    b = series_b.dropna().reset_index(drop=True)
+    min_len = min(len(a), len(b), lookback + 1)
+    a = a.iloc[-min_len:]
+    b = b.iloc[-min_len:]
     for i in range(len(a) - 1):
         if a.iloc[i] <= b.iloc[i] and a.iloc[i + 1] > b.iloc[i + 1]:
             return True
     return False
 
 
-def line_crossed_below(series_a: pd.Series, series_b: pd.Series, lookback: int = 3) -> bool:
+def line_crossed_below(series_a: pd.Series, series_b: pd.Series, lookback: int = 5) -> bool:
     """Series A hat Series B von oben gekreuzt (bearishes Cross)."""
     if len(series_a) < lookback + 1 or len(series_b) < lookback + 1:
         return False
-    a = series_a.dropna().iloc[-(lookback + 1):]
-    b = series_b.dropna().iloc[-(lookback + 1):]
-    if len(a) != len(b):
-        return False
+    a = series_a.dropna().reset_index(drop=True)
+    b = series_b.dropna().reset_index(drop=True)
+    min_len = min(len(a), len(b), lookback + 1)
+    a = a.iloc[-min_len:]
+    b = b.iloc[-min_len:]
     for i in range(len(a) - 1):
         if a.iloc[i] >= b.iloc[i] and a.iloc[i + 1] < b.iloc[i + 1]:
             return True
@@ -129,15 +168,29 @@ class TFSignal:
     rsi_oversold: bool = False       # < 30
     rsi_overbought: bool = False     # > 70
 
-    # Stochastik
+    # Schnelle Stochastik (14,3,3) — Primärsignal
     stoch_k: float = 0.0
     stoch_d: float = 0.0
-    stoch_bullish: bool = False       # %K > %D
-    stoch_bearish: bool = False       # %K < %D
-    stoch_cross_20_up: bool = False   # kreuzt 20 aufwärts
-    stoch_cross_80_down: bool = False # kreuzt 80 abwärts
-    stoch_oversold: bool = False      # %K < 20
-    stoch_overbought: bool = False    # %K > 80
+    stoch_bullish: bool = False
+    stoch_bearish: bool = False
+    stoch_cross_20_up: bool = False
+    stoch_cross_80_down: bool = False
+    stoch_oversold: bool = False
+    stoch_overbought: bool = False
+    stoch_ready_buy: bool = False     # %K < 20 UND %K kreuzt %D aufwärts (stärkstes Signal)
+    stoch_ready_sell: bool = False    # %K > 80 UND %K kreuzt %D abwärts
+
+    # Langsame Stochastik (35,10,5) — Bestätigung
+    stoch_slow_k: float = 0.0
+    stoch_slow_d: float = 0.0
+    stoch_slow_oversold: bool = False
+    stoch_slow_overbought: bool = False
+    stoch_slow_ready_buy: bool = False
+    stoch_slow_ready_sell: bool = False
+
+    # Dual-Bestätigung
+    stoch_both_oversold: bool = False   # Beide überverkauft → stärkstes Kaufsignal
+    stoch_both_overbought: bool = False # Beide überkauft → stärkstes Verkaufssignal
 
     # MACD
     macd_val: float = 0.0
@@ -253,19 +306,37 @@ def _analyze_tf(df: pd.DataFrame, tf_name: str, lookback: int = 3,
     sig.rsi_cross_30_up = crossed_above(rsi, 30, lookback)
     sig.rsi_cross_70_down = crossed_below(rsi, 70, lookback)
 
-    # ── Stochastik ───────────────────────────────────────────────────────
-    k, d = calc_stoch(high, low, close)
+    # ── Dual Stochastic (Stillhalter AI App) ───────────────────────────
+    # Schnell: 14,3,3
+    k, d = calc_stoch(high, low, close, k_period=14, smooth_k=3, d_period=3)
     if len(k.dropna()) < 2:
         return None
 
     sig.stoch_k = float(k.iloc[-1]) if not np.isnan(k.iloc[-1]) else 50.0
     sig.stoch_d = float(d.iloc[-1]) if not np.isnan(d.iloc[-1]) else 50.0
-    sig.stoch_bullish = sig.stoch_k > sig.stoch_d
-    sig.stoch_bearish = sig.stoch_k < sig.stoch_d
-    sig.stoch_oversold = sig.stoch_k < 20
+    sig.stoch_bullish    = sig.stoch_k > sig.stoch_d
+    sig.stoch_bearish    = sig.stoch_k < sig.stoch_d
+    sig.stoch_oversold   = sig.stoch_k < 20
     sig.stoch_overbought = sig.stoch_k > 80
-    sig.stoch_cross_20_up = crossed_above(k, 20, lookback)
-    sig.stoch_cross_80_down = crossed_below(k, 80, lookback)
+    sig.stoch_cross_20_up   = stoch_cross_above_with_confirm(k, d, 20.0, lookback)
+    sig.stoch_cross_80_down = stoch_cross_below_with_confirm(k, d, 80.0, lookback)
+    # readyBuy: %K < 20 UND %K kreuzt %D aufwärts
+    sig.stoch_ready_buy  = sig.stoch_oversold  and line_crossed_above(k, d, lookback)
+    sig.stoch_ready_sell = sig.stoch_overbought and line_crossed_below(k, d, lookback)
+
+    # Langsam: 35,10,5
+    ks, ds = calc_stoch(high, low, close, k_period=35, smooth_k=10, d_period=5)
+    if len(ks.dropna()) >= 2:
+        sig.stoch_slow_k         = float(ks.iloc[-1]) if not np.isnan(ks.iloc[-1]) else 50.0
+        sig.stoch_slow_d         = float(ds.iloc[-1]) if not np.isnan(ds.iloc[-1]) else 50.0
+        sig.stoch_slow_oversold  = sig.stoch_slow_k < 20
+        sig.stoch_slow_overbought= sig.stoch_slow_k > 80
+        sig.stoch_slow_ready_buy = sig.stoch_slow_oversold  and line_crossed_above(ks, ds, lookback)
+        sig.stoch_slow_ready_sell= sig.stoch_slow_overbought and line_crossed_below(ks, ds, lookback)
+
+    # Dual-Bestätigung
+    sig.stoch_both_oversold   = sig.stoch_oversold   and sig.stoch_slow_oversold
+    sig.stoch_both_overbought = sig.stoch_overbought and sig.stoch_slow_overbought
 
     # ── MACD ─────────────────────────────────────────────────────────────
     macd, macd_signal, hist = calc_macd(close)

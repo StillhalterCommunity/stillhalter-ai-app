@@ -1,5 +1,5 @@
 """
-Stillhalter Community Brand Theme.
+Stillhalter AI App Brand Theme.
 Red Rose Font + Dark Professional Design.
 """
 
@@ -60,7 +60,7 @@ def get_logo_html(variant: str = "white", height: int = 40) -> str:
 
 
 def get_css() -> str:
-    """Vollständiges CSS mit Red Rose Font + Stillhalter Community Branding."""
+    """Vollständiges CSS mit Red Rose Font + Stillhalter AI App Branding."""
     rr_regular = _load_b64("RedRose-Regular.b64")
     rr_bold    = _load_b64("RedRose-Bold.b64")
     rr_light   = _load_b64("RedRose-Light.b64")

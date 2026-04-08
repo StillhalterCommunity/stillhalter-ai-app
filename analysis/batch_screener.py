@@ -9,12 +9,15 @@ import time
 import yfinance as yf
 from typing import Optional, Callable, List
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from analysis.greeks import enrich_options_with_greeks
 from analysis.technicals import analyze_technicals, TechSignal
 from data.fetcher import (
     fetch_options_chain, fetch_price_history,
-    fetch_stock_info, calculate_dte
+    fetch_stock_info, calculate_dte,
+    fetch_iv_rank, fetch_earnings_date
 )
 from data.watchlist import get_sector_for_ticker, SECTOR_ICONS
 
@@ -58,6 +61,200 @@ def calculate_crv_score(
     return round(crv, 2)
 
 
+# ── Short Strangle Scan ───────────────────────────────────────────────────────
+
+def _mid(row) -> float:
+    """Midprice aus Bid/Ask oder LastPrice."""
+    bid = float(row.get("bid", 0) or 0)
+    ask = float(row.get("ask", 0) or 0)
+    last = float(row.get("lastPrice", 0) or 0)
+    if bid > 0 and ask > 0:
+        return (bid + ask) / 2
+    return last
+
+
+def scan_strangle(
+    ticker: str,
+    dte_min: int = 14,
+    dte_max: int = 60,
+    iv_min: float = 0.30,
+    premium_min: float = 0.10,
+    min_oi: int = 5,
+    otm_min: float = 10.0,
+    otm_max: float = 50.0,
+) -> pd.DataFrame:
+    """
+    Scannt Short-Strangle-Kombinationen: SHORT PUT + SHORT CALL auf gleichem Verfallstag.
+    Beide Strikes mind. otm_min% OTM. Gibt kombinierte Metriken zurück.
+    Ideal: hohe IV, weite Strikes, noch ausreichende Prämie.
+    """
+    try:
+        puts_df, calls_df, expirations = fetch_options_chain(
+            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=6
+        )
+        if not expirations or puts_df is None or calls_df is None:
+            return pd.DataFrame()
+
+        stock_info = fetch_stock_info(ticker)
+        current_price = stock_info.get("price")
+        if not current_price or current_price <= 0:
+            return pd.DataFrame()
+
+        sector = get_sector_for_ticker(ticker)
+        sector_short = (sector.split(".", 1)[-1].strip().split("(")[0].strip()
+                        if "." in sector else sector)
+
+        # Technische Analyse (für Trend-Info)
+        trend_str = ""
+        try:
+            hist = fetch_price_history(ticker, period="6mo")
+            if hist is not None and not hist.empty:
+                tech = analyze_technicals(hist)
+                if tech:
+                    m = {"bullish": "↑ Aufwärtstrend", "bearish": "↓ Abwärtstrend",
+                         "neutral": "→ Seitwärts"}
+                    trend_str = m.get(tech.trend, "")
+        except Exception:
+            pass
+
+        # IV Rank
+        iv_rank_str = "–"
+        try:
+            ivd = fetch_iv_rank(ticker)
+            ivr = ivd.get("iv_rank")
+            iv_rank_str = f"{ivr:.0f}" if ivr is not None else "–"
+        except Exception:
+            pass
+
+        # Earnings
+        earnings_str = ""
+        try:
+            edate = fetch_earnings_date(ticker)
+            if edate and calculate_dte(edate) >= 0:
+                earnings_str = edate
+        except Exception:
+            pass
+
+        # Für jeden Verfallstag: bestes PUT + CALL Paar finden
+        results = []
+        for expiry in expirations:
+            dte_val = calculate_dte(expiry)
+            if dte_val < dte_min or dte_val > dte_max:
+                continue
+
+            # Puts für diesen Verfall
+            p_exp = puts_df[puts_df["expiration"] == expiry].copy() if "expiration" in puts_df.columns else pd.DataFrame()
+            c_exp = calls_df[calls_df["expiration"] == expiry].copy() if "expiration" in calls_df.columns else pd.DataFrame()
+
+            if p_exp.empty or c_exp.empty:
+                continue
+
+            # Mid-Price berechnen
+            p_exp["mid_price"] = p_exp.apply(_mid, axis=1)
+            c_exp["mid_price"] = c_exp.apply(_mid, axis=1)
+
+            # OTM% berechnen
+            p_exp["otm_pct"] = ((current_price - p_exp["strike"].astype(float)) / current_price * 100).clip(lower=0)
+            c_exp["otm_pct"] = ((c_exp["strike"].astype(float) - current_price) / current_price * 100).clip(lower=0)
+
+            # Filter anwenden
+            p_filt = p_exp[
+                (p_exp["otm_pct"] >= otm_min) & (p_exp["otm_pct"] <= otm_max) &
+                (p_exp["mid_price"] >= premium_min) &
+                (p_exp.get("impliedVolatility", pd.Series([1.0] * len(p_exp), index=p_exp.index)).fillna(0) >= iv_min) &
+                (p_exp.get("openInterest", pd.Series([min_oi] * len(p_exp), index=p_exp.index)).fillna(0) >= min_oi)
+            ]
+            c_filt = c_exp[
+                (c_exp["otm_pct"] >= otm_min) & (c_exp["otm_pct"] <= otm_max) &
+                (c_exp["mid_price"] >= premium_min) &
+                (c_exp.get("impliedVolatility", pd.Series([1.0] * len(c_exp), index=c_exp.index)).fillna(0) >= iv_min) &
+                (c_exp.get("openInterest", pd.Series([min_oi] * len(c_exp), index=c_exp.index)).fillna(0) >= min_oi)
+            ]
+
+            if p_filt.empty or c_filt.empty:
+                continue
+
+            # Greeks berechnen
+            p_filt = enrich_options_with_greeks(p_filt, current_price, "put")
+            c_filt = enrich_options_with_greeks(c_filt, current_price, "call")
+
+            if p_filt.empty or c_filt.empty:
+                continue
+
+            # Bestes Paar: höchste Gesamt-Prämie mit möglichst symmetrischem Delta
+            # → kombiniere jeweils das beste Put + beste Call (nach Prämie/OTM)
+            best_put  = p_filt.sort_values("mid_price", ascending=False).iloc[0]
+            best_call = c_filt.sort_values("mid_price", ascending=False).iloc[0]
+
+            put_strike   = float(best_put["strike"])
+            call_strike  = float(best_call["strike"])
+            put_premium  = float(best_put["mid_price"])
+            call_premium = float(best_call["mid_price"])
+            put_otm      = float(best_put["otm_pct"])
+            call_otm     = float(best_call["otm_pct"])
+            put_delta    = float(best_put.get("delta", -0.15))
+            call_delta   = float(best_call.get("delta", 0.15))
+            put_iv       = float(best_put.get("impliedVolatility", iv_min))
+            call_iv      = float(best_call.get("impliedVolatility", iv_min))
+            avg_iv       = (put_iv + call_iv) / 2
+            combined_prem = put_premium + call_premium
+            net_delta    = put_delta + call_delta     # nahe 0 = neutral
+            breakeven_low  = put_strike  - combined_prem
+            breakeven_high = call_strike + combined_prem
+            total_range_pct = (call_strike - put_strike) / current_price * 100
+            combined_yield  = (combined_prem / current_price) * 100   # auf Kurs
+            annual_yield    = combined_yield * (365 / max(1, dte_val))
+
+            # CRV für Strangle: Rendite × √(Range) / (|net_delta| + 0.1)
+            crv = (annual_yield * np.sqrt(1 + total_range_pct / 2)) / (abs(net_delta) + 0.10)
+
+            earn_warn = ""
+            if earnings_str:
+                earn_dte = calculate_dte(earnings_str)
+                if 0 <= earn_dte <= dte_val:
+                    earn_warn = f"⚠️ {earnings_str}"
+
+            results.append({
+                "Ticker":           ticker,
+                "Sektor":           sector_short,
+                "Kurs":             round(current_price, 2),
+                "Strike PUT":       round(put_strike, 2),
+                "Strike CALL":      round(call_strike, 2),
+                "Strike":           round((put_strike + call_strike) / 2, 2),  # für Sortierung
+                "OTM% PUT":         round(put_otm, 1),
+                "OTM% CALL":        round(call_otm, 1),
+                "Range %":          round(total_range_pct, 1),
+                "Verfall":          expiry,
+                "DTE":              dte_val,
+                "Prämie PUT":       round(put_premium, 2),
+                "Prämie CALL":      round(call_premium, 2),
+                "Prämie gesamt":    round(combined_prem, 2),
+                "Prämie":           round(combined_prem, 2),  # Kompatibilität
+                "Rendite ann. %":   round(annual_yield, 1),
+                "Rendite % Laufzeit": round(combined_yield, 2),
+                "Rendite %/Tag":    round(combined_yield / max(1, dte_val), 4),
+                "Prämie/Tag":       round(combined_prem / max(1, dte_val), 3),
+                "Delta PUT":        round(put_delta, 3),
+                "Delta CALL":       round(call_delta, 3),
+                "Delta":            round(net_delta, 3),
+                "IV %":             round(avg_iv * 100, 1),
+                "IV Rank":          iv_rank_str,
+                "Break-even Low":   round(breakeven_low, 2),
+                "Break-even High":  round(breakeven_high, 2),
+                "Trend":            trend_str,
+                "Trend-Score":      0,
+                "CRV Score":        round(crv, 2),
+                "⚠️ Earnings":      earn_warn,
+            })
+
+        if not results:
+            return pd.DataFrame()
+        return pd.DataFrame(results).sort_values("CRV Score", ascending=False)
+
+    except Exception:
+        return pd.DataFrame()
+
+
 # ── Einzelner Ticker Scan ─────────────────────────────────────────────────────
 
 def scan_ticker(
@@ -72,12 +269,25 @@ def scan_ticker(
     min_oi: int = 5,
     otm_min: float = 3.0,
     otm_max: float = 25.0,
+    require_valid_market: bool = True,
+    max_spread_pct: float = 999.0,
 ) -> pd.DataFrame:
     """
     Scannt einen einzelnen Ticker und gibt gefilterte Optionen mit CRV zurück.
+    Für Short Strangle → delegiert an scan_strangle().
     """
+    if strategy == "Short Strangle":
+        return scan_strangle(
+            ticker,
+            dte_min=dte_min, dte_max=dte_max,
+            iv_min=iv_min, premium_min=premium_min,
+            min_oi=min_oi, otm_min=otm_min, otm_max=otm_max,
+        )
+
     try:
-        puts_df, calls_df, expirations = fetch_options_chain(ticker)
+        puts_df, calls_df, expirations = fetch_options_chain(
+            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=6
+        )
 
         if not expirations:
             return pd.DataFrame()
@@ -96,26 +306,47 @@ def scan_ticker(
 
         df = raw_df.copy()
 
-        # Basis-Berechnungen (mid_price kommt bereits aus fetcher._fix_off_hours_prices)
+        # ── Bid/Ask-Validierung ────────────────────────────────────────────────
+        # Sicherere Konvertierung aller Preisspalten
+        for col in ("bid", "ask", "lastPrice"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            else:
+                df[col] = 0.0
+
+        # Flag: hat echten zweiteiligen Markt (Bid UND Ask vorhanden)
+        df["_has_market"] = (df["bid"] > 0) & (df["ask"] > 0) & (df["ask"] >= df["bid"])
+
+        # mid_price: NUR aus Bid/Ask wenn vorhanden, sonst lastPrice (nur Off-Hours)
+        df["mid_price"] = np.where(
+            df["_has_market"],
+            (df["bid"] + df["ask"]) / 2,
+            df["lastPrice"]
+        )
+
+        # Kursquelle-Label für Anzeige
+        df["_price_source"] = np.where(df["_has_market"], "Mid", "Last")
+
+        # Spread-Berechnung (nur wenn echter Markt, sonst NaN)
+        df["_spread_pct"] = np.where(
+            df["_has_market"] & (df["mid_price"] > 0),
+            (df["ask"] - df["bid"]) / df["mid_price"] * 100,
+            np.nan
+        )
+
+        # Basis-Berechnungen
         df["dte"] = df["expiration"].apply(calculate_dte)
-        if "mid_price" not in df.columns:
-            df["mid_price"] = df.apply(
-                lambda r: (float(r.get("bid", 0) or 0) + float(r.get("ask", 0) or 0)) / 2
-                if float(r.get("bid", 0) or 0) > 0
-                else float(r.get("lastPrice", 0) or 0),
-                axis=1
-            )
 
         if opt_type == "put":
-            df["otm_pct"] = df.apply(
-                lambda r: max(0, (current_price - float(r["strike"])) / current_price * 100), axis=1
-            )
+            df["otm_pct"] = (
+                (current_price - df["strike"].astype(float)) / current_price * 100
+            ).clip(lower=0)
         else:
-            df["otm_pct"] = df.apply(
-                lambda r: max(0, (float(r["strike"]) - current_price) / current_price * 100), axis=1
-            )
+            df["otm_pct"] = (
+                (df["strike"].astype(float) - current_price) / current_price * 100
+            ).clip(lower=0)
 
-        # Basis-Filter (ohne Delta, der kommt nach Greeks)
+        # ── Basis-Filter ───────────────────────────────────────────────────────
         mask = (
             (df["dte"] >= dte_min) & (df["dte"] <= dte_max) &
             (df["mid_price"] >= premium_min) &
@@ -125,6 +356,20 @@ def scan_ticker(
             mask &= df["openInterest"].fillna(0) >= min_oi
         if "impliedVolatility" in df.columns:
             mask &= df["impliedVolatility"].fillna(0) >= iv_min
+
+        # ── Liquiditäts-Filter (Kernfix) ───────────────────────────────────────
+        # Wenn require_valid_market=True: NUR Optionen mit echtem Bid/Ask zeigen
+        # → verhindert falsche Rendite-Berechnungen auf Basis von lastPrice
+        if require_valid_market:
+            mask &= df["_has_market"]
+
+        # Spread-Filter (nur auf Optionen mit echtem Markt anwenden)
+        if max_spread_pct < 999.0:
+            # Optionen ohne Markt (NaN spread) werden bei require_valid_market
+            # bereits ausgeschlossen; wenn erlaubt, dann nicht am Spread messen
+            valid_spread = df["_spread_pct"].notna() & (df["_spread_pct"] <= max_spread_pct)
+            no_spread    = df["_spread_pct"].isna()   # kein Bid/Ask → kein Spread
+            mask &= (valid_spread | no_spread)
 
         df = df[mask].copy()
 
@@ -185,32 +430,103 @@ def scan_ticker(
             trend_str = trend_map.get(tech.trend, "")
             trend_score = tech.trend_score
 
+        # IV Rank (non-blocking — gibt leeres Dict zurück wenn Fehler)
+        iv_rank_data = {}
+        try:
+            iv_rank_data = fetch_iv_rank(ticker)
+        except Exception:
+            pass
+        iv_rank_val = iv_rank_data.get("iv_rank")
+        iv_pctile   = iv_rank_data.get("iv_percentile")
+        iv_rank_str = (f"{iv_rank_val:.0f}" if iv_rank_val is not None else "–")
+
+        # Earnings-Warnung (U1): Datum holen und prüfen ob innerhalb Laufzeit
+        earnings_str = ""
+        try:
+            earn_date_str = fetch_earnings_date(ticker)
+            if earn_date_str:
+                earn_dte = calculate_dte(earn_date_str)
+                if earn_dte >= 0:
+                    earnings_str = earn_date_str
+        except Exception:
+            pass
+
+        # Spread-Qualität: direkt aus vorberechneter _spread_pct Spalte
+        spread_pct_col = df["_spread_pct"].values if "_spread_pct" in df.columns else np.full(len(df), np.nan)
+
+        # Liquiditäts-Label (🟢🟡🔴) — einheitlich mit Einzelanalyse
+        def _liq_label(r) -> str:
+            sp  = r.get("_spread_pct", np.nan)
+            oi  = int(r.get("openInterest", 0) or 0)
+            vol = int(r.get("volume", 0) or 0)
+            if pd.isna(sp) or sp >= 999:
+                return "🔴"
+            if sp <= 15 and oi >= 50:
+                return "🟢"
+            if sp <= 40 and oi >= 10:
+                return "🟡"
+            return "🔴"
+
+        liq_col = df.apply(_liq_label, axis=1)
+
+        # Earnings-Warnung je Option
+        def _earn_warn(dte_val):
+            if not earnings_str:
+                return ""
+            earn_dte = calculate_dte(earnings_str)
+            if 0 <= earn_dte <= dte_val:
+                return f"⚠️ {earnings_str}"
+            return ""
+
         # Output aufbauen
         result = pd.DataFrame({
-            "Ticker": ticker,
-            "Sektor": sector_short,
-            "Kurs": round(current_price, 2),
-            "Strike": df["strike"].round(2),
-            "Verfall": df["expiration"],
-            "DTE": df["dte"].astype(int),
-            "Prämie": df["mid_price"].round(2),
-            "Prämie/Tag": df["premium_per_day"].round(3),
-            "Rendite ann. %": df["annual_yield_pct"].round(1),
+            "Liq.":     liq_col,
+            "Ticker":   ticker,
+            "Sektor":   sector_short,
+            "Kurs":     round(current_price, 2),
+            "Strike":   df["strike"].round(2),
+            "OTM %":    df["otm_pct"].round(1),
+            "Verfall":  df["expiration"],
+            "DTE":      df["dte"].astype(int),
+            "Prämie":   df["mid_price"].round(2),
+            "Bid":      df["bid"].round(2) if "bid" in df.columns else pd.Series(float("nan"), index=df.index),
+            "Ask":      df["ask"].round(2) if "ask" in df.columns else pd.Series(float("nan"), index=df.index),
+            "Kursquelle":        df["_price_source"] if "_price_source" in df.columns else "Mid",
+            "Spread %":          pd.Series(spread_pct_col, index=df.index).round(1),
+            "Prämie/Tag":        df["premium_per_day"].round(3),
+            "Rendite ann. %":    df["annual_yield_pct"].round(1),
             "Rendite % Laufzeit": df["yield_laufzeit_pct"].round(2),
-            "Rendite %/Tag": df["yield_per_day_pct"].round(4),
-            "Delta": df["delta"].round(3),
-            "IV %": (df["impliedVolatility"] * 100).round(1) if "impliedVolatility" in df.columns else 0,
-            "OTM %": df["otm_pct"].round(1),
-            "OI": df["openInterest"].fillna(0).astype(int) if "openInterest" in df.columns else 0,
-            "Trend": trend_str,
+            "Rendite %/Tag":     df["yield_per_day_pct"].round(4),
+            "Delta":    df["delta"].round(3),
+            "Theta/Tag": df["theta"].round(3) if "theta" in df.columns else pd.Series(float("nan"), index=df.index),
+            "IV %":     (df["impliedVolatility"] * 100).round(1) if "impliedVolatility" in df.columns else 0,
+            "IV Rank":  iv_rank_str,
+            "OI":       df["openInterest"].fillna(0).astype(int) if "openInterest" in df.columns else 0,
+            "Volumen":  df["volume"].fillna(0).astype(int) if "volume" in df.columns else 0,
+            "Trend":    trend_str,
             "Trend-Score": round(trend_score, 0),
             "CRV Score": df["crv_score"],
+            "⚠️ Earnings": df["dte"].apply(_earn_warn),
         })
 
         return result.sort_values("CRV Score", ascending=False)
 
     except Exception as e:
         return pd.DataFrame()
+
+
+# ── Rate-Limiter für parallele Anfragen ───────────────────────────────────────
+_PARALLEL_WORKERS = 8        # Gleichzeitige Anfragen (Yahoo Finance verträgt ~10)
+_RATE_LIMITER     = threading.Semaphore(_PARALLEL_WORKERS)
+_REQUEST_DELAY    = 0.05     # Sekunden zwischen Anfragen pro Thread (war 0.15)
+
+
+def _scan_single(ticker: str, scan_kwargs: dict) -> tuple:
+    """Wrapper für Thread-Pool: gibt (ticker, DataFrame) zurück."""
+    with _RATE_LIMITER:
+        result = scan_ticker(ticker, **scan_kwargs)
+        time.sleep(_REQUEST_DELAY)
+    return ticker, result
 
 
 # ── Batch Scanner ─────────────────────────────────────────────────────────────
@@ -228,40 +544,61 @@ def scan_watchlist(
     otm_min: float = 3.0,
     otm_max: float = 25.0,
     max_results_per_ticker: int = 3,
+    require_valid_market: bool = True,
+    max_spread_pct: float = 999.0,
     progress_callback: Optional[Callable] = None,
+    result_callback: Optional[Callable] = None,
 ) -> pd.DataFrame:
     """
-    Scannt eine Liste von Tickern und gibt die besten Optionen nach CRV zurück.
+    Scannt eine Liste von Tickern PARALLEL (bis zu 8 gleichzeitig)
+    und gibt die besten Optionen nach CRV zurück.
 
-    progress_callback(current, total, ticker) wird bei jedem Ticker aufgerufen.
+    progress_callback(current, total, ticker) — Fortschritt (Zähler + Name)
+    result_callback(ticker, df)              — wird bei JEDEM Treffer sofort
+                                               aufgerufen → Live-Anzeige möglich
     """
     all_results = []
     total = len(tickers)
+    completed = 0
 
-    for i, ticker in enumerate(tickers):
-        if progress_callback:
-            progress_callback(i, total, ticker)
+    scan_kwargs = dict(
+        strategy=strategy, delta_min=delta_min, delta_max=delta_max,
+        dte_min=dte_min, dte_max=dte_max, iv_min=iv_min,
+        premium_min=premium_min, min_oi=min_oi,
+        otm_min=otm_min, otm_max=otm_max,
+        require_valid_market=require_valid_market,
+        max_spread_pct=max_spread_pct,
+    )
 
-        df = scan_ticker(
-            ticker=ticker,
-            strategy=strategy,
-            delta_min=delta_min,
-            delta_max=delta_max,
-            dte_min=dte_min,
-            dte_max=dte_max,
-            iv_min=iv_min,
-            premium_min=premium_min,
-            min_oi=min_oi,
-            otm_min=otm_min,
-            otm_max=otm_max,
-        )
+    with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as executor:
+        futures = {
+            executor.submit(_scan_single, ticker, scan_kwargs): ticker
+            for ticker in tickers
+        }
+        for future in as_completed(futures):
+            try:
+                ticker, df = future.result(timeout=30)
+            except Exception:
+                ticker = futures[future]
+                df = pd.DataFrame()
 
-        if not df.empty:
-            # Nur die besten N pro Ticker
-            all_results.append(df.head(max_results_per_ticker))
+            completed += 1
 
-        # Kurze Pause um Rate-Limiting zu vermeiden
-        time.sleep(0.3)
+            if not df.empty:
+                partial = df.head(max_results_per_ticker)
+                all_results.append(partial)
+                # ── Live-Callback: sofort melden (Fehler nie den Scan brechen lassen) ──
+                if result_callback:
+                    try:
+                        result_callback(ticker, partial)
+                    except Exception:
+                        pass
+
+            if progress_callback:
+                try:
+                    progress_callback(completed, total, ticker)
+                except Exception:
+                    pass
 
     if progress_callback:
         progress_callback(total, total, "Fertig")

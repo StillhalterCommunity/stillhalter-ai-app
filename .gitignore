@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+
+# Virtuelle Umgebungen
+venv/
+.venv/
+env/
+
+# Cache-Dateien (große Pickle-Dateien, nicht in Git)
+*.pkl
+*.cache
+.streamlit/
+
+# Systemdateien
+.DS_Store
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets / API Keys (NIEMALS committen!)
+.env
+secrets.toml

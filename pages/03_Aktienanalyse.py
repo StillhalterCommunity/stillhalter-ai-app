@@ -1,5 +1,5 @@
 """
-Stillhalter Community — Einzelanalyse
+Stillhalter AI App — Einzelanalyse
 """
 
 import streamlit as st
@@ -8,7 +8,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(
-    page_title="Analyse · Stillhalter Community",
+    page_title="Aktienanalyse · Stillhalter AI App",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -17,14 +17,15 @@ st.set_page_config(
 from ui.theme import get_css, get_logo_html
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 
-from data.watchlist import WATCHLIST, SECTOR_ICONS, get_sector_for_ticker
+from data.watchlist import WATCHLIST, SECTOR_ICONS, get_sector_for_ticker, ALL_TICKERS
+from data.universes import get_universe_tickers, UNIVERSE_OPTIONS
 from data.fetcher import (fetch_options_chain, fetch_price_history, fetch_stock_info,
                            fetch_fundamentals, calculate_dte, market_status_text, is_market_open)
 from analysis.technicals import analyze_technicals
 from analysis.screening import screen_options, ScreeningParams
 from analysis.batch_screener import calculate_crv_score
 from analysis.multi_timeframe import analyze_multi_timeframe, tf_summary_row, stillhalter_trend_html
-from ui.charts import render_stock_chart, render_payoff_diagram
+from ui.charts import render_stock_chart, render_payoff_diagram, render_option_mini_chart
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -57,13 +58,32 @@ with st.sidebar:
     st.markdown(get_logo_html("white", 30), unsafe_allow_html=True)
     st.markdown("## 📊 Aktie wählen")
 
-    sector_sel = st.selectbox(
-        "Sektor",
-        list(WATCHLIST.keys()),
-        format_func=lambda s: f"{SECTOR_ICONS.get(s,'')} {s.split('.',1)[-1].strip().split('(')[0].strip()}",
+    analyse_universe = st.selectbox(
+        "Universum",
+        UNIVERSE_OPTIONS,
+        key="analyse_universe",
+        help="Aus welchem Index soll die Aktie gewählt werden?",
     )
-    ticker_list = WATCHLIST.get(sector_sel, [])
-    selected_ticker = st.selectbox("Ticker", ticker_list)
+
+    if "Watchlist" in analyse_universe:
+        sector_sel = st.selectbox(
+            "Sektor",
+            list(WATCHLIST.keys()),
+            format_func=lambda s: f"{SECTOR_ICONS.get(s,'')} {s.split('.',1)[-1].strip().split('(')[0].strip()}",
+        )
+        ticker_list = WATCHLIST.get(sector_sel, [])
+    else:
+        sector_sel = ""
+        ticker_list = sorted(get_universe_tickers(analyse_universe))
+
+    # Freitexteingabe für beliebige Ticker
+    manual_ticker = st.text_input("Oder Ticker direkt eingeben", "",
+                                   placeholder="z.B. AAPL, TSLA, META…").strip().upper()
+
+    if manual_ticker:
+        selected_ticker = manual_ticker
+    else:
+        selected_ticker = st.selectbox("Ticker", ticker_list)
 
     st.markdown("---")
     if st.button("🔄 Daten aktualisieren", use_container_width=True):
@@ -286,58 +306,168 @@ with tab_opts:
             if tech_signal and tech_signal.resistance_levels:
                 st.markdown("🔴 **Widerstände:** " + " | ".join([f"${r:.2f}" for r in tech_signal.resistance_levels]))
 
+            # Im Session State cachen für Chart-Overlay
+            st.session_state.setdefault("screened_cache", {})[selected_ticker] = screened
+
             hide = ["_highlight"]
             show = [c for c in screened.columns if c not in hide]
             view = screened[show].copy()
 
-            # Max-Wert Hervorhebung (Gold für beste Werte je Spalte)
-            _HL = ["OTM %", "Prämie", "Prämie/Tag", "ROI ann. %", "IV %", "⭐ CRV"]
-            _hl_targets = [c for c in _HL if c in view.columns]
+            # Top-3 Badge hinzufügen
+            rank_badges = ["🥇 Top 1", "🥈 Top 2", "🥉 Top 3"]
+            view.insert(0, "Top", [rank_badges[i] if i < 3 else "" for i in range(len(view))])
 
-            def _style_max_analyse(df_v):
+            # Kurs als Referenz-Spalte ergänzen (direkt nach Top, Liq.)
+            if "Kurs" not in view.columns:
+                view.insert(2, "Kurs", current_price)
+
+            # ── Einheitliche Spaltenreihenfolge (identisch mit Watchlist Scanner) ──
+            UNIFIED_COLS = [
+                "Top", "Liq.", "Kurs", "Strike", "OTM %", "Verfall", "DTE",
+                "Prämie", "Bid", "Ask", "Kursquelle", "Spread %", "Prämie/Tag",
+                "Rendite % Laufzeit", "Rendite ann. %", "Rendite %/Tag",
+                "Delta", "Theta/Tag", "IV %", "OI", "Volumen", "Score", "⭐ CRV",
+            ]
+            ordered = [c for c in UNIFIED_COLS if c in view.columns]
+            extras  = [c for c in view.columns if c not in ordered]
+            view = view[ordered + extras]
+
+            # Max-Wert Hervorhebung
+            _HL = ["OTM %", "Prämie", "Prämie/Tag",
+                   "Rendite ann. %", "Rendite % Laufzeit", "Rendite %/Tag", "IV %", "Score"]
+            _hl_max  = [c for c in _HL if c in view.columns]
+            _hl_min  = ["Delta", "Spread %"]  # kleine Werte = besser
+            _min_cols = [c for c in _hl_min if c in view.columns]
+
+            def _style_analyse(df_v):
                 s = pd.DataFrame("", index=df_v.index, columns=df_v.columns)
-                for col in _hl_targets:
-                    if df_v[col].dtype.kind in "fiu" and len(df_v) > 0:
-                        s.loc[df_v[col].idxmax(), col] = (
-                            "background-color: rgba(212,168,67,0.18); "
-                            "color: #d4a843; font-weight: 700;"
-                        )
+                # Top-3 Zeilen Gold/Silber/Bronze
+                row_bg = ["rgba(212,168,67,0.18)", "rgba(160,160,180,0.12)", "rgba(180,130,80,0.10)"]
+                for i in range(min(3, len(df_v))):
+                    s.iloc[i] = f"background-color:{row_bg[i]};"
+                # Liq.-Spalte einfärben (🟢🟡🔴)
+                if "Liq." in df_v.columns:
+                    for idx, val in df_v["Liq."].items():
+                        if val == "🟢":
+                            s.loc[idx, "Liq."] = "background-color:rgba(34,197,94,0.15);"
+                        elif val == "🟡":
+                            s.loc[idx, "Liq."] = "background-color:rgba(234,179,8,0.15);"
+                        elif val == "🔴":
+                            s.loc[idx, "Liq."] = "background-color:rgba(239,68,68,0.15);"
+                # Spalten-Maxima gold
+                for col in _hl_max:
+                    if col in df_v.columns and df_v[col].dtype.kind in "fiu" and len(df_v) > 0:
+                        try:
+                            idx = df_v[col].idxmax()
+                            s.loc[idx, col] = "background-color:rgba(212,168,67,0.28);color:#d4a843;font-weight:700;"
+                        except Exception:
+                            pass
+                # Spalten-Minima grün
+                for col in _min_cols:
+                    if col in df_v.columns and df_v[col].dtype.kind in "fiu" and len(df_v) > 0:
+                        try:
+                            valid = df_v[col].replace(0, np.nan).dropna()
+                            if not valid.empty:
+                                s.loc[valid.idxmin(), col] = "background-color:rgba(34,197,94,0.15);color:#22c55e;font-weight:700;"
+                        except Exception:
+                            pass
                 return s
 
             col_cfg_analyse = {
-                "Strike":     st.column_config.NumberColumn("Strike",    format="$%.2f"),
-                "Prämie":     st.column_config.NumberColumn("Prämie",    format="$%.2f"),
-                "Prämie/Tag": st.column_config.NumberColumn("$/Tag",     format="$%.3f"),
-                "ROI ann. %": st.column_config.NumberColumn("ROI ann.%", format="%.1f%%"),
-                "IV %":       st.column_config.NumberColumn("IV %",      format="%.1f%%"),
-                "OTM %":      st.column_config.NumberColumn("OTM %",     format="%.1f%%"),
-                "Delta":      st.column_config.NumberColumn("Δ Delta",   format="%.3f"),
-                "Theta/Tag":  st.column_config.NumberColumn("Θ/Tag",     format="%.3f"),
-                "⭐ CRV":    st.column_config.NumberColumn("⭐ CRV",     format="%.1f"),
+                "Top":                st.column_config.TextColumn("Top", width="small",
+                                                                   help="Rang nach CRV Score"),
+                "Liq.":               st.column_config.TextColumn("Liq.", width="small",
+                                                                   help="🟢 Spread ≤5% · 🟡 5–15% · 🔴 >15%"),
+                "Kurs":               st.column_config.NumberColumn("Kurs",         format="$%.2f"),
+                "Strike":             st.column_config.NumberColumn("Strike",        format="$%.2f"),
+                "OTM %":              st.column_config.NumberColumn("OTM %",         format="%.1f%%"),
+                "Verfall":            st.column_config.TextColumn("Verfall",         width="small"),
+                "DTE":                st.column_config.NumberColumn("DTE",           format="%d"),
+                "Prämie":             st.column_config.NumberColumn("Prämie",        format="$%.2f"),
+                "Bid":                st.column_config.NumberColumn("Bid",           format="$%.2f",
+                                                                     help="Geldkurs — was du beim Verkauf erhältst"),
+                "Ask":                st.column_config.NumberColumn("Ask",           format="$%.2f",
+                                                                     help="Briefkurs — was der Käufer bezahlt"),
+                "Kursquelle":         st.column_config.TextColumn("Quelle", width="small",
+                                                                   help="Mid = Bid/Ask Midprice · Letztkurs = Off-Hours Schätzung"),
+                "Spread %":           st.column_config.NumberColumn("Spread %",      format="%.1f%%",
+                                                                     help="Bid/Ask Spread — niedrig = liquide"),
+                "Prämie/Tag":         st.column_config.NumberColumn("$/Tag",         format="$%.3f"),
+                "Rendite % Laufzeit": st.column_config.NumberColumn("Rendite % LZ",  format="%.2f%%",
+                                                                     help="Rendite auf Laufzeit (Prämie / Strike)"),
+                "Rendite ann. %":     st.column_config.NumberColumn("Rendite ann.",  format="%.1f%%"),
+                "Rendite %/Tag":      st.column_config.NumberColumn("Rend. %/Tag",   format="%.4f%%",
+                                                                     help="Tagesrendite in % auf Strike"),
+                "Delta":              st.column_config.NumberColumn("Δ",             format="%.3f"),
+                "Theta/Tag":          st.column_config.NumberColumn("Θ/Tag",         format="%.3f",
+                                                                     help="Theta — täglicher Zeitwertverlust der Option"),
+                "IV %":               st.column_config.NumberColumn("IV %",          format="%.1f%%"),
+                "OI":                 st.column_config.NumberColumn("OI",            format="%d",
+                                                                     help="Open Interest — offene Kontrakte"),
+                "Volumen":            st.column_config.NumberColumn("Vol.",           format="%d"),
+                "Score":              st.column_config.NumberColumn("Score",          format="%.1f",
+                                                                     help="Stillhalter-Score: gewichtet Prämie/Tag, IV, Delta, Trend, Liquidität"),
+                "⭐ CRV":             st.column_config.NumberColumn("⭐ CRV",         format="%.1f",
+                                                                     help="Chance-Risiko-Verhältnis: Rendite × Puffer / Delta"),
             }
             try:
-                st.dataframe(
-                    view.style.apply(_style_max_analyse, axis=None),
-                    use_container_width=True, height=480,
+                _styled = view.style.apply(_style_analyse, axis=None)
+                _tbl_event = st.dataframe(
+                    _styled,
+                    use_container_width=True, height=420,
                     column_config=col_cfg_analyse, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key="opt_table_sel",
                 )
             except Exception:
-                st.dataframe(view, use_container_width=True, height=480,
-                             column_config=col_cfg_analyse, hide_index=True)
+                _tbl_event = st.dataframe(
+                    view, use_container_width=True, height=420,
+                    column_config=col_cfg_analyse, hide_index=True,
+                    on_select="rerun", selection_mode="single-row",
+                    key="opt_table_sel_fb",
+                )
 
-            # Payoff
-            st.markdown("---")
-            st.markdown("#### 📐 Payoff-Diagramm")
-            raw = screen_options(puts_df, calls_df, current_price, params, tech_signal)
-            if not raw.empty and "Strike" in raw.columns:
-                labels = [f"Strike ${r['Strike']:.2f} | {r['Verfall']} | {r['DTE']}d | ${r['Prämie']:.2f}"
-                          for _,r in raw.head(10).iterrows()]
-                sel = st.selectbox("Option auswählen:", labels)
-                idx = labels.index(sel)
-                row = raw.iloc[idx]
-                fig_p = render_payoff_diagram(current_price, float(row["Strike"]),
-                                              float(row["Prämie"]), opt_type, selected_ticker)
-                st.plotly_chart(fig_p, use_container_width=True)
+            st.caption("💡 Zeile anklicken → Mini-Chart mit Payoff-Overlay")
+
+            # ── Mini-Chart bei Zeilenauswahl ──────────────────────────────
+            _sel_rows = (getattr(_tbl_event, "selection", None) or {})
+            _sel_rows = _sel_rows.get("rows", []) if isinstance(_sel_rows, dict) else getattr(_sel_rows, "rows", [])
+            if _sel_rows:
+                _sel_idx = _sel_rows[0]
+                if _sel_idx < len(view):
+                    _row = view.iloc[_sel_idx]
+                    _strike  = float(_row.get("Strike", 0) or 0)
+                    _premium = float(_row.get("Prämie", 0) or 0)
+                    _dte     = int(_row.get("DTE", 30) or 30)
+                    _iv_pct  = float(_row.get("IV %", 30) or 30)
+                    _expiry  = str(_row.get("Verfall", ""))
+
+                    st.markdown("---")
+                    _c1, _c2 = st.columns([3, 2])
+                    with _c1:
+                        if not hist.empty and _strike > 0 and _premium > 0:
+                            fig_mini = render_option_mini_chart(
+                                hist=hist,
+                                ticker=selected_ticker,
+                                current_price=current_price,
+                                strike=_strike,
+                                premium=_premium,
+                                dte=_dte,
+                                iv_pct=_iv_pct,
+                                option_type=opt_type,
+                                expiry_date=_expiry,
+                            )
+                            st.plotly_chart(fig_mini, use_container_width=True,
+                                            config={"displayModeBar": False})
+                    with _c2:
+                        if _strike > 0 and _premium > 0:
+                            fig_pay = render_payoff_diagram(
+                                current_price, _strike, _premium,
+                                opt_type, selected_ticker, _dte,
+                            )
+                            fig_pay.update_layout(height=260, margin=dict(l=5,r=5,t=45,b=30))
+                            st.plotly_chart(fig_pay, use_container_width=True,
+                                            config={"displayModeBar": False})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -366,20 +496,65 @@ with tab_chart:
         ch_hist = fetch_price_history(selected_ticker, period=cp) if cp != "1y" else price_hist
         ch_tech = analyze_technicals(ch_hist) if not ch_hist.empty else tech_signal
 
-        fig = render_stock_chart(ch_hist, ticker=selected_ticker,
-                                  tech_signal=ch_tech, show_indicators=show_inds, height=ch_height,
-                                  trend_mode=trend_mode_chart)
+        # Top-3 Optionen für Chart-Overlay aus Session State holen
+        _top3_for_chart = None
+        _screened_cached = st.session_state.get("screened_cache", {}).get(selected_ticker)
+        if _screened_cached is not None and not _screened_cached.empty:
+            _top3_for_chart = _screened_cached.head(3)
+
+        col_chart, col_dark = st.columns([6, 1])
+        with col_dark:
+            dark_chart = st.checkbox("🌙 Dark", value=True, key="chart_dark")
+
+        fig = render_stock_chart(
+            ch_hist, ticker=selected_ticker,
+            tech_signal=ch_tech, show_indicators=show_inds, height=ch_height,
+            trend_mode=trend_mode_chart,
+            top_options=_top3_for_chart,
+            dark_mode=dark_chart,
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         if ch_tech:
             st.markdown("#### 📊 Technische Zusammenfassung")
-            tc1,tc2,tc3,tc4,tc5 = st.columns(5)
+            tc1,tc2,tc3,tc4,tc5,tc6 = st.columns(6)
             tc1.metric("Trend-Score", f"{ch_tech.trend_score:.0f}/100",
                        {"bullish":"↑ Aufwärts","bearish":"↓ Abwärts","neutral":"→ Seitwärts"}.get(ch_tech.trend,""))
-            tc2.metric("MACD", {"bullish":"Bullish ↑","bearish":"Bearish ↓","neutral":"Neutral →"}.get(ch_tech.macd_signal,"–"))
-            tc3.metric("Stoch %K/%D", f"{ch_tech.stoch_k:.0f}/{ch_tech.stoch_d:.0f}", ch_tech.stoch_signal)
-            tc4.metric("Über SMA50",  "✅" if ch_tech.above_sma50  else "❌")
-            tc5.metric("Über SMA200", "✅" if ch_tech.above_sma200 else "❌")
+            sc_m = ch_tech.sc_macd
+            if sc_m:
+                tc2.metric("SC MACD Pro",
+                           {"strong_bull":"⭐ STARK ↑↑","bull":"Bullish ↑",
+                            "neutral":"Neutral →","bear":"Bearish ↓",
+                            "strong_bear":"⭐ STARK ↓↓"}.get(sc_m.signal_strength,"–"),
+                           f"ADX {sc_m.adx_val:.0f}")
+            else:
+                tc2.metric("SC MACD Pro", "–")
+            ds_s = ch_tech.dual_stoch
+            if ds_s:
+                fast_lbl = ("🟢 Ready Buy" if ds_s.fast_ready_buy
+                            else "🔴 Ready Sell" if ds_s.fast_ready_sell
+                            else ds_s.signal_strength)
+                slow_lbl = ("🟢 Ready Buy" if ds_s.slow_ready_buy
+                            else "🔴 Ready Sell" if ds_s.slow_ready_sell
+                            else ds_s.signal_strength)
+                tc3.metric("Stoch Schnell %K", f"{ds_s.fast_k:.0f}", fast_lbl)
+                tc4.metric("Stoch Langsam %K", f"{ds_s.slow_k:.0f}", slow_lbl)
+            else:
+                tc3.metric("Stoch %K/%D", f"{ch_tech.stoch_k:.0f}/{ch_tech.stoch_d:.0f}", ch_tech.stoch_signal)
+                tc4.metric("Stoch Langsam", "–")
+            tc5.metric("EMA 50",  "✅ Kurs darüber" if ch_tech.above_sma50  else "❌ Kurs darunter")
+            tc6.metric("EMA 200", "✅ Kurs darüber" if ch_tech.above_sma200 else "❌ Kurs darunter")
+
+            # S/R Legende unter Chart
+            sr_col1, sr_col2 = st.columns(2)
+            with sr_col1:
+                if ch_tech.support_levels:
+                    lvls = " · ".join([f"**${s:.2f}**" for s in ch_tech.support_levels[:5]])
+                    st.markdown(f"🟢 **Unterstützungen:** {lvls}")
+            with sr_col2:
+                if ch_tech.resistance_levels:
+                    lvls = " · ".join([f"**${r:.2f}**" for r in ch_tech.resistance_levels[:5]])
+                    st.markdown(f"🔴 **Widerstände:** {lvls}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -598,6 +773,15 @@ with tab_bt:
                                       key="bt_period")
             bt_rfr = st.number_input("Risikofreier Zinssatz %", 0.0, 10.0, 5.0, 0.5,
                                       key="bt_rfr") / 100
+            bt_early_exit = st.number_input(
+                "Early Exit %", 0.0, 90.0, 50.0, 10.0, key="bt_early_exit",
+                help="0 = kein Early Exit · 50 = Position schließen wenn 50% des Gewinns erreicht"
+            )
+            bt_commission = st.number_input(
+                "Kommission $/Kontrakt", 0.0, 5.0, 1.30, 0.10,
+                format="%.2f", key="bt_commission",
+                help="Open + Close Kommission. IBKR: ca. $0.65×2 = $1.30 pro Kontrakt"
+            )
 
     bt_run = st.button("▶ Backtest starten", type="primary", key="bt_run")
 
@@ -612,6 +796,8 @@ with tab_bt:
                 dte=int(bt_dte),
                 period=bt_period,
                 risk_free_rate=bt_rfr,
+                early_exit_pct=float(bt_early_exit),
+                commission_per_contract=float(bt_commission),
             )
         st.session_state["bt_result"] = bt_result
         st.session_state["bt_ticker"] = selected_ticker

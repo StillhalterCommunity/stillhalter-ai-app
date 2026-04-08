@@ -1,5 +1,5 @@
 """
-Stillhalter Community — Options Backtest Engine
+Stillhalter AI App — Options Backtest Engine
 Simuliert historische Stillhalter-Strategien auf Basis des SC Trend Models.
 
 Methodik:
@@ -158,6 +158,8 @@ def run_backtest(
     period: str = "3y",
     risk_free_rate: float = 0.05,
     min_iv: float = 0.10,
+    early_exit_pct: float = 0.0,        # 0 = kein Early Exit | 50 = schließen bei 50% Gewinn
+    commission_per_contract: float = 0.0,  # $/Kontrakt (z.B. 1.30 = $0.65 Open + $0.65 Close)
 ) -> BacktestResult:
     """
     Backtestet eine Stillhalter-Strategie auf historischen Daten.
@@ -210,7 +212,7 @@ def run_backtest(
     stoch_cross_20_up = (stoch_k >= 20) & (stoch_k.shift(1) < 20)
 
     # Historische Volatilität
-    hvol = _hist_vol(close, 20).fillna(method="bfill").clip(lower=min_iv, upper=2.0)
+    hvol = _hist_vol(close, 20).bfill().clip(lower=min_iv, upper=2.0)
 
     # ── Einstiegs-Signale bestimmen ────────────────────────────────────────
     if signal_type == "SC Trend Cross ↑":
@@ -270,24 +272,58 @@ def run_backtest(
         expiry_date = dates_arr[expiry_idx]
         S_expiry = float(close.iloc[expiry_idx])
 
-        # P&L berechnen
-        if opt_type == "put":
-            itm = S_expiry < K
+        # ── Early-Exit Simulation ───────────────────────────────────────────
+        # Suche nach dem ersten Tag, an dem der Positionswert um early_exit_pct% gefallen ist
+        # (Option-Prämie ist um X% gesunken → Käufer hat Verluste → wir schließen)
+        early_exit_triggered = False
+        actual_exit_idx = expiry_idx
+        actual_exit_price_stock = S_expiry
+
+        if early_exit_pct > 0:
+            target_buyback = premium * (1.0 - early_exit_pct / 100.0)
+            for check_idx in range(i + 1, expiry_idx):
+                S_check = float(close.iloc[check_idx])
+                T_rem = (expiry_idx - check_idx) / 365.0
+                if opt_type == "put":
+                    current_val = _bs_put_price(S_check, K, max(T_rem, 1/365),
+                                                risk_free_rate, float(hvol.iloc[check_idx]))
+                else:
+                    current_val = _bs_call_price(S_check, K, max(T_rem, 1/365),
+                                                 risk_free_rate, float(hvol.iloc[check_idx]))
+                if current_val <= target_buyback:
+                    early_exit_triggered = True
+                    actual_exit_idx = check_idx
+                    actual_exit_price_stock = S_check
+                    S_expiry = S_check  # für Logging
+                    break
+
+        # ── P&L berechnen ────────────────────────────────────────────────
+        # Kommission: Open + Close
+        comm = commission_per_contract
+
+        if early_exit_triggered:
+            # Early Exit: Rückkauf bei target_buyback Preis
+            buyback_price = premium * (1.0 - early_exit_pct / 100.0)
+            pnl = (premium - buyback_price) - comm
+            res = f"✅ Early Exit ({early_exit_pct:.0f}%)"
+            itm = False
+        elif opt_type == "put":
+            itm = float(close.iloc[expiry_idx]) < K
+            S_expiry = float(close.iloc[expiry_idx])
             if not itm:
-                # Option verfallen → volle Prämie
-                pnl = premium
+                pnl = premium - comm
                 res = "✅ Gewinn (verfallen)"
             else:
-                # Assignment
-                pnl = premium - (K - S_expiry)
+                pnl = premium - (K - S_expiry) - comm
                 res = "❌ Verlust (Assignment)" if pnl < 0 else "⚠️ Gewinn (teilw.)"
         else:  # covered call
+            S_expiry = float(close.iloc[expiry_idx])
             itm = S_expiry > K
             if not itm:
-                pnl = premium
+                pnl = premium - comm
                 res = "✅ Gewinn (verfallen)"
             else:
-                pnl = premium - (S_expiry - K)
+                pnl = premium - (S_expiry - K) - comm
                 res = "❌ Verlust (Assignment)" if pnl < 0 else "⚠️ Gewinn (teilw.)"
 
         pnl_pct = (pnl / K) * 100
