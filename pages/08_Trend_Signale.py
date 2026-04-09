@@ -24,7 +24,9 @@ st.set_page_config(
 )
 
 from ui.theme import get_css, get_logo_html
+from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+render_sidebar()
 
 from data.universes import get_universe_tickers, UNIVERSE_OPTIONS
 from data.watchlist import ALL_TICKERS

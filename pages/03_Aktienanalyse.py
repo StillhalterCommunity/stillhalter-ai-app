@@ -15,7 +15,9 @@ st.set_page_config(
 )
 
 from ui.theme import get_css, get_logo_html
+from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+render_sidebar()
 
 from data.watchlist import WATCHLIST, SECTOR_ICONS, get_sector_for_ticker, ALL_TICKERS
 from data.universes import get_universe_tickers, UNIVERSE_OPTIONS
@@ -445,9 +447,9 @@ with tab_opts:
                     st.markdown("---")
                     _c1, _c2 = st.columns([3, 2])
                     with _c1:
-                        if not hist.empty and _strike > 0 and _premium > 0:
+                        if not price_hist.empty and _strike > 0 and _premium > 0:
                             fig_mini = render_option_mini_chart(
-                                hist=hist,
+                                hist=price_hist,
                                 ticker=selected_ticker,
                                 current_price=current_price,
                                 strike=_strike,

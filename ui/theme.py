@@ -92,6 +92,34 @@ def get_css() -> str:
     return f"""
     {font_face}
 
+    /* ── Automatische Streamlit-Seitennavigation ausblenden ── */
+    /* Versteckt die auto-generierte Dateinamen-Liste oben in der Sidebar */
+    [data-testid="stSidebarNav"] {{
+        display: none !important;
+    }}
+
+    /* ── Sidebar Page-Links: einheitliches Styling ── */
+    [data-testid="stSidebar"] [data-testid="stPageLink"] > a {{
+        border-radius: 6px !important;
+        background: transparent !important;
+        border: none !important;
+        padding: 4px 8px !important;
+        font-size: 0.82rem !important;
+        color: #888 !important;
+        width: 100% !important;
+        display: block !important;
+    }}
+    [data-testid="stSidebar"] [data-testid="stPageLink"] > a:hover {{
+        color: #d4a843 !important;
+        background: #1a1a1a !important;
+    }}
+    /* Aktive Seite hervorheben */
+    [data-testid="stSidebar"] [data-testid="stPageLink"] > a[aria-current="page"] {{
+        color: #d4a843 !important;
+        background: #1a1a1a !important;
+        font-weight: 600 !important;
+    }}
+
     /* ── Base ── */
     html, body, .stApp {{
         background-color: #0c0c0c !important;

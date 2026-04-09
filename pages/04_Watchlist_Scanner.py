@@ -17,7 +17,9 @@ st.set_page_config(
 )
 
 from ui.theme import get_css, get_logo_html
+from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+render_sidebar()
 
 from data.watchlist import WATCHLIST, SECTOR_ICONS, ALL_TICKERS
 from data.fetcher import market_status_text, is_market_open, fetch_price_history
