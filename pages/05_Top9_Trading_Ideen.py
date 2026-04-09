@@ -54,9 +54,9 @@ with st.sidebar:
         "Tipp: Watchlist-Aktien (AAPL, MSFT, JPM…) haben meist IV 20–40%. "
         "Setze die Grenzen entsprechend um alle drei Klassen zu befüllen."
     )
-    iv_thresh_low = st.slider("Low IV Grenze (%)", 10, 60, 20, 5,
+    iv_thresh_low = st.slider("Low IV Grenze (%)", 10, 60, 30, 5,
                                help="IV unterhalb dieser Grenze = Low IV (Konservativ)")
-    iv_thresh_mid = st.slider("Mid IV Grenze (%)", 20, 120, 40, 5,
+    iv_thresh_mid = st.slider("Mid IV Grenze (%)", 20, 120, 60, 5,
                                help="IV unterhalb dieser Grenze = Mid IV (Ausgewogen)")
     st.caption(f"Low IV: 0–{iv_thresh_low}% · Mid IV: {iv_thresh_low}–{iv_thresh_mid}% · High IV: >{iv_thresh_mid}%")
 
