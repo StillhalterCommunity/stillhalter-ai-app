@@ -1204,7 +1204,7 @@ def _render_signal_card(sig: Dict, market_regime: Dict, show_backtest: bool = Tr
                     f"USD {premium:.2f}</div></div>"
                     f"<div style='background:#0e0e0e;border-radius:6px;padding:6px 10px'>"
                     f"<div style='font-size:0.6rem;color:#555;font-family:sans-serif'>"
-                    f"IV / Hist.Vol (20T)</div>"
+                    f"IV / Hist. Vol</div>"
                     f"<div style='font-size:0.85rem;font-weight:600;color:#aaa;font-family:sans-serif'>"
                     f"{rec.get('iv','–')}% / {rec.get('hist_vol_20','–')}%</div></div>"
                     f"</div>"
@@ -1278,7 +1278,7 @@ def _render_signal_card(sig: Dict, market_regime: Dict, show_backtest: bool = Tr
                 f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px'>"
                 f"<div style='background:#0e0e0e;border-radius:5px;padding:6px 8px'>"
                 f"<div style='font-size:0.58rem;color:#555;font-family:sans-serif;margin-bottom:2px'>"
-                f"Stoch. (14,3,3)</div>"
+                f"Dual Stochastik</div>"
                 f"<div style='font-size:0.95rem;font-weight:700;color:{stoch_col};"
                 f"font-family:sans-serif'>{stoch_str}</div>"
                 f"<div style='font-size:0.58rem;color:#444;font-family:sans-serif'>"
@@ -1502,23 +1502,23 @@ with st.expander("❓  Was ist der STI-Score? · Wie funktioniert das System?", 
 </div>
 <div style='font-size:0.78rem;color:#888;display:grid;grid-template-columns:1fr 1fr;gap:6px'>
     <div>
-        <b style='color:#aaa'>Stochastik (14,3,3)</b><br>
-        Misst ob die Aktie überkauft (&gt;82) oder überverkauft (&lt;18) ist.
+        <b style='color:#aaa'>Stillhalter Dual Stochastik</b><br>
+        Misst ob die Aktie überkauft oder überverkauft ist.
         Grün = günstiger Einstiegsbereich für die Signalrichtung.
     </div>
     <div>
         <b style='color:#aaa'>Volumen-Ratio</b><br>
-        Aktuelles Volumen ÷ 20-Tage-Durchschnitt.
+        Aktuelles Volumen vs. Durchschnitt.
         Hohe Bestätigung ≥ 1.5× zeigt starke Marktbeteiligung am Signal.
     </div>
     <div>
-        <b style='color:#aaa'>IV / Hist. Vol (20T)</b><br>
+        <b style='color:#aaa'>IV / Hist. Vol</b><br>
         Implizite Volatilität vs. historische Volatilität.
         Günstig wenn IV/HV &lt; 1.1 (Option preiswert), teuer wenn &gt; 1.8.
     </div>
     <div>
         <b style='color:#aaa'>Widerstände &amp; Unterstützungen</b><br>
-        Swing-Highs/-Lows aus dem 1-Jahres-Chart (5-Kerzen-Fenster, geclustert).
+        Ermittelt aus der Kurshistorie via proprietärem Swing-Analyse-Algorithmus.
         Nächster Widerstand = Zielzone für Calls, nächste Unterstützung = Zielzone für Puts.
     </div>
 </div>

@@ -342,7 +342,7 @@ with c7:
           "#a78bfa", "pages/07_Trade_Management.py", "⚖️", "Trade Management")
 with c8:
     _card("8", "TREND SIGNALE",
-          "EMA 2/9 Multi-Timeframe · Score ≥ 4/6 · Call/Put-Empfehlung mit Strike &amp; Prämie",
+          "Stillhalter Trend Model · Multi-Timeframe Confluence · Call/Put-Empfehlung mit Strike &amp; Prämie",
           "#f59e0b", "pages/08_Trend_Signale.py", "🎯", "Trend Signale")
 
 st.html('<div class="gold-line" style="margin:18px 0"></div>')

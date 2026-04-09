@@ -464,7 +464,7 @@ def render_stock_chart(
         if ds.fast_k_series is not None:
             # Schnelle Stochastik
             fig.add_trace(
-                go.Scatter(x=dates, y=ds.fast_k_series, name="Schnell %K (14,3,3)",
+                go.Scatter(x=dates, y=ds.fast_k_series, name="Stillhalter Dual Stochastik (Schnell)",
                            line=dict(color="#4fc3f7", width=2),
                            hovertemplate="%{y:.1f}"),
                 row=4, col=1
@@ -479,7 +479,7 @@ def render_stock_chart(
         if ds.slow_k_series is not None:
             # Langsame Stochastik (35,10,5): dunkelgrün/%K, hellgelb/%D
             fig.add_trace(
-                go.Scatter(x=dates, y=ds.slow_k_series, name="Langsam %K (35,10,5)",
+                go.Scatter(x=dates, y=ds.slow_k_series, name="Stillhalter Dual Stochastik (Langsam)",
                            line=dict(color="#007700", width=2),
                            hovertemplate="%{y:.1f}"),
                 row=4, col=1

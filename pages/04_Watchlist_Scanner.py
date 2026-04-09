@@ -241,7 +241,7 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
         )
 
 # ── Technische Filter ─────────────────────────────────────────────────────────
-with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stochastik · MACD · Stillhalter Trend Model · Multi-Timeframe", expanded=False):
+with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stillhalter Dual Stochastik · Stillhalter MACD Pro · Stillhalter Trend Model · Multi-Timeframe", expanded=False):
 
     st.markdown("""
     <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
@@ -287,7 +287,7 @@ with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stochastik · MACD · St
         st.caption("Crossover-Signale = Trendumkehr-Hinweise")
 
     with tc3:
-        st.markdown("**〽️ Stochastik (Overbought/Sold)**")
+        st.markdown("**〽️ Stillhalter Dual Stochastik**")
         stoch_filter = st.selectbox("Stochastik Signal", [
             "Alle",
             "Kreuzt 20 aufwärts ↑",
@@ -301,7 +301,7 @@ with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stochastik · MACD · St
         st.caption("%K kreuzt 20 aufwärts = klassisches Kaufsignal")
 
     with tc4:
-        st.markdown("**🌊 MACD (Momentum)**")
+        st.markdown("**🌊 Stillhalter MACD Pro**")
         macd_filter = st.selectbox("MACD Signal", [
             "Alle",
             "Bullish Cross (neg → pos)",
@@ -311,7 +311,7 @@ with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stochastik · MACD · St
             "MACD Linie > 0",
         ], key="macd_f")
         macd_tf = st.selectbox("MACD Timeframe", TF_OPTIONS, index=1, key="macd_tf")
-        st.caption("MACD Cross neg→pos = starkes Bullish-Signal")
+        st.caption("Cross neg→pos = starkes Bullish-Signal")
 
     st.markdown("---")
     al1, al2, al3 = st.columns([1, 2, 5])
