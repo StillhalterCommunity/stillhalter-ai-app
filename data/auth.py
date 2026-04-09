@@ -13,20 +13,14 @@ from datetime import datetime
 # Hier neue Nutzer eintragen ↓
 
 USERS: dict[str, str] = {
-    # ── Admin / Betreiber ──────────────────────────────────────────────────────
-    "Admin-Sth-00":     "Admin",
+    # ── Admin ──────────────────────────────────────────────────────────────────
+    "Oliver-Sth-00":    "Oliver Riebartsch",
 
-    # ── Beta-Tester (Beispiele — anpassen!) ───────────────────────────────────
-    "Max-Sth-01":       "Max",
-    "Anna-Sth-02":      "Anna",
-    "Thomas-Sth-03":    "Thomas",
-    "Julia-Sth-04":     "Julia",
-    "Stefan-Sth-05":    "Stefan",
-    "Laura-Sth-06":     "Laura",
-    "Michael-Sth-07":   "Michael",
-    "Sandra-Sth-08":    "Sandra",
-    "Klaus-Sth-09":     "Klaus",
-    "Petra-Sth-10":     "Petra",
+    # ── Beta-Tester ───────────────────────────────────────────────────────────
+    "Stefan-Sth-01":    "Stefan Zenkel",
+    "Jan-Sth-02":       "Jan Bechler",
+    "Leon-Sth-03":      "Leon Benedens",
+    "Tobias-Sth-04":    "Tobias Mayer",
 }
 
 # ── Log-Datei ────────────────────────────────────────────────────────────────

@@ -194,19 +194,25 @@ _PRELOAD_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
                     "META", "TSLA", "JPM", "V", "JNJ", "UNH", "XOM", "WMT"]
 
 if not st.session_state.get(_PRELOAD_KEY):
-    st.html("""
-<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.9rem;
-            color:#d4a843;letter-spacing:0.08em;margin-bottom:6px'>
-    ⚡ DATENIMPORT — Kerndaten werden vorgeladen
-</div>
-""")
+    header_ph    = st.empty()
     progress_bar = st.progress(0.0)
     status_txt   = st.empty()
 
     total = len(_PRELOAD_TICKERS)
     for i, ticker in enumerate(_PRELOAD_TICKERS):
-        pct = i / total
+        pct      = i / total
+        pct_int  = int(pct * 100)
         progress_bar.progress(pct)
+        header_ph.html(f"""
+<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.95rem;
+            color:#d4a843;letter-spacing:0.08em;margin-bottom:4px'>
+    ⚡ DATENIMPORT &nbsp;
+    <span style='font-size:1.4rem;color:#f0f0f0'>{pct_int}%</span>
+    <span style='font-size:0.75rem;color:#555;font-weight:300;margin-left:8px'>
+        — Kerndaten werden vorgeladen
+    </span>
+</div>
+""")
         status_txt.caption(f"Lade {ticker} … ({i+1}/{total})")
         try:
             fetch_price_history(ticker, period="1y")
@@ -215,13 +221,23 @@ if not st.session_state.get(_PRELOAD_KEY):
             pass
 
     progress_bar.progress(1.0)
-    status_txt.caption(f"✅ {total} Basiswerte vorgeladen — App bereit")
+    header_ph.html("""
+<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.95rem;
+            color:#22c55e;letter-spacing:0.08em;margin-bottom:4px'>
+    ✅ DATENIMPORT &nbsp;
+    <span style='font-size:1.4rem;color:#f0f0f0'>100%</span>
+    <span style='font-size:0.75rem;color:#555;font-weight:300;margin-left:8px'>
+        — App bereit
+    </span>
+</div>
+""")
+    status_txt.empty()
     st.session_state[_PRELOAD_KEY] = True
 
     import time
-    time.sleep(0.8)
+    time.sleep(1.0)
+    header_ph.empty()
     progress_bar.empty()
-    status_txt.empty()
 
 st.html("<div style='margin-bottom:8px'></div>")
 
