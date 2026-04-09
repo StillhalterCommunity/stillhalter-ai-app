@@ -502,6 +502,217 @@ def analyze_multi_timeframe(ticker: str, lookback: int = 3,
     return result
 
 
+# ── Best Convergence Score ─────────────────────────────────────────────────────
+
+@dataclass
+class ConvergenceResult:
+    """
+    Misst wie nah ein Ticker an einer idealen Konvergenz aller Indikatoren ist.
+    Short Put:  Stoch kreuzt 20↑ · RSI kreuzt 30↑ · EMA2 kreuzt EMA9↑ · MACD hist neg→pos
+    Short Call: Stoch kreuzt 80↓ · RSI kreuzt 70↓ · EMA2 kreuzt EMA9↓ · MACD hist pos→neg
+    """
+    strategy: str = "put"          # "put" | "call"
+
+    # Gesamt-Score 0-100 (gewichteter Durchschnitt 1D 60% + 4H 40%)
+    score: float = 0.0
+    score_1d: float = 0.0
+    score_4h: float = 0.0
+
+    # Teilscores 1D
+    stoch_1d: float = 0.0
+    rsi_1d: float = 0.0
+    ema_1d: float = 0.0
+    macd_1d: float = 0.0
+
+    # Teilscores 4H
+    stoch_4h: float = 0.0
+    rsi_4h: float = 0.0
+    ema_4h: float = 0.0
+    macd_4h: float = 0.0
+
+    label: str = "–"               # "Perfekt" | "Sehr nah" | "Nah" | "Entfernt"
+    bar: str = ""                  # visueller Balken "████░░░░░░"
+
+
+def _proximity_put(tf: TFSignal) -> dict:
+    """Berechnet Short Put Konvergenz-Teilscores für einen Timeframe (je 0-100)."""
+
+    # ── Stochastik: ideal = %K kreuzt 20 aufwärts ─────────────────────────
+    k = tf.stoch_k
+    if tf.stoch_cross_20_up:
+        stoch_s = 100
+    elif k < 20 and tf.stoch_bullish:          # überverkauft + K dreht auf
+        stoch_s = 88
+    elif k < 20:                               # überverkauft, noch fallend
+        stoch_s = 65
+    elif k < 30:                               # gerade aus Überverkauft-Zone
+        stoch_s = int(80 - (k - 20) * 3.5)    # 80 bei k=20 → 45 bei k=30
+    elif k < 50:
+        stoch_s = int(max(10, 40 - (k - 30) * 1.5))
+    else:
+        stoch_s = int(max(0, 10 - (k - 50) * 0.15))
+
+    # ── RSI: ideal = kreuzt 30 aufwärts ───────────────────────────────────
+    rsi = tf.rsi
+    if tf.rsi_cross_30_up:
+        rsi_s = 100
+    elif rsi < 30:
+        rsi_s = 72
+    elif rsi < 40:
+        rsi_s = int(max(30, 85 - (rsi - 30) * 5.5))  # 85→30
+    elif rsi < 50:
+        rsi_s = int(max(10, 30 - (rsi - 40) * 2))
+    else:
+        rsi_s = int(max(0, 10 - (rsi - 50) * 0.15))
+
+    # ── EMA Trend: ideal = EMA2 kreuzt EMA9 aufwärts ──────────────────────
+    if tf.ema_cross_bullish:
+        ema_s = 100
+    elif tf.ema_bullish:
+        # Bereits bullish — noch ein frischer Aufwärtstrend (gut, aber nicht Ideal-Timing)
+        ema_s = 58
+    else:
+        # EMA2 < EMA9 — wie weit weg vom Cross?
+        ref = abs(tf.ema9) if tf.ema9 != 0 else 1.0
+        gap_pct = abs(tf.ema9 - tf.ema2) / ref * 100
+        ema_s = int(max(0, 75 - gap_pct * 4))
+
+    # ── MACD Histogramm: ideal = dreht von negativ auf positiv ────────────
+    hist = tf.macd_hist
+    if tf.macd_cross_bullish:
+        macd_s = 100
+    elif hist > 0 and tf.macd_bullish:
+        # Schon positiv — je kleiner das Histogramm, desto frischer der Cross
+        ref = max(abs(tf.macd_val), 1e-6)
+        freshness = max(0, 1 - hist / (ref * 2))
+        macd_s = int(50 + freshness * 30)   # 50-80
+    elif hist < 0:
+        # Negativ aber wie nah an Null? (höher = besser)
+        ref = max(abs(tf.macd_val), 1e-6)
+        proximity = max(0, 1 - abs(hist) / (ref * 2.5))
+        macd_s = int(proximity * 80)         # 0-80
+    else:
+        macd_s = 20
+
+    return {
+        "stoch": stoch_s, "rsi": rsi_s,
+        "ema": ema_s,     "macd": macd_s,
+        "total": (stoch_s + rsi_s + ema_s + macd_s) / 4,
+    }
+
+
+def _proximity_call(tf: TFSignal) -> dict:
+    """Berechnet Short Call Konvergenz-Teilscores für einen Timeframe (je 0-100)."""
+
+    # ── Stochastik: ideal = %K kreuzt 80 abwärts ──────────────────────────
+    k = tf.stoch_k
+    if tf.stoch_cross_80_down:
+        stoch_s = 100
+    elif k > 80 and tf.stoch_bearish:          # überkauft + K dreht ab
+        stoch_s = 88
+    elif k > 80:
+        stoch_s = 65
+    elif k > 70:
+        stoch_s = int(80 - (80 - k) * 3.5)    # 80 bei k=80 → 45 bei k=70
+    elif k > 50:
+        stoch_s = int(max(10, 40 - (70 - k) * 1.5))
+    else:
+        stoch_s = int(max(0, 10 - (50 - k) * 0.15))
+
+    # ── RSI: ideal = kreuzt 70 abwärts ────────────────────────────────────
+    rsi = tf.rsi
+    if tf.rsi_cross_70_down:
+        rsi_s = 100
+    elif rsi > 70:
+        rsi_s = 72
+    elif rsi > 60:
+        rsi_s = int(max(30, 85 - (70 - rsi) * 5.5))
+    elif rsi > 50:
+        rsi_s = int(max(10, 30 - (60 - rsi) * 2))
+    else:
+        rsi_s = int(max(0, 10 - (50 - rsi) * 0.15))
+
+    # ── EMA Trend: ideal = EMA2 kreuzt EMA9 abwärts ───────────────────────
+    if tf.ema_cross_bearish:
+        ema_s = 100
+    elif tf.ema_bearish:
+        ema_s = 58
+    else:
+        ref = abs(tf.ema9) if tf.ema9 != 0 else 1.0
+        gap_pct = abs(tf.ema2 - tf.ema9) / ref * 100
+        ema_s = int(max(0, 75 - gap_pct * 4))
+
+    # ── MACD Histogramm: ideal = dreht von positiv auf negativ ────────────
+    hist = tf.macd_hist
+    if tf.macd_cross_bearish:
+        macd_s = 100
+    elif hist < 0 and tf.macd_bearish:
+        ref = max(abs(tf.macd_val), 1e-6)
+        freshness = max(0, 1 - abs(hist) / (ref * 2))
+        macd_s = int(50 + freshness * 30)
+    elif hist > 0:
+        ref = max(abs(tf.macd_val), 1e-6)
+        proximity = max(0, 1 - hist / (ref * 2.5))
+        macd_s = int(proximity * 80)
+    else:
+        macd_s = 20
+
+    return {
+        "stoch": stoch_s, "rsi": rsi_s,
+        "ema": ema_s,     "macd": macd_s,
+        "total": (stoch_s + rsi_s + ema_s + macd_s) / 4,
+    }
+
+
+def calc_convergence_score(mtf: MultiTFResult, strategy: str = "put") -> ConvergenceResult:
+    """
+    Berechnet den Best-Convergence-Score für einen Ticker.
+
+    strategy = "put"  → Short Put Setup (Indikatoren nähern sich Oversold-Umkehr an)
+    strategy = "call" → Short Call Setup (Indikatoren nähern sich Overbought-Umkehr an)
+
+    Score 0-100:
+      80-100 = Perfekte Konvergenz (alle Indikatoren nahe am Idealwert)
+      60-79  = Sehr nah (3-4 Indikatoren konvergieren)
+      40-59  = Nah (2 Indikatoren konvergieren)
+      0-39   = Noch entfernt
+    """
+    proximity_fn = _proximity_put if strategy == "put" else _proximity_call
+
+    zero = {"stoch": 0, "rsi": 0, "ema": 0, "macd": 0, "total": 0}
+
+    s_1d = proximity_fn(mtf.tf_1d) if mtf.tf_1d else zero
+    s_4h = proximity_fn(mtf.tf_4h) if mtf.tf_4h else s_1d  # fallback auf 1D wenn kein 4H
+
+    score_1d = round(s_1d["total"], 1)
+    score_4h = round(s_4h["total"], 1)
+    combined = round(score_1d * 0.60 + score_4h * 0.40, 1)
+
+    # Label
+    if combined >= 78:
+        label = "🟢 Perfekt"
+    elif combined >= 60:
+        label = "🟡 Sehr nah"
+    elif combined >= 40:
+        label = "🟠 Nah"
+    else:
+        label = "🔴 Entfernt"
+
+    # Visueller Balken (10 Blöcke)
+    filled = round(combined / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+
+    return ConvergenceResult(
+        strategy=strategy,
+        score=combined, score_1d=score_1d, score_4h=score_4h,
+        stoch_1d=round(s_1d["stoch"], 1), rsi_1d=round(s_1d["rsi"], 1),
+        ema_1d=round(s_1d["ema"], 1),     macd_1d=round(s_1d["macd"], 1),
+        stoch_4h=round(s_4h["stoch"], 1), rsi_4h=round(s_4h["rsi"], 1),
+        ema_4h=round(s_4h["ema"], 1),     macd_4h=round(s_4h["macd"], 1),
+        label=label, bar=bar,
+    )
+
+
 # ── Filter-Matching ────────────────────────────────────────────────────────────
 
 @dataclass

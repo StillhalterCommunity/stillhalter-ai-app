@@ -330,10 +330,11 @@ def _screen_strangle(puts_df: pd.DataFrame, calls_df: pd.DataFrame,
         premium_min=params.premium_min * 0.5,
         min_open_interest=params.min_open_interest,
     )
+    # Calls brauchen positive Delta-Werte (abs der Put-Werte, umgekehrt)
     call_params = ScreeningParams(
         strategy="Covered Call",
-        delta_min=params.delta_min,
-        delta_max=params.delta_max,
+        delta_min=abs(params.delta_max),   # z.B. 0.05 (aus delta_max=-0.05)
+        delta_max=abs(params.delta_min),   # z.B. 0.35 (aus delta_min=-0.35)
         dte_min=params.dte_min,
         dte_max=params.dte_max,
         iv_min=params.iv_min,

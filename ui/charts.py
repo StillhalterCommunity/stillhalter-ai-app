@@ -795,104 +795,64 @@ def render_option_mini_chart(
 
     fig = go.Figure()
 
-    # ── Farbzonen (horizontal) ─────────────────────────────────────────────
-    if option_type == "put":
-        fig.add_hrect(y0=strike,    y1=y_max,
-                      fillcolor="rgba(34,197,94,0.07)",  line_width=0)
-        fig.add_hrect(y0=breakeven, y1=strike,
-                      fillcolor="rgba(234,179,8,0.07)",  line_width=0)
-        fig.add_hrect(y0=y_min,     y1=breakeven,
-                      fillcolor="rgba(239,68,68,0.07)",  line_width=0)
-    else:
-        fig.add_hrect(y0=y_min,     y1=strike,
-                      fillcolor="rgba(34,197,94,0.07)",  line_width=0)
-        fig.add_hrect(y0=strike,    y1=breakeven,
-                      fillcolor="rgba(234,179,8,0.07)",  line_width=0)
-        fig.add_hrect(y0=breakeven, y1=y_max,
-                      fillcolor="rgba(239,68,68,0.07)",  line_width=0)
-
-    # Zonen-Labels (rechts außen)
-    if option_type == "put":
-        _zone_lbls = [
-            ("🟢 Max Profit", max(y_max - y_pad * 0.5, strike + y_pad * 0.3), "#22c55e"),
-            ("⚠️ Recovery",   (strike + breakeven) / 2,                        "#f59e0b"),
-            ("🔴 Verlust",    min(y_min + y_pad * 0.5, breakeven - y_pad * 0.3), "#ef4444"),
-        ]
-    else:
-        _zone_lbls = [
-            ("🟢 Max Profit", min(y_min + y_pad * 0.5, strike - y_pad * 0.3), "#22c55e"),
-            ("⚠️ Recovery",   (strike + breakeven) / 2,                        "#f59e0b"),
-            ("🔴 Verlust",    max(y_max - y_pad * 0.5, breakeven + y_pad * 0.3), "#ef4444"),
-        ]
-    for lbl, y_pos, col in _zone_lbls:
-        fig.add_annotation(x=1.01, y=y_pos, xref="paper", yref="y",
-                           text=lbl, showarrow=False, xanchor="left",
-                           font=dict(size=8, color=col))
+    # ── Candlestick Kurshistorie ───────────────────────────────────────────
+    fig.add_trace(go.Candlestick(
+        x=dates,
+        open=df["Open"].values,
+        high=df["High"].values,
+        low=df["Low"].values,
+        close=df["Close"].values,
+        name=ticker,
+        increasing=dict(line=dict(color="#22c55e", width=1), fillcolor="rgba(34,197,94,0.75)"),
+        decreasing=dict(line=dict(color="#ef4444", width=1), fillcolor="rgba(239,68,68,0.75)"),
+        hovertext=[
+            f"{d.strftime('%d.%m.%y') if hasattr(d,'strftime') else str(d)}: "
+            f"O ${o:.2f} H ${h:.2f} L ${l:.2f} C ${c:.2f}"
+            for d, o, h, l, c in zip(
+                dates,
+                df["Open"].values, df["High"].values,
+                df["Low"].values,  df["Close"].values,
+            )
+        ],
+        hoverinfo="text",
+    ))
 
     # ── IV-Kegel (Projektion in die Zukunft) ──────────────────────────────
-    cone_x = [last_date, expiry_dt,  expiry_dt, last_date]
+    cone_x = [last_date, expiry_dt, expiry_dt, last_date]
     cone_y = [current_price, iv_upper, iv_lower, current_price]
     fig.add_trace(go.Scatter(
         x=cone_x, y=cone_y,
         fill="toself",
-        fillcolor="rgba(59,130,246,0.09)",
-        line=dict(color="rgba(59,130,246,0.25)", width=1, dash="dot"),
-        name=f"IV-Kegel ±${sigma_move:.1f} ({dte}d)",
+        fillcolor="rgba(59,130,246,0.08)",
+        line=dict(color="rgba(59,130,246,0.20)", width=1, dash="dot"),
+        name=f"IV-Kegel ±${sigma_move:.1f}",
         hoverinfo="skip", showlegend=True,
-    ))
-    fig.add_trace(go.Scatter(
-        x=[last_date, expiry_dt], y=[current_price, iv_upper],
-        mode="lines", line=dict(color="rgba(59,130,246,0.35)", width=1, dash="dot"),
-        showlegend=False, hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=[last_date, expiry_dt], y=[current_price, iv_lower],
-        mode="lines", line=dict(color="rgba(59,130,246,0.35)", width=1, dash="dot"),
-        showlegend=False, hoverinfo="skip",
     ))
     fig.add_annotation(x=expiry_dt, y=iv_upper,
                        text=f"+1σ ${iv_upper:.0f}", showarrow=False,
-                       xanchor="left", font=dict(size=8, color="#3b82f6"))
+                       xanchor="left", font=dict(size=9, color="rgba(59,130,246,0.7)"))
     fig.add_annotation(x=expiry_dt, y=iv_lower,
                        text=f"-1σ ${iv_lower:.0f}", showarrow=False,
-                       xanchor="left", font=dict(size=8, color="#3b82f6"))
-
-    # ── Kurshistorie ──────────────────────────────────────────────────────
-    fig.add_trace(go.Scatter(
-        x=dates, y=close,
-        mode="lines",
-        line=dict(color="#9ca3af", width=1.5),
-        name=ticker,
-        hovertemplate="%{x|%d.%m.%y}: <b>$%{y:.2f}</b><extra>" + ticker + "</extra>",
-    ))
-    # Aktueller Kurs (Marker)
-    status_icon = "✅" if otm_side else "⚠️"
-    fig.add_trace(go.Scatter(
-        x=[last_date], y=[current_price],
-        mode="markers",
-        marker=dict(color="#d4a843", size=9, symbol="circle",
-                    line=dict(color="#fff", width=1)),
-        name=f"{status_icon} Kurs ${current_price:.2f}",
-        hovertemplate=f"Aktuell: <b>${current_price:.2f}</b><extra>Kurs</extra>",
-    ))
+                       xanchor="left", font=dict(size=9, color="rgba(59,130,246,0.7)"))
 
     # ── Horizontale Linien ────────────────────────────────────────────────
+    status_icon = "✅" if otm_side else "⚠️"
     fig.add_hline(
-        y=strike, line=dict(color="#3b82f6", dash="dash", width=1.8),
-        annotation_text=f" Strike ${strike:.2f}",
-        annotation_font_color="#3b82f6", annotation_font_size=10,
+        y=strike, line=dict(color="#3b82f6", dash="dash", width=2.5),
+        annotation_text=f"  Strike ${strike:.2f}",
+        annotation_font=dict(color="#3b82f6", size=11),
         annotation_position="right",
     )
     fig.add_hline(
-        y=breakeven, line=dict(color="#f59e0b", dash="dot", width=1.5),
-        annotation_text=f" BE ${breakeven:.2f}",
-        annotation_font_color="#f59e0b", annotation_font_size=10,
+        y=breakeven, line=dict(color="#f59e0b", dash="dot", width=2.0),
+        annotation_text=f"  Break-Even ${breakeven:.2f}",
+        annotation_font=dict(color="#f59e0b", size=11),
         annotation_position="right",
     )
     fig.add_hline(
-        y=current_price, line=dict(color="#d4a843", dash="dot", width=1),
-        annotation_text=f" Kurs ${current_price:.2f}",
-        annotation_font_color="#d4a843", annotation_font_size=9,
+        y=current_price, line=dict(color="#d4a843", dash="solid", width=1.2),
+        annotation_text=f"  {status_icon} ${current_price:.2f}",
+        annotation_font=dict(color="#d4a843", size=10),
         annotation_position="left",
     )
 
@@ -907,24 +867,25 @@ def render_option_mini_chart(
               f"<b>Prämie/Tag:</b> ${premium / max(dte, 1) * 100:.2f}  "
               f"<b>Rendite ann.:</b> {ann_yield:.1f}%"),
         showarrow=False, xanchor="left", yanchor="top",
-        font=dict(size=9, color="#9ca3af"),
-        bgcolor="rgba(12,12,12,0.80)", borderpad=5,
-        bordercolor="#2a2a2a", borderwidth=1,
+        font=dict(size=10, color="#d1d5db"),
+        bgcolor="rgba(10,10,10,0.85)", borderpad=6,
+        bordercolor="#333", borderwidth=1,
     )
 
     # ── Layout ─────────────────────────────────────────────────────────────
     strat = "Short Put" if option_type == "put" else "Short Call"
-    title = (f"{ticker} · {strat} · Strike ${strike:.2f}"
+    title = (f"{strat} · {ticker} · Strike ${strike:.2f} · Prämie ${premium:.2f}"
              f"{' · ' + expiry_date if expiry_date else ''}")
     fig.update_layout(
-        height=260,
-        title=dict(text=title, font=dict(size=11, color="#9ca3af"), x=0),
-        margin=dict(l=10, r=120, t=36, b=10),
+        height=420,
+        title=dict(text=title, font=dict(size=12, color="#9ca3af"), x=0),
+        margin=dict(l=10, r=140, t=42, b=30),
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(12,12,12,0.6)",
+        plot_bgcolor="rgba(10,10,10,0.85)",
         font=dict(color="#9ca3af", family="RedRose, Inter, sans-serif", size=10),
         xaxis=dict(
             gridcolor="#1e1e1e", zeroline=False, tickfont=dict(size=9),
+            rangeslider=dict(visible=False),
             range=[dates[0],
                    expiry_dt + pd.Timedelta(days=max(dte // 8, 3))],
         ),
@@ -933,8 +894,8 @@ def render_option_mini_chart(
             tickfont=dict(size=9), tickformat="$,.0f",
             range=[y_min, y_max],
         ),
-        legend=dict(orientation="h", y=-0.20, x=0,
-                    font=dict(size=8, color="#555"),
+        legend=dict(orientation="h", y=-0.08, x=0,
+                    font=dict(size=9, color="#6b7280"),
                     bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified",
     )

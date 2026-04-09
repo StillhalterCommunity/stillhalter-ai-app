@@ -27,7 +27,7 @@ from data.universes import get_universe_tickers, UNIVERSE_OPTIONS, UNIVERSE_COUN
 from analysis.batch_screener import scan_watchlist
 from analysis.multi_timeframe import (
     analyze_multi_timeframe, matches_tech_filter,
-    TechFilterParams, tf_summary_row
+    TechFilterParams, tf_summary_row, calc_convergence_score
 )
 from ui.charts import render_option_mini_chart, render_payoff_diagram
 
@@ -236,7 +236,7 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
         st.markdown("<br>", unsafe_allow_html=True)
         sort_by = st.selectbox(
             "Sortierung",
-            ["CRV Score", "Rendite ann. %", "Rendite % Laufzeit",
+            ["CRV Score", "Best Convergence", "Rendite ann. %", "Rendite % Laufzeit",
              "Rendite %/Tag", "OTM %", "Prämie/Tag", "DTE", "|Delta|"],
         )
 
@@ -607,6 +607,35 @@ if start_scan:
             results["SC Trend(1D)"] = [x[3] for x in tf_cols]
             results["TF-Align"] = [x[4] for x in tf_cols]
 
+            # ── Best Convergence Score ──────────────────────────────────────
+            conv_strategy = "call" if scan_strategy == "Covered Call" else "put"
+
+            def _conv_score(ticker):
+                try:
+                    tf = tf_cache.get(ticker)
+                    if tf is None:
+                        return (0.0, "🔴 Entfernt", "░░░░░░░░░░",
+                                0, 0, 0, 0, 0, 0, 0, 0)
+                    c = calc_convergence_score(tf, conv_strategy)
+                    return (c.score, c.label, c.bar,
+                            c.stoch_1d, c.rsi_1d, c.ema_1d, c.macd_1d,
+                            c.stoch_4h, c.rsi_4h, c.ema_4h, c.macd_4h)
+                except Exception:
+                    return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+
+            conv_cols = results["Ticker"].apply(_conv_score)
+            results["Konvergenz"]    = [x[0] for x in conv_cols]
+            results["Konv. Label"]   = [x[1] for x in conv_cols]
+            results["Konv. Bar"]     = [x[2] for x in conv_cols]
+            results["Stoch(1D)◎"]   = [x[3] for x in conv_cols]
+            results["RSI(1D)◎"]     = [x[4] for x in conv_cols]
+            results["EMA(1D)◎"]     = [x[5] for x in conv_cols]
+            results["MACD(1D)◎"]    = [x[6] for x in conv_cols]
+            results["Stoch(4H)◎"]   = [x[7] for x in conv_cols]
+            results["RSI(4H)◎"]     = [x[8] for x in conv_cols]
+            results["EMA(4H)◎"]     = [x[9] for x in conv_cols]
+            results["MACD(4H)◎"]    = [x[10] for x in conv_cols]
+
         progress_bar.progress(1.0)
         n_found = len(results)
         n_tickers = results["Ticker"].nunique() if not results.empty else 0
@@ -663,6 +692,45 @@ elif results.empty:
     )
 
 else:
+    # ── Konvergenz-Score nachladen falls nicht vorhanden (z.B. Hintergrund-Scan) ──
+    if "Konvergenz" not in results.columns and "Ticker" in results.columns:
+        _cached_tf = st.session_state.get("tf_results") or {}
+        _conv_strategy = "call" if meta.get("strategy", scan_strategy) == "Covered Call" else "put"
+        _missing_tf = [t for t in results["Ticker"].unique() if t not in _cached_tf]
+        if _missing_tf:
+            _ph = st.empty()
+            _ph.caption(f"⚡ Berechne Konvergenz-Scores für {len(_missing_tf)} Ticker...")
+            for _mt in _missing_tf:
+                _cached_tf[_mt] = analyze_multi_timeframe(_mt)
+            _ph.empty()
+
+        def _lazy_conv(ticker):
+            try:
+                tf = _cached_tf.get(ticker)
+                if tf is None:
+                    return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+                c = calc_convergence_score(tf, _conv_strategy)
+                return (c.score, c.label, c.bar,
+                        c.stoch_1d, c.rsi_1d, c.ema_1d, c.macd_1d,
+                        c.stoch_4h, c.rsi_4h, c.ema_4h, c.macd_4h)
+            except Exception:
+                return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+
+        _cx = results["Ticker"].apply(_lazy_conv)
+        results["Konvergenz"]    = [x[0] for x in _cx]
+        results["Konv. Label"]   = [x[1] for x in _cx]
+        results["Konv. Bar"]     = [x[2] for x in _cx]
+        results["Stoch(1D)◎"]   = [x[3] for x in _cx]
+        results["RSI(1D)◎"]     = [x[4] for x in _cx]
+        results["EMA(1D)◎"]     = [x[5] for x in _cx]
+        results["MACD(1D)◎"]    = [x[6] for x in _cx]
+        results["Stoch(4H)◎"]   = [x[7] for x in _cx]
+        results["RSI(4H)◎"]     = [x[8] for x in _cx]
+        results["EMA(4H)◎"]     = [x[9] for x in _cx]
+        results["MACD(4H)◎"]    = [x[10] for x in _cx]
+        st.session_state.scan_results = results
+        st.session_state.tf_results = {**st.session_state.get("tf_results", {}), **_cached_tf}
+
     # ── Kennzahlen ─────────────────────────────────────────────────────────
     n_tickers_found = results["Ticker"].nunique() if "Ticker" in results.columns else 0
     avg_crv  = results["CRV Score"].mean() if "CRV Score" in results.columns else 0
@@ -670,17 +738,38 @@ else:
     avg_yield = results["Rendite ann. %"].mean() if "Rendite ann. %" in results.columns else 0
     avg_otm   = results["OTM %"].mean() if "OTM %" in results.columns else 0
 
+    best_conv  = results["Konvergenz"].max()  if "Konvergenz" in results.columns else None
     mc = st.columns(6)
     mc[0].metric("Optionen gefunden",  len(results))
     mc[1].metric("Aktien",             n_tickers_found)
     mc[2].metric("Bester CRV",         f"{best_crv:.1f}")
     mc[3].metric("Ø CRV Score",        f"{avg_crv:.1f}")
     mc[4].metric("Ø Rendite ann.",      f"{avg_yield:.1f}%")
-    mc[5].metric("Ø OTM Puffer",       f"{avg_otm:.1f}%")
+    mc[5].metric("⚡ Best Convergence", f"{best_conv:.0f}/100" if best_conv is not None else "–")
 
-    # U5: CRV & TF-Alignment Formel-Erklärung
-    with st.expander("ℹ️ **Wie werden CRV Score & TF-Alignment berechnet?**", expanded=False):
-        icol1, icol2 = st.columns(2)
+    # CRV, TF-Alignment & Konvergenz-Erklärung
+    with st.expander("ℹ️ **Wie werden CRV Score, TF-Alignment & Best Convergence berechnet?**", expanded=False):
+        icol1, icol2, icol3 = st.columns(3)
+        with icol3:
+            st.markdown("""
+            **⚡ Best Convergence Score — Annäherung ans Ideal**
+
+            Misst wie nah alle 4 Indikatoren gleichzeitig an ihrem idealen Einstiegssignal sind — auf **4H & 1D** Ebene.
+
+            | Indikator | Short Put Ideal | Short Call Ideal |
+            |-----------|----------------|-----------------|
+            | **Stoch. Dual** | %K kreuzt 20 ↑ | %K kreuzt 80 ↓ |
+            | **RSI** | kreuzt 30 ↑ | kreuzt 70 ↓ |
+            | **Stillhalter Trendmodel** | EMA2 kreuzt EMA9 ↑ | EMA2 kreuzt EMA9 ↓ |
+            | **MACD Pro** | Hist. neg → pos | Hist. pos → neg |
+
+            Score = gewichteter Durchschnitt (1D 60% · 4H 40%)
+
+            → **≥ 78**: 🟢 Perfekte Konvergenz — idealer Einstieg
+            → **60–77**: 🟡 Sehr nah — 3-4 Indikatoren konvergieren
+            → **40–59**: 🟠 Nah — 2 Indikatoren nähern sich an
+            → **< 40**: 🔴 Noch entfernt
+            """)
         with icol1:
             st.markdown("""
             **📐 CRV Score — Chance-Risiko-Verhältnis**
@@ -718,12 +807,14 @@ else:
     with fc1:
         trend_f = st.radio("Trend-Filter (1D)", ["Alle", "↑ Aufwärts", "→ Seitwärts", "↓ Abwärts"], horizontal=True)
     with fc2:
-        sort_col = sort_by if sort_by in results.columns else "CRV Score"
         if sort_by == "|Delta|" and "Delta" in results.columns:
             display_df = results.copy()
             display_df["_abs_delta"] = display_df["Delta"].abs()
             display_df = display_df.sort_values("_abs_delta").head(int(top_n)).reset_index(drop=True)
+        elif sort_by == "Best Convergence" and "Konvergenz" in results.columns:
+            display_df = results.sort_values("Konvergenz", ascending=False).head(int(top_n)).reset_index(drop=True)
         else:
+            sort_col = sort_by if sort_by in results.columns else "CRV Score"
             display_df = results.sort_values(
                 sort_col, ascending=(sort_by == "DTE")
             ).head(int(top_n)).reset_index(drop=True)
@@ -774,7 +865,12 @@ else:
                      "Trend", "⚠️ Earnings"]
     # Tech-Spalten wenn vorhanden
     tech_cols = [c for c in ["RSI(1D)", "Stoch(1D)", "MACD(1D)", "SC Trend(1D)", "TF-Align"] if c in display_df.columns]
-    show_cols = [c for c in base_cols + tech_cols + ["⭐ CRV"] if c in display_df.columns]
+    # Konvergenz-Spalten
+    conv_cols_show = [c for c in ["Konv. Bar", "Konvergenz", "Konv. Label",
+                                  "Stoch(1D)◎", "RSI(1D)◎", "EMA(1D)◎", "MACD(1D)◎",
+                                  "Stoch(4H)◎", "RSI(4H)◎", "EMA(4H)◎", "MACD(4H)◎"]
+                      if c in display_df.columns]
+    show_cols = [c for c in base_cols + tech_cols + conv_cols_show + ["⭐ CRV"] if c in display_df.columns]
 
     col_config = {
         "Top":           st.column_config.TextColumn("Top", width="small",
@@ -810,6 +906,25 @@ else:
                                                        help="Handelsvolumen der Option heute"),
         "⚠️ Earnings":  st.column_config.TextColumn("Earnings", width="medium",
                                                       help="⚠️ Earnings-Termin fällt in die Laufzeit der Option"),
+        # Konvergenz-Spalten
+        "Konv. Bar":    st.column_config.TextColumn("⚡ Konvergenz",
+                                                     help="Best Convergence — wie nah sind alle Indikatoren am idealen Einstiegszeitpunkt (████ = perfekt)"),
+        "Konvergenz":   st.column_config.ProgressColumn("Konv. Score", min_value=0, max_value=100,
+                                                          format="%.0f",
+                                                          help="0-100: Annäherung aller Indikatoren an ideale Konvergenz für diesen Setup-Typ"),
+        "Konv. Label":  st.column_config.TextColumn("Konv.", width="small"),
+        "Stoch(1D)◎":  st.column_config.ProgressColumn("Stoch 1D", min_value=0, max_value=100, format="%.0f",
+                                                          help="Stochastik-Annäherung 1D (100 = %K kreuzt Ideallinie)"),
+        "RSI(1D)◎":    st.column_config.ProgressColumn("RSI 1D", min_value=0, max_value=100, format="%.0f",
+                                                          help="RSI-Annäherung 1D (100 = RSI kreuzt 30/70)"),
+        "EMA(1D)◎":    st.column_config.ProgressColumn("Trend 1D", min_value=0, max_value=100, format="%.0f",
+                                                          help="Stillhalter Trendmodel-Annäherung 1D (100 = EMA kreuzt)"),
+        "MACD(1D)◎":   st.column_config.ProgressColumn("MACD 1D", min_value=0, max_value=100, format="%.0f",
+                                                          help="MACD-Histogramm-Annäherung 1D (100 = dreht Vorzeichen)"),
+        "Stoch(4H)◎":  st.column_config.ProgressColumn("Stoch 4H", min_value=0, max_value=100, format="%.0f"),
+        "RSI(4H)◎":    st.column_config.ProgressColumn("RSI 4H", min_value=0, max_value=100, format="%.0f"),
+        "EMA(4H)◎":    st.column_config.ProgressColumn("Trend 4H", min_value=0, max_value=100, format="%.0f"),
+        "MACD(4H)◎":   st.column_config.ProgressColumn("MACD 4H", min_value=0, max_value=100, format="%.0f"),
     }
 
     # ── Styling: Top-3 Zeilen + Spalten-Max/Min ────────────────────────────

@@ -450,7 +450,7 @@ with tab_opts:
                     _expiry  = str(_row.get("Verfall", ""))
 
                     st.markdown("---")
-                    _c1, _c2 = st.columns([3, 2])
+                    _c1, _c2 = st.columns([5, 3])
                     with _c1:
                         if not price_hist.empty and _strike > 0 and _premium > 0:
                             fig_mini = render_option_mini_chart(
@@ -472,7 +472,7 @@ with tab_opts:
                                 current_price, _strike, _premium,
                                 opt_type, selected_ticker, _dte,
                             )
-                            fig_pay.update_layout(height=260, margin=dict(l=5,r=5,t=45,b=30))
+                            fig_pay.update_layout(height=420, margin=dict(l=5,r=5,t=45,b=30))
                             st.plotly_chart(fig_pay, use_container_width=True,
                                             config={"displayModeBar": False})
 
