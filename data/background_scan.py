@@ -114,47 +114,53 @@ def stop_scan() -> None:
 def _scan_worker(tickers, strategy, delta_min, delta_max, dte_min, dte_max,
                  iv_min, premium_min, min_oi, otm_min, otm_max,
                  max_spread_pct, require_valid_market):
-    """Läuft im Hintergrund-Thread. Aktualisiert _state laufend."""
+    """
+    Läuft im Hintergrund-Thread — nutzt scan_watchlist() mit 8 parallelen Workern,
+    identisch zum normalen Scan. Aktualisiert _state laufend via Callbacks.
+    """
     try:
-        from analysis.batch_screener import scan_ticker
+        from analysis.batch_screener import scan_watchlist
 
-        all_results = []
         total = len(tickers)
 
-        for i, ticker in enumerate(tickers):
-            # Abbruch-Check
+        def on_progress(current: int, total_: int, ticker: str):
             with _lock:
                 if not _state["running"]:
-                    break
-                _state["current"] = ticker
-                _state["done"] = i
-                _state["progress"] = i / max(total, 1)
+                    return
+                _state["current"]  = ticker
+                _state["done"]     = current
+                _state["progress"] = current / max(total_, 1)
 
-            try:
-                df = scan_ticker(
-                    ticker,
-                    strategy=strategy,
-                    delta_min=delta_min,
-                    delta_max=delta_max,
-                    dte_min=dte_min,
-                    dte_max=dte_max,
-                    iv_min=iv_min,
-                    premium_min=premium_min,
-                    min_oi=min_oi,
-                    otm_min=otm_min,
-                    otm_max=otm_max,
-                    max_spread_pct=max_spread_pct,
-                    require_valid_market=require_valid_market,
-                )
-                if df is not None and not df.empty:
-                    all_results.append(df)
-            except Exception:
-                pass
+        def on_result(ticker: str, df: pd.DataFrame):
+            # Zwischenergebnis akkumulieren (thread-safe)
+            with _lock:
+                existing = _state.get("results")
+                if existing is None or existing.empty:
+                    _state["results"] = df.copy()
+                else:
+                    combined = pd.concat([existing, df], ignore_index=True)
+                    if "CRV Score" in combined.columns:
+                        combined = combined.sort_values("CRV Score", ascending=False)
+                    _state["results"] = combined
 
-            time.sleep(0.05)  # Rate-Limiting
+        results = scan_watchlist(
+            tickers=tickers,
+            strategy=strategy,
+            delta_min=delta_min,
+            delta_max=delta_max,
+            dte_min=dte_min,
+            dte_max=dte_max,
+            iv_min=iv_min,
+            premium_min=premium_min,
+            min_oi=min_oi,
+            otm_min=otm_min,
+            otm_max=otm_max,
+            require_valid_market=require_valid_market,
+            max_spread_pct=max_spread_pct,
+            progress_callback=on_progress,
+            result_callback=on_result,
+        )
 
-        # Fertig
-        results = pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
         if not results.empty and "CRV Score" in results.columns:
             results = results.sort_values("CRV Score", ascending=False).reset_index(drop=True)
 

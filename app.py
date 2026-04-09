@@ -190,8 +190,9 @@ st.html("<div style='margin-top:8px'></div>")
 # ══════════════════════════════════════════════════════════════════════════════
 
 _PRELOAD_KEY = "preload_done"
-_PRELOAD_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
-                    "META", "TSLA", "JPM", "V", "JNJ", "UNH", "XOM", "WMT"]
+# Alle Watchlist-Ticker + Markt-ETFs vorabladen
+from data.watchlist import ALL_TICKERS
+_PRELOAD_TICKERS = ["SPY", "QQQ", "VIX"] + [t for t in ALL_TICKERS if t not in ("SPY", "QQQ", "VIX")]
 
 if not st.session_state.get(_PRELOAD_KEY):
     header_ph    = st.empty()
