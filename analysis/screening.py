@@ -456,12 +456,19 @@ def _format_output(df: pd.DataFrame, current_price: float, option_type: str) -> 
         (df["mid_price"] / df["strike"] * (365 / df["dte"].clip(lower=1)) * 100)
     ).round(1)
 
-    # Liquiditäts-Label pro Zeile
+    # Liquiditäts-Label pro Zeile (NaN-sicher)
+    def _safe_int(val):
+        try:
+            v = float(val)
+            return 0 if (v != v) else int(v)  # NaN-Check: NaN != NaN
+        except Exception:
+            return 0
+
     liq_label = df.apply(
         lambda r: _liquidity_label(
             r.get("spread_pct", 999),
-            int(r.get("openInterest", 0) or 0),
-            int(r.get("volume", 0) or 0),
+            _safe_int(r.get("openInterest", 0)),
+            _safe_int(r.get("volume", 0)),
         ), axis=1
     )
 

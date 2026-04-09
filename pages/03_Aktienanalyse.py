@@ -239,7 +239,13 @@ with tab_opts:
         st.error("Kurs konnte nicht geladen werden.")
     else:
         # Inline Filter
-        st.markdown("#### ⚙️ Options-Filter")
+        _rf1, _rf2 = st.columns([8, 1])
+        with _rf1:
+            st.markdown("#### ⚙️ Options-Filter")
+        with _rf2:
+            if st.button("🔄", help="Optionskette neu laden", use_container_width=True, key="btn_reload_opts"):
+                st.cache_data.clear()
+                st.rerun()
         oc1,oc2,oc3,oc4,oc5 = st.columns(5)
         with oc1:
             strategy = st.selectbox("Strategie",
