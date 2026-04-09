@@ -26,3 +26,6 @@ env/
 # Secrets / API Keys (NIEMALS committen!)
 .env
 secrets.toml
+
+# Nutzerdaten (DSGVO — nicht in Git!)
+data/login_log.csv

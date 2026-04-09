@@ -9,6 +9,8 @@ from ui.theme import get_logo_html
 
 def render_sidebar():
     """Rendert die einheitliche Sidebar-Navigation auf jeder Seite."""
+    from data.fetcher import is_market_open, market_status_text
+    market_open = is_market_open()
     with st.sidebar:
         st.html(get_logo_html("white", 28))
         st.html("""
@@ -32,3 +34,12 @@ def render_sidebar():
         st.page_link("pages/10_Option_Olli_Chat.py",        label="10 · Option Olli Chat",   icon="🤖")
         st.page_link("pages/11_Prozess.py",                 label="11 · Prozess",            icon="📋")
         st.page_link("pages/12_IBKR_Integration.py",        label="12 · IBKR Integration",   icon="🔗")
+        st.page_link("pages/13_Rechtliches.py",              label="13 · Datenschutz & Recht", icon="⚖️")
+        st.html("<div style='border-top:1px solid #1e1e1e;margin:10px 0 4px 0'></div>")
+        # Markt-Status Badge
+        if market_open:
+            st.html("<div style='font-family:RedRose,sans-serif;font-size:0.75rem;"
+                    "color:#22c55e;padding:2px 0'>● Markt geöffnet</div>")
+        else:
+            st.html("<div style='font-family:RedRose,sans-serif;font-size:0.75rem;"
+                    "color:#f59e0b;padding:2px 0'>● Markt geschlossen · Last Price</div>")

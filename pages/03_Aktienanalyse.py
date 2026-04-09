@@ -57,7 +57,6 @@ def peg_info(peg):
 
 # ── Sidebar: Ticker-Auswahl ───────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(get_logo_html("white", 30), unsafe_allow_html=True)
     st.markdown("## 📊 Aktie wählen")
 
     analyse_universe = st.selectbox(

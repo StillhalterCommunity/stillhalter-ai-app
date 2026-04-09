@@ -360,17 +360,77 @@ st.info(
     f"· Dauer: **~{mins}–{maxs} Min.**{tech_filter_note}{strat_note} · {price_mode_str}"
 )
 
+# ── Hintergrund-Scan Status anzeigen ─────────────────────────────────────────
+import data.background_scan as bg_scan
+_bg = bg_scan.get_state()
+if _bg["running"]:
+    pct  = _bg["progress"]
+    done = _bg["done"]
+    tot  = _bg["total"]
+    cur  = _bg["current"]
+    st.html(f"""
+<div style='background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.3);
+            border-radius:10px;padding:10px 16px;margin-bottom:4px'>
+    <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.85rem;color:#d4a843'>
+        🔍 SCAN LÄUFT IM HINTERGRUND — du kannst die Seite wechseln
+    </div>
+    <div style='font-family:RedRose,sans-serif;font-size:0.8rem;color:#888;margin-top:4px'>
+        {done}/{tot} Aktien · aktuell: <strong style='color:#f0f0f0'>{cur}</strong>
+    </div>
+</div>
+""")
+    st.progress(pct)
+    if st.button("⏹ Scan abbrechen", key="btn_stop_bg"):
+        bg_scan.stop_scan()
+        st.rerun()
+    import time as _t; _t.sleep(2); st.rerun()
+elif _bg["finished_at"] and _bg["results"] is not None and not _bg["results"].empty:
+    # Ergebnisse aus Hintergrund-Scan übernehmen
+    if st.session_state.scan_results is None or st.session_state.scan_results.empty:
+        st.session_state.scan_results = _bg["results"]
+        st.session_state.scan_meta = {"strategy": _bg["strategy"], "source": "background"}
+
 # ── Scan Buttons ──────────────────────────────────────────────────────────────
-b1, b2, _ = st.columns([2, 2, 8])
+b1, b2, b3, _ = st.columns([2, 2, 2, 6])
 with b1:
-    start_scan = st.button(f"🚀 Scan starten ({len(scan_tickers)} Ticker)", type="primary", use_container_width=True)
+    start_scan_fg = st.button(f"🚀 Scan starten ({len(scan_tickers)} Ticker)", type="primary", use_container_width=True)
 with b2:
+    start_scan_bg = st.button(
+        f"🌙 Im Hintergrund ({len(scan_tickers)})",
+        use_container_width=True,
+        help="Scan läuft im Hintergrund — du kannst die Seite wechseln, Scan läuft weiter",
+        disabled=_bg["running"],
+    )
+with b3:
     if st.button("🗑️ Cache leeren", use_container_width=True):
         st.cache_data.clear()
         for key in ["scan_results", "scan_meta", "tf_results", "preset"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
+
+# Hintergrund-Scan starten
+if start_scan_bg:
+    off_hours_bg = use_last_price and not market_open
+    started = bg_scan.start_scan(
+        tickers=scan_tickers,
+        strategy=scan_strategy,
+        delta_min=d_min, delta_max=d_max,
+        dte_min=int(dte_min), dte_max=int(dte_max),
+        iv_min=iv_min / 100,
+        premium_min=0.01 if off_hours_bg else prem_min,
+        min_oi=0 if off_hours_bg else int(oi_min),
+        otm_min=float(otm_min), otm_max=float(otm_max),
+        max_spread_pct=float(max_spread_pct),
+        require_valid_market=not off_hours_bg,
+    )
+    if started:
+        st.success("✅ Hintergrund-Scan gestartet — du kannst jetzt die Seite wechseln!")
+        import time as _t; _t.sleep(1); st.rerun()
+    else:
+        st.warning("Ein Scan läuft bereits. Bitte warten.")
+
+start_scan = start_scan_fg
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
@@ -683,30 +743,8 @@ else:
         return {1: "🥇 Top 1", 2: "🥈 Top 2", 3: "🥉 Top 3"}.get(i, f"#{i}")
     display_df["Top"] = display_df["Rang"].apply(_medal)
 
-    # ── Liquiditäts-Ampel aus Spread % + Kursquelle ───────────────────────────
-    def _liq(row) -> str:
-        """🟢 Spread ≤5% · 🟡 5–15% · 🔴 >15% · ⚠️ kein Markt (Last Price)"""
-        # Kursquelle prüfen (wenn verfügbar)
-        src = str(row.get("Kursquelle", "Mid")) if isinstance(row, dict) else "Mid"
-        if hasattr(row, "get"):
-            src = str(row.get("Kursquelle", "Mid"))
-        else:
-            src = "Mid"
-        if src == "Last":
-            return "⚠️"  # Off-Hours / kein aktiver Markt
-        try:
-            v = float(row.get("Spread %") if hasattr(row, "get") else row)
-            if v <= 5:   return "🟢"
-            if v <= 15:  return "🟡"
-            return "🔴"
-        except Exception:
-            return "⚪"
-
-    if "Spread %" in display_df.columns or "Kursquelle" in display_df.columns:
-        display_df["Liq."] = display_df.apply(
-            lambda r: _liq(r), axis=1
-        )
-    else:
+    # Liq.-Spalte kommt bereits aus batch_screener — nur Fallback wenn fehlt
+    if "Liq." not in display_df.columns:
         display_df["Liq."] = "⚪"
 
     # ── CRV Medaillen ─────────────────────────────────────────────────────────

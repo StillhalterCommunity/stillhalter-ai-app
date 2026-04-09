@@ -1,8 +1,10 @@
 """
 Stillhalter AI App Dashboard — Startseite
+Login-Gate + Daten-Preload + Navigation
 """
 
 import streamlit as st
+import uuid
 
 st.set_page_config(
     page_title="Stillhalter AI App Dashboard",
@@ -12,18 +14,70 @@ st.set_page_config(
 )
 
 from ui.theme import get_css, get_logo_html
-from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+
+from data.auth import check_password, log_event
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LOGIN GATE — muss vor allem anderen kommen
+# ══════════════════════════════════════════════════════════════════════════════
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = ""
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+
+if not st.session_state.authenticated:
+    # Zentriertes Login-Fenster
+    _, center, _ = st.columns([1, 2, 1])
+    with center:
+        st.html(f"""
+<div style='text-align:center;margin:60px 0 32px 0'>
+    {get_logo_html("white", 56)}
+</div>
+<div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
+            border-radius:14px;padding:32px 36px;'>
+    <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.4rem;
+                color:#f0f0f0;letter-spacing:0.05em;margin-bottom:4px'>
+        STILLHALTER AI APP
+    </div>
+    <div style='font-family:RedRose,sans-serif;font-size:0.78rem;color:#555;
+                letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px'>
+        Beta-Zugang · Bitte Passwort eingeben
+    </div>
+</div>
+""")
+        pw = st.text_input("Passwort", type="password", placeholder="Dein persönliches Passwort",
+                           label_visibility="collapsed")
+        col_btn, col_hint = st.columns([2, 3])
+        with col_btn:
+            login_btn = st.button("→ Einloggen", type="primary", use_container_width=True)
+        with col_hint:
+            st.caption("Passwort erhalten? Wende dich an die Stillhalter Community.")
+
+        if login_btn or pw:
+            username = check_password(pw)
+            if username:
+                st.session_state.authenticated = True
+                st.session_state.auth_user = username
+                log_event(username, "login", st.session_state.session_id)
+                st.rerun()
+            elif pw:
+                st.error("Ungültiges Passwort — bitte prüfen oder Stillhalter Community kontaktieren.")
+    st.stop()
+
+# ── Ab hier: nur für eingeloggte Nutzer ──────────────────────────────────────
+from ui.sidebar import render_sidebar
 
 # ── Kompaktes Spacing: Card → Link-Footer nahtlos ────────────────────────────
 st.markdown("""
 <style>
-/* Page-Link Container im Hauptbereich: an die Card heranziehen */
 [data-testid="stMain"] [data-testid="stElementContainer"]:has([data-testid="stPageLink"]) {
     margin-top: -10px !important;
     margin-bottom: 8px !important;
 }
-/* Page-Link als Card-Footer: unten abgerundet, Seitenrand wie die Card */
 [data-testid="stMain"] [data-testid="stPageLink"] > a {
     border-radius: 0 0 14px 14px !important;
     background: #0c0c0c !important;
@@ -42,32 +96,15 @@ st.markdown("""
     background: #111 !important;
     text-decoration: none !important;
 }
-/* Sidebar Navigation: normales Spacing beibehalten */
-[data-testid="stSidebar"] [data-testid="stElementContainer"]:has([data-testid="stPageLink"]) {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-}
-[data-testid="stSidebar"] [data-testid="stPageLink"] > a {
-    border-radius: 6px !important;
-    background: transparent !important;
-    border: none !important;
-    padding: 4px 8px !important;
-    font-size: 0.82rem !important;
-    color: #888 !important;
-    width: 100% !important;
-    display: block !important;
-}
-[data-testid="stSidebar"] [data-testid="stPageLink"] > a:hover {
-    color: #d4a843 !important;
-    background: #1a1a1a !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
 from data.fetcher import (
     market_status_text, is_market_open,
     fetch_extended_hours_price, get_extended_hours_session,
+    fetch_price_history, fetch_stock_info,
 )
+import data.background_scan as bg_scan
 
 render_sidebar()
 
@@ -84,14 +121,14 @@ with col_title:
     if ext_session:
         spy_ext = fetch_extended_hours_price("SPY")
         if spy_ext:
-            sign       = "+" if spy_ext["change_pct"] >= 0 else ""
-            col_chg    = "#22c55e" if spy_ext["change_pct"] >= 0 else "#ef4444"
-            lbl_color  = spy_ext["label_color"]
-            lbl_text   = spy_ext["label"]
-            spy_price  = spy_ext["price"]
-            spy_chg    = spy_ext["change_pct"]
-            spy_time   = spy_ext["time_str"]
-            ext_badge  = (
+            sign      = "+" if spy_ext["change_pct"] >= 0 else ""
+            col_chg   = "#22c55e" if spy_ext["change_pct"] >= 0 else "#ef4444"
+            lbl_color = spy_ext["label_color"]
+            lbl_text  = spy_ext["label"]
+            spy_price = spy_ext["price"]
+            spy_chg   = spy_ext["change_pct"]
+            spy_time  = spy_ext["time_str"]
+            ext_badge = (
                 f" &nbsp;·&nbsp; <span style='background:#1a1a2e;border:1px solid #333;"
                 f"border-radius:4px;padding:1px 8px;font-size:0.75rem;"
                 f"color:{lbl_color}'>{lbl_text}</span>"
@@ -99,6 +136,7 @@ with col_title:
                 f"SPY {spy_price:.2f} ({sign}{spy_chg:.2f}%) · {spy_time}</span>"
             )
 
+    user_name = st.session_state.get("auth_user", "")
     st.html(
         f"<div style='padding-top:6px'>"
         f"<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:2rem;"
@@ -106,17 +144,22 @@ with col_title:
         f"<div style='font-family:RedRose,sans-serif;font-weight:300;font-size:0.8rem;"
         f"color:#666;text-transform:uppercase;letter-spacing:0.15em;margin-top:2px'>"
         f"Options Trading Dashboard &nbsp;·&nbsp; <span class='{mkt_class}'>{market_status_text()}</span>"
-        f"{ext_badge}</div></div>"
+        f"{ext_badge}"
+        f" &nbsp;·&nbsp; <span style='color:#d4a843'>👤 {user_name}</span>"
+        f"</div></div>"
     )
 
 st.html('<div class="gold-line"></div>')
 
 # ── System-Steuerung ───────────────────────────────────────────────────────────
 with st.expander("⚙️ System", expanded=False):
-    sc1, sc2, sc3, _ = st.columns([2, 2, 2, 6])
+    sc1, sc2, sc3, sc4, _ = st.columns([2, 2, 2, 2, 4])
     with sc1:
         if st.button("🔄 App neu starten", use_container_width=True,
                      help="Startet die App komplett neu — behebt Hänger und Speicherfehler"):
+            user = st.session_state.get("auth_user", "")
+            sid  = st.session_state.get("session_id", "")
+            log_event(user, "logout", sid)
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.cache_data.clear()
@@ -130,15 +173,100 @@ with st.expander("⚙️ System", expanded=False):
         if st.button("🔃 Seite aktualisieren", use_container_width=True,
                      help="Aktualisiert die aktuelle Seite"):
             st.rerun()
+    with sc4:
+        if st.button("🚪 Ausloggen", use_container_width=True,
+                     help="Sitzung beenden"):
+            user = st.session_state.get("auth_user", "")
+            sid  = st.session_state.get("session_id", "")
+            log_event(user, "logout", sid)
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
-st.html("<div style='margin-top:16px'></div>")
+st.html("<div style='margin-top:8px'></div>")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DATEN-PRELOAD — läuft einmal beim ersten Besuch der Startseite
+# ══════════════════════════════════════════════════════════════════════════════
+
+_PRELOAD_KEY = "preload_done"
+_PRELOAD_TICKERS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
+                    "META", "TSLA", "JPM", "V", "JNJ", "UNH", "XOM", "WMT"]
+
+if not st.session_state.get(_PRELOAD_KEY):
+    st.html("""
+<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.9rem;
+            color:#d4a843;letter-spacing:0.08em;margin-bottom:6px'>
+    ⚡ DATENIMPORT — Kerndaten werden vorgeladen
+</div>
+""")
+    progress_bar = st.progress(0.0)
+    status_txt   = st.empty()
+
+    total = len(_PRELOAD_TICKERS)
+    for i, ticker in enumerate(_PRELOAD_TICKERS):
+        pct = i / total
+        progress_bar.progress(pct)
+        status_txt.caption(f"Lade {ticker} … ({i+1}/{total})")
+        try:
+            fetch_price_history(ticker, period="1y")
+            fetch_stock_info(ticker)
+        except Exception:
+            pass
+
+    progress_bar.progress(1.0)
+    status_txt.caption(f"✅ {total} Basiswerte vorgeladen — App bereit")
+    st.session_state[_PRELOAD_KEY] = True
+
+    import time
+    time.sleep(0.8)
+    progress_bar.empty()
+    status_txt.empty()
+
+st.html("<div style='margin-bottom:8px'></div>")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HINTERGRUND-SCAN STATUS — zeigt laufenden Scan auf der Startseite
+# ══════════════════════════════════════════════════════════════════════════════
+_bg = bg_scan.get_state()
+if _bg["running"]:
+    pct  = _bg["progress"]
+    done = _bg["done"]
+    tot  = _bg["total"]
+    cur  = _bg["current"]
+    st.html(f"""
+<div style='background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.3);
+            border-radius:10px;padding:12px 18px;margin-bottom:4px'>
+    <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.85rem;
+                color:#d4a843;margin-bottom:6px'>
+        🔍 WATCHLIST-SCAN LÄUFT IM HINTERGRUND
+    </div>
+    <div style='font-family:RedRose,sans-serif;font-size:0.8rem;color:#888'>
+        Strategie: {_bg['strategy']} &nbsp;·&nbsp;
+        Fortschritt: {done}/{tot} Aktien ({pct*100:.0f}%) &nbsp;·&nbsp;
+        Aktuell: <strong style='color:#f0f0f0'>{cur}</strong>
+        &nbsp;·&nbsp; Seite wechseln ist jederzeit möglich ✓
+    </div>
+</div>
+""")
+    st.progress(pct)
+    # Auto-Refresh alle 3 Sekunden solange Scan läuft
+    import time as _time
+    _time.sleep(3)
+    st.rerun()
+elif _bg["finished_at"] and _bg["results"] is not None:
+    res = _bg["results"]
+    dur = (_bg["finished_at"] - _bg["started_at"]).total_seconds() if _bg["started_at"] else 0
+    n   = len(res)
+    nt  = res["Ticker"].nunique() if "Ticker" in res.columns else 0
+    st.success(
+        f"✅ Letzter Scan abgeschlossen: **{n} Optionen** aus **{nt} Aktien** "
+        f"gefunden · Dauer: {dur:.0f}s · "
+        f"Ergebnisse in **Watchlist Scanner** & **Top 9** verfügbar"
+    )
 
 # ── Karten-Helper ─────────────────────────────────────────────────────────────
-# Jede Karte enthält die Beschreibung + den Link als Footer — kein Abstandsproblem mehr
-
 def _card(num: str, title: str, desc: str, color: str, page: str, icon: str, label: str):
-    """Rendert eine Navigations-Karte mit Link-Footer (nahtlos aneinander)."""
-    # Karte: nur oben abgerundet — unten gerade, damit der Link-Footer direkt anschließt
     st.html(f"""
     <div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid {color};
                 border-bottom:none;border-radius:14px 14px 0 0;padding:20px 22px 14px'>
@@ -154,7 +282,7 @@ def _card(num: str, title: str, desc: str, color: str, page: str, icon: str, lab
     st.page_link(page, label=f"→ {label}", icon=icon)
 
 
-# ── Zeile 1: Marktanalyse + Fundamentalanalyse ───────────────────────────────
+# ── Zeile 1 ───────────────────────────────────────────────────────────────────
 c1, c2 = st.columns(2, gap="large")
 with c1:
     _card("1", "MARKTANALYSE / NEWS",
@@ -165,7 +293,7 @@ with c2:
           "PEG · KGV · Wachstum · ROE — Value Score A/B/C für die gesamte Watchlist",
           "#22c55e", "pages/02_Fundamentalanalyse.py", "💎", "Fundamentalanalyse")
 
-# ── Zeile 2: Aktienanalyse + Watchlist Scanner ────────────────────────────────
+# ── Zeile 2 ───────────────────────────────────────────────────────────────────
 c3, c4 = st.columns(2, gap="large")
 with c3:
     _card("3", "AKTIENANALYSE",
@@ -178,7 +306,7 @@ with c4:
 
 st.html('<div class="gold-line" style="margin:18px 0"></div>')
 
-# ── Zeile 3: Top9 + Zukunftsprognose ─────────────────────────────────────────
+# ── Zeile 3 ───────────────────────────────────────────────────────────────────
 c5, c6 = st.columns(2, gap="large")
 with c5:
     _card("5", "TOP 9 TRADING IDEEN",
@@ -189,7 +317,7 @@ with c6:
           "Welche Aktien nähern sich einem Setup? · Indikator-Proximity · Konvergenz-Score",
           "#60a5fa", "pages/06_Zukunftsprognose.py", "🔭", "Zukunftsprognose")
 
-# ── Zeile 4: Trade Management + Trend Signale ────────────────────────────────
+# ── Zeile 4 ───────────────────────────────────────────────────────────────────
 c7, c8 = st.columns(2, gap="large")
 with c7:
     _card("7", "TRADE MANAGEMENT",
@@ -202,7 +330,7 @@ with c8:
 
 st.html('<div class="gold-line" style="margin:18px 0"></div>')
 
-# ── Zeile 5: Investoren Check + Option Olli ───────────────────────────────────
+# ── Zeile 5 ───────────────────────────────────────────────────────────────────
 c9, c10 = st.columns(2, gap="large")
 with c9:
     _card("9", "INVESTOREN CHECK",
@@ -213,7 +341,7 @@ with c10:
           "KI-Assistent für Optionsstrategien · Persönliches Coaching · Wissens-Upload",
           "#e879f9", "pages/10_Option_Olli_Chat.py", "🤖", "Option Olli Chat")
 
-# ── Zeile 6: Prozess + IBKR ──────────────────────────────────────────────────
+# ── Zeile 6 ───────────────────────────────────────────────────────────────────
 c11, c12 = st.columns(2, gap="large")
 with c11:
     _card("11", "PROZESS",
@@ -224,6 +352,13 @@ with c12:
           "Interactive Brokers Live-Verbindung · Portfolio-Import · Automatische Positionserkennung",
           "#34d399", "pages/12_IBKR_Integration.py", "🔗", "IBKR Integration")
 
+# ── Zeile 7: Rechtliches ─────────────────────────────────────────────────────
+c13, _ = st.columns(2, gap="large")
+with c13:
+    _card("13", "DATENSCHUTZ & RECHTLICHES",
+          "Datenschutzerklärung · Haftungsausschluss · Impressum",
+          "#475569", "pages/13_Rechtliches.py", "⚖️", "Datenschutz & Rechtliches")
+
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.html("""
@@ -231,5 +366,9 @@ st.html("""
             letter-spacing:0.08em'>
     STILLHALTER AI APP · Daten: Yahoo Finance ·
     Stillhalter MACD Pro · Stillhalter Dual Stochastik · Stillhalter Trend Model®
+    &nbsp;·&nbsp;
+    <a href='pages/13_Rechtliches.py' style='color:#444;text-decoration:none'>
+        Datenschutz &amp; Impressum
+    </a>
 </div>
 """)

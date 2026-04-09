@@ -754,8 +754,6 @@ def render_option_mini_chart(
     Kompakter Inline-Chart: Kurshistorie + Options-Overlay.
     Zeigt Profit/Warning/Loss-Zonen, Strike, Break-Even und IV-Kegel.
     """
-    import pandas as pd
-
     df = hist.tail(90) if len(hist) > 90 else hist
     if df.empty:
         fig = go.Figure()
