@@ -230,6 +230,6 @@ st.html("""
 <div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.78rem;color:#333;
             letter-spacing:0.08em'>
     STILLHALTER AI APP · Daten: Yahoo Finance ·
-    MACD Pro (10/35/5) · Dual Stochastik (14,3,3 + 35,10,5) · Stillhalter Trend Model® · RSI (14)
+    Stillhalter MACD Pro · Stillhalter Dual Stochastik · Stillhalter Trend Model®
 </div>
 """)
