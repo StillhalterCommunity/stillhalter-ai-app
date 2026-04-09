@@ -5,6 +5,7 @@ Login-Gate + Daten-Preload + Navigation
 
 import streamlit as st
 import uuid
+from datetime import datetime
 
 st.set_page_config(
     page_title="Stillhalter AI App Dashboard",
@@ -186,59 +187,47 @@ with st.expander("⚙️ System", expanded=False):
 st.html("<div style='margin-top:8px'></div>")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DATEN-PRELOAD — läuft einmal beim ersten Besuch der Startseite
+# DATEN-PRELOAD — läuft parallel im Hintergrund, App bleibt sofort nutzbar
+# Auto-Update alle 15 Minuten
 # ══════════════════════════════════════════════════════════════════════════════
 
-_PRELOAD_KEY = "preload_done"
-# Alle Watchlist-Ticker + Markt-ETFs vorabladen
+import data.preloader as _preloader
 from data.watchlist import ALL_TICKERS
-_PRELOAD_TICKERS = ["SPY", "QQQ", "VIX"] + [t for t in ALL_TICKERS if t not in ("SPY", "QQQ", "VIX")]
 
-if not st.session_state.get(_PRELOAD_KEY):
-    header_ph    = st.empty()
-    progress_bar = st.progress(0.0)
-    status_txt   = st.empty()
+_PRELOAD_TICKERS = ["SPY", "QQQ"] + [t for t in ALL_TICKERS if t not in ("SPY", "QQQ")]
 
-    total = len(_PRELOAD_TICKERS)
-    for i, ticker in enumerate(_PRELOAD_TICKERS):
-        pct      = i / total
-        pct_int  = int(pct * 100)
-        progress_bar.progress(pct)
-        header_ph.html(f"""
+# Preload starten falls nötig (erstes Mal oder älter als 15 Min.)
+if _preloader.needs_update():
+    _preloader.start_preload(_PRELOAD_TICKERS)
+
+# Status anzeigen
+_pl = _preloader.get_state()
+if _pl["running"]:
+    pct_int  = int(_pl["progress"] * 100)
+    done     = _pl["done"]
+    total    = _pl["total"]
+    _pl_hdr  = st.empty()
+    _pl_bar  = st.progress(_pl["progress"])
+    _pl_hdr.html(f"""
 <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.95rem;
             color:#d4a843;letter-spacing:0.08em;margin-bottom:4px'>
     ⚡ DATENIMPORT &nbsp;
     <span style='font-size:1.4rem;color:#f0f0f0'>{pct_int}%</span>
     <span style='font-size:0.75rem;color:#555;font-weight:300;margin-left:8px'>
-        — Kerndaten werden vorgeladen
+        — {done}/{total} Ticker · Du kannst die App bereits nutzen
     </span>
 </div>
 """)
-        status_txt.caption(f"Lade {ticker} … ({i+1}/{total})")
-        try:
-            fetch_price_history(ticker, period="1y")
-            fetch_stock_info(ticker)
-        except Exception:
-            pass
-
-    progress_bar.progress(1.0)
-    header_ph.html("""
-<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.95rem;
-            color:#22c55e;letter-spacing:0.08em;margin-bottom:4px'>
-    ✅ DATENIMPORT &nbsp;
-    <span style='font-size:1.4rem;color:#f0f0f0'>100%</span>
-    <span style='font-size:0.75rem;color:#555;font-weight:300;margin-left:8px'>
-        — App bereit
-    </span>
+    import time as _t; _t.sleep(2); st.rerun()
+elif _pl["last_update"]:
+    _ago = int((datetime.now() - _pl["last_update"]).total_seconds() / 60)
+    _next = max(0, 15 - _ago)
+    st.html(f"""
+<div style='font-family:RedRose,sans-serif;font-size:0.75rem;color:#333;margin-bottom:4px'>
+    ✅ Kerndaten aktuell · zuletzt geladen vor {_ago} Min.
+    · nächstes Update in ~{_next} Min.
 </div>
 """)
-    status_txt.empty()
-    st.session_state[_PRELOAD_KEY] = True
-
-    import time
-    time.sleep(1.0)
-    header_ph.empty()
-    progress_bar.empty()
 
 st.html("<div style='margin-bottom:8px'></div>")
 
