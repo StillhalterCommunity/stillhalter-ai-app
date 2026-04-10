@@ -34,12 +34,12 @@ try:
 except ImportError:
     IBKR_AVAILABLE = False
 
-IB_INSYNC_INSTALLED = False
-try:
-    import ib_insync  # noqa
-    IB_INSYNC_INSTALLED = True
-except ImportError:
-    pass
+def _check_ib_insync() -> bool:
+    """Prüft ob ib_insync installiert ist ohne es zu importieren (vermeidet asyncio-Fehler)."""
+    import importlib.util
+    return importlib.util.find_spec("ib_insync") is not None
+
+IB_INSYNC_INSTALLED = _check_ib_insync()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
