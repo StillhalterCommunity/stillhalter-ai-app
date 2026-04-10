@@ -92,10 +92,52 @@ def bs_price(S: float, K: float, T: float, sigma: float, option_type: str = "put
         return float(K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1))
 
 
+def _solve_iv(price: float, S: float, K: float, T: float,
+              option_type: str = "put", r: float = RISK_FREE_RATE) -> float:
+    """
+    Berechnet Implied Volatility aus dem Marktpreis (Brent-Solver).
+    Gibt 0.30 als Fallback zurück wenn keine Lösung gefunden wird.
+    """
+    if T <= 0 or price <= 0 or S <= 0 or K <= 0:
+        return 0.30
+    intrinsic = max(0.0, K - S) if option_type == "put" else max(0.0, S - K)
+    if price <= intrinsic + 1e-6:
+        return 0.001
+    try:
+        from scipy.optimize import brentq
+        def objective(sigma):
+            return bs_price(S, K, T, sigma, option_type) - price
+        # IV zwischen 0.5% und 500%
+        lo, hi = 0.005, 5.0
+        if objective(lo) * objective(hi) > 0:
+            return 0.30  # kein Vorzeichenwechsel → kein Schnittpunkt
+        return float(brentq(objective, lo, hi, xtol=1e-5, maxiter=100))
+    except Exception:
+        return 0.30
+
+
+def _yahoo_iv_valid(sigma: float, price: float, S: float, K: float, T: float,
+                    option_type: str) -> bool:
+    """
+    Prüft ob Yahoo-IV plausibel ist: BS-Preis mit dieser IV muss innerhalb
+    50% des echten Preises liegen. Yahoo liefert oft Placeholder-IVs (0.03, 0.06...).
+    """
+    if sigma <= 0.01 or sigma > 4.0 or price <= 0 or T <= 0:
+        return False
+    try:
+        theo = bs_price(S, K, T, sigma, option_type)
+        return abs(theo - price) / max(price, 0.01) < 0.50
+    except Exception:
+        return False
+
+
 def enrich_options_with_greeks(df, current_price: float, option_type: str = "put") -> object:
     """
     Ergänzt einen Options-DataFrame um berechnete Greeks.
-    Nutzt IV aus yfinance falls vorhanden.
+    IV-Strategie:
+      1. Yahoo-IV verwenden wenn plausibel (BS-Preis ≈ Marktpreis ± 50%)
+      2. Sonst: IV aus mid_price / lastPrice zurückrechnen (IV-Solver)
+      3. Fallback: 0.30 (30%)
     """
     import pandas as pd
 
@@ -109,27 +151,37 @@ def enrich_options_with_greeks(df, current_price: float, option_type: str = "put
     df["dte"] = df["expiration"].apply(calculate_dte)
     df["T"] = df["dte"] / 365.0
 
-    # IV aus yfinance (als Dezimalzahl)
     iv_col = "impliedVolatility" if "impliedVolatility" in df.columns else None
-
-    deltas, thetas, gammas, vegas = [], [], [], []
+    deltas, thetas, gammas, vegas, ivs_used = [], [], [], [], []
 
     for _, row in df.iterrows():
         K = float(row.get("strike", 0))
         T = float(row.get("T", 0))
-        sigma = float(row.get("impliedVolatility", 0.30)) if iv_col else 0.30
+        yahoo_iv = float(row.get("impliedVolatility", 0.0)) if iv_col else 0.0
 
-        if sigma <= 0 or sigma > 5:
-            sigma = 0.30  # Fallback bei ungültiger IV
+        # Marktpreis für IV-Solver (mid_price bevorzugt, dann lastPrice)
+        mkt_price = float(row.get("mid_price", 0.0) or row.get("lastPrice", 0.0))
+
+        # IV bestimmen
+        if _yahoo_iv_valid(yahoo_iv, mkt_price, current_price, K, T, option_type):
+            sigma = yahoo_iv          # Yahoo-IV ist plausibel
+        elif mkt_price > 0 and T > 0:
+            sigma = _solve_iv(mkt_price, current_price, K, T, option_type)
+        else:
+            sigma = 0.30              # letzter Fallback
+
+        sigma = max(0.01, min(sigma, 4.0))  # Clip
 
         deltas.append(bs_delta(current_price, K, T, sigma, option_type))
         thetas.append(bs_theta(current_price, K, T, sigma, option_type))
         gammas.append(bs_gamma(current_price, K, T, sigma))
         vegas.append(bs_vega(current_price, K, T, sigma))
+        ivs_used.append(sigma)
 
     df["delta"] = deltas
     df["theta"] = thetas
     df["gamma"] = gammas
     df["vega"] = vegas
+    df["iv_used"] = ivs_used   # tatsächlich verwendete IV (für Debugging)
 
     return df

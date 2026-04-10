@@ -357,11 +357,18 @@ def scan_ticker(
         if "impliedVolatility" in df.columns:
             mask &= df["impliedVolatility"].fillna(0) >= iv_min
 
-        # ── Liquiditäts-Filter (Kernfix) ───────────────────────────────────────
-        # Wenn require_valid_market=True: NUR Optionen mit echtem Bid/Ask zeigen
-        # → verhindert falsche Rendite-Berechnungen auf Basis von lastPrice
-        if require_valid_market:
+        # ── Liquiditäts-Filter ────────────────────────────────────────────────
+        # Auto-Fallback: wenn Yahoo Finance kaum Bid/Ask liefert (<20%), auf lastPrice
+        # zurückfallen — passiert regelmäßig auch während Marktzeiten.
+        bid_ask_rate = df["_has_market"].mean() if len(df) > 0 else 0.0
+        sparse_market = bid_ask_rate < 0.20
+
+        if require_valid_market and not sparse_market:
+            # Normalmodus: nur echte Bid/Ask-Optionen
             mask &= df["_has_market"]
+        elif require_valid_market and sparse_market:
+            # Fallback: lastPrice akzeptieren, aber mindestens > 0
+            mask &= (df["_has_market"] | (df["lastPrice"] > 0))
 
         # Spread-Filter (nur auf Optionen mit echtem Markt anwenden)
         if max_spread_pct < 999.0:
