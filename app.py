@@ -358,12 +358,23 @@ with c12:
           "Interactive Brokers Live-Verbindung · Portfolio-Import · Automatische Positionserkennung",
           "#34d399", "pages/12_IBKR_Integration.py", "🔗", "IBKR Integration")
 
-# ── Zeile 7: Rechtliches ─────────────────────────────────────────────────────
-c13, _ = st.columns(2, gap="large")
+# ── Zeile 7 ───────────────────────────────────────────────────────────────────
+c13, c14 = st.columns(2, gap="large")
 with c13:
     _card("13", "DATENSCHUTZ & RECHTLICHES",
           "Datenschutzerklärung · Haftungsausschluss · Impressum",
           "#475569", "pages/13_Rechtliches.py", "⚖️", "Datenschutz & Rechtliches")
+with c14:
+    _card("14", "ORDER-PLANUNG",
+          "Orders direkt in IBKR TWS platzieren · Held-Order Workflow · Freigabe in TWS",
+          "#22c55e", "pages/14_Order_Planung.py", "📋", "Order-Planung")
+
+# ── Zeile 8 ───────────────────────────────────────────────────────────────────
+c15, _ = st.columns(2, gap="large")
+with c15:
+    _card("15", "DATENQUELLEN",
+          "Yahoo Finance vs. Massive.com · API-Konfiguration · Verbindungstest",
+          "#3b82f6", "pages/15_Datenquellen.py", "📡", "Datenquellen")
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
