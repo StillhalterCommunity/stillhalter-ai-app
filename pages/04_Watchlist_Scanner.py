@@ -360,6 +360,11 @@ st.info(
     f"· Dauer: **~{mins}–{maxs} Min.**{tech_filter_note}{strat_note} · {price_mode_str}"
 )
 
+# ── Session State früh initialisieren (vor Hintergrund-Scan-Check) ───────────
+for _k in ["scan_results", "scan_meta", "tf_results"]:
+    if _k not in st.session_state:
+        st.session_state[_k] = None
+
 # ── Hintergrund-Scan Status anzeigen ─────────────────────────────────────────
 import data.background_scan as bg_scan
 _bg = bg_scan.get_state()
@@ -434,10 +439,7 @@ start_scan = start_scan_fg
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
-# ── Session State ─────────────────────────────────────────────────────────────
-for k in ["scan_results", "scan_meta", "tf_results"]:
-    if k not in st.session_state:
-        st.session_state[k] = None
+# (Session State bereits oben initialisiert)
 
 # ── Scan ausführen ────────────────────────────────────────────────────────────
 if start_scan:
