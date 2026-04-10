@@ -165,6 +165,30 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
 # ══════════════════════════════════════════════════════════════════════════════
 # ORDER EINGABE
 # ══════════════════════════════════════════════════════════════════════════════
+
+# ── Prefill aus Scanner auslesen ──────────────────────────────────────────────
+_pf = st.session_state.pop("order_prefill", None)  # einmalig lesen & löschen
+
+if _pf:
+    _pf_strategy = "Short Call" if _pf.get("right") == "C" else "Short Put"
+    # Strangle erkennen (kommt nur wenn Scanner Strangle-Strategie aktiv hatte)
+    if "Strangle" in str(_pf.get("strategy", "")):
+        _pf_strategy = "Short Strangle"
+    st.html(f"""
+<div style='background:#0a0e12;border:1px solid #3b82f6;border-radius:10px;
+     padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px'>
+  <span style='font-size:1.3rem'>📥</span>
+  <div style='font-size:0.82rem;color:#93c5fd;font-family:sans-serif'>
+    <b>Aus Watchlist Scanner übernommen:</b>
+    {_pf.get("ticker")} · Strike ${_pf.get("strike", 0):.2f} ·
+    Prämie ${_pf.get("premium", 0):.2f} · DTE {_pf.get("dte", 0)} ·
+    Delta {_pf.get("delta", 0):.2f}
+  </div>
+</div>
+""")
+else:
+    _pf_strategy = "Short Put"
+
 st.html("""
 <div style='font-size:1.05rem;font-weight:700;color:#f0f0f0;font-family:sans-serif;
      margin:20px 0 12px'>
@@ -173,27 +197,48 @@ st.html("""
 """)
 
 # Strategie-Auswahl
+_strategy_options = ["Short Put", "Short Call", "Short Strangle", "Short Put Spread", "Short Call Spread"]
 strategy = st.segmented_control(
     "Strategie",
-    ["Short Put", "Short Call", "Short Strangle", "Short Put Spread", "Short Call Spread"],
-    default="Short Put",
+    _strategy_options,
+    default=_pf_strategy if _pf_strategy in _strategy_options else "Short Put",
 )
 
 st.markdown("")
 
+# ── Prefill-Werte für Felder ──────────────────────────────────────────────────
+_default_ticker  = _pf.get("ticker", "AAPL")      if _pf else "AAPL"
+_default_qty     = int(_pf.get("quantity", 1))     if _pf else 1
+_default_lmt_put = float(_pf.get("limit_price", 1.50)) if _pf and _pf.get("right") != "C" else 1.50
+_default_lmt_call= float(_pf.get("limit_price", 1.20)) if _pf and _pf.get("right") == "C" else 1.20
+_default_strike_put  = float(_pf.get("strike", 185.0)) if _pf and _pf.get("right") != "C" else 185.0
+_default_strike_call = float(_pf.get("strike", 210.0)) if _pf and _pf.get("right") == "C" else 210.0
+
+# Expiry parsen
+_default_expiry = date.today().replace(day=20)
+if _pf and _pf.get("expiration"):
+    try:
+        _exp_str = str(_pf["expiration"])
+        if len(_exp_str) == 10:   # YYYY-MM-DD
+            _default_expiry = date.fromisoformat(_exp_str)
+        elif len(_exp_str) == 8:  # YYYYMMDD
+            _default_expiry = date(int(_exp_str[:4]), int(_exp_str[4:6]), int(_exp_str[6:]))
+    except Exception:
+        pass
+
 # ── Gemeinsame Felder ─────────────────────────────────────────────────────────
 col_a, col_b, col_c, col_d = st.columns([2, 1, 1, 1])
 with col_a:
-    ticker = st.text_input("Ticker", value="AAPL", max_chars=10).upper().strip()
+    ticker = st.text_input("Ticker", value=_default_ticker, max_chars=10).upper().strip()
 with col_b:
     expiry_date = st.date_input(
         "Verfall",
-        value=date.today().replace(day=20),
+        value=_default_expiry,
         min_value=date.today(),
         format="DD.MM.YYYY",
     )
 with col_c:
-    quantity = st.number_input("Kontrakte", min_value=1, max_value=100, value=1, step=1)
+    quantity = st.number_input("Kontrakte", min_value=1, max_value=100, value=_default_qty, step=1)
 with col_d:
     order_type = st.selectbox("Order-Typ", ["LMT", "MKT"])
 
@@ -223,17 +268,17 @@ def _leg_inputs(label: str, right: str, default_strike: float = 190.0,
 
 
 if strategy == "Short Put":
-    put_strike, put_lmt = _leg_inputs("Short Put", "P", 185.0, 1.50)
+    put_strike, put_lmt = _leg_inputs("Short Put", "P", _default_strike_put, _default_lmt_put)
 
 elif strategy == "Short Call":
-    call_strike, call_lmt = _leg_inputs("Short Call", "C", 210.0, 1.20)
+    call_strike, call_lmt = _leg_inputs("Short Call", "C", _default_strike_call, _default_lmt_call)
 
 elif strategy == "Short Strangle":
     scol1, scol2 = st.columns(2)
     with scol1:
-        put_strike, put_lmt = _leg_inputs("Short Put", "P", 185.0, 1.50)
+        put_strike, put_lmt = _leg_inputs("Short Put", "P", _default_strike_put, _default_lmt_put)
     with scol2:
-        call_strike, call_lmt = _leg_inputs("Short Call", "C", 215.0, 1.20)
+        call_strike, call_lmt = _leg_inputs("Short Call", "C", _default_strike_call, _default_lmt_call)
 
 elif strategy == "Short Put Spread":
     scol1, scol2 = st.columns(2)

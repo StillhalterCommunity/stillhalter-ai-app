@@ -1007,6 +1007,62 @@ else:
                         st.plotly_chart(fig_pay, use_container_width=True,
                                         config={"displayModeBar": False})
 
+                    # ── Trade-Button ──────────────────────────────────────
+                    _delta_val = float(_r.get("Delta", 0) or 0)
+                    _expiry_raw = str(_r.get("Verfall", "") or "")
+                    _strategy_raw = meta.get("strategy", scan_strategy)
+
+                    st.html("""
+<div style='background:#0a0e0a;border:1px solid #22c55e;border-radius:10px;
+     padding:14px 16px;margin-top:8px'>
+  <div style='font-size:0.82rem;font-weight:700;color:#22c55e;margin-bottom:8px'>
+    📋 Order vorbereiten
+  </div>
+""")
+                    st.caption(
+                        f"**{_tkr}** · Strike ${_strike:.2f} · "
+                        f"Delta {_delta_val:.2f} · Prämie ${_premium:.2f} · DTE {_dte}"
+                    )
+
+                    # Limit-Preis vorschlag: 90% des Mid-Price (konservativ)
+                    _suggested_lmt = round(_premium * 0.90, 2)
+                    _lmt_input = st.number_input(
+                        "Limit-Preis $", min_value=0.01,
+                        value=max(0.01, _suggested_lmt),
+                        step=0.05, format="%.2f",
+                        key=f"lmt_quick_{_tkr}_{_strike}",
+                        help="Vorschlag: 90% des Midpoints — anpassen nach Marktlage",
+                    )
+                    _qty_input = st.number_input(
+                        "Kontrakte", min_value=1, max_value=100,
+                        value=1, step=1,
+                        key=f"qty_quick_{_tkr}_{_strike}",
+                    )
+
+                    if st.button(
+                        "📋 In Order-Planung öffnen",
+                        key=f"trade_btn_{_tkr}_{_strike}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        # Werte in Session State schreiben → Seite 14 liest sie aus
+                        st.session_state["order_prefill"] = {
+                            "ticker":       _tkr,
+                            "expiration":   _expiry_raw,
+                            "strike":       _strike,
+                            "right":        "C" if _is_call else "P",
+                            "action":       "SELL",
+                            "quantity":     _qty_input,
+                            "limit_price":  _lmt_input,
+                            "strategy":     _strategy_raw,
+                            "premium":      _premium,
+                            "delta":        _delta_val,
+                            "dte":          _dte,
+                        }
+                        st.switch_page("pages/14_Order_Planung.py")
+
+                    st.html("</div>")
+
     # ── Export ─────────────────────────────────────────────────────────────
     ex1, ex2 = st.columns([2, 10])
     with ex1:
