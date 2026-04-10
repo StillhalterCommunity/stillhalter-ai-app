@@ -1,6 +1,14 @@
 """
 Yahoo Finance Daten-Fetcher mit Caching.
 Holt Options Chains, Kurshistorie, Stock-Info, Fundamentaldaten, News.
+
+Datenquelle wählen:
+  USE_MASSIVE = False  → Yahoo Finance (kostenlos, 15 Min verzögert, IV-Workarounds nötig)
+  USE_MASSIVE = True   → Massive.com / Polygon.io (Echtzeit, echte Greeks, API-Key nötig)
+
+API-Key setzen:
+  Streamlit Secrets: MASSIVE_API_KEY = "dein_key"
+  Oder Umgebungsvariable: export MASSIVE_API_KEY=dein_key
 """
 
 import yfinance as yf
@@ -10,6 +18,20 @@ import streamlit as st
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import pytz
+
+# ── Datenquelle ───────────────────────────────────────────────────────────────
+# Auf True setzen sobald MASSIVE_API_KEY konfiguriert ist
+USE_MASSIVE: bool = False
+
+def _massive_enabled() -> bool:
+    """True wenn Massive.com als Datenquelle aktiv und API-Key vorhanden."""
+    if not USE_MASSIVE:
+        return False
+    try:
+        from data.massive_fetcher import is_api_key_configured
+        return is_api_key_configured()
+    except ImportError:
+        return False
 
 
 # ── Marktzeiten ──────────────────────────────────────────────────────────────
@@ -256,6 +278,52 @@ def fetch_fundamentals(ticker: str) -> dict:
 
 # ── Options Chain ─────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_options_chain_massive(
+    ticker: str,
+    dte_min: int = 0,
+    dte_max: int = 120,
+    max_expiries: int = 6,
+) -> tuple:
+    """
+    Holt Options Chain von Massive.com/Polygon.io.
+    Gibt zurück: (puts_df, calls_df, expirations_list)
+    Greeks sind direkt enthalten — kein enrich_options_with_greeks() nötig.
+    """
+    from data.massive_fetcher import get_available_expirations, get_options_chain
+
+    try:
+        expirations = get_available_expirations(ticker)
+        if not expirations:
+            return pd.DataFrame(), pd.DataFrame(), []
+
+        today = datetime.today().date()
+        relevant = [
+            exp for exp in expirations
+            if dte_min <= (datetime.strptime(exp, "%Y-%m-%d").date() - today).days <= dte_max
+        ][:max_expiries] or expirations[:max_expiries]
+
+        all_puts, all_calls = [], []
+        for exp in relevant:
+            puts = get_options_chain(ticker, exp, "put")
+            if not puts.empty:
+                puts["option_type"] = "put"
+                all_puts.append(puts)
+            calls = get_options_chain(ticker, exp, "call")
+            if not calls.empty:
+                calls["option_type"] = "call"
+                all_calls.append(calls)
+
+        puts_df  = pd.concat(all_puts,  ignore_index=True) if all_puts  else pd.DataFrame()
+        calls_df = pd.concat(all_calls, ignore_index=True) if all_calls else pd.DataFrame()
+        return puts_df, calls_df, relevant
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Massive options chain(%s): %s", ticker, e)
+        return pd.DataFrame(), pd.DataFrame(), []
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_options_chain(
     ticker: str,
@@ -267,10 +335,12 @@ def fetch_options_chain(
     Holt Options Chain — nur relevante Verfallsdaten im DTE-Fenster.
     Gibt zurück: (puts_df, calls_df, expirations_list)
 
-    Optimierung: Statt alle 15-20 Verfallsdaten zu laden, werden nur
-    die Dates im DTE-Bereich geholt (max max_expiries). Das spart
-    70-80% der API-Calls und macht den Scan 4-6x schneller.
+    Nutzt Massive.com wenn USE_MASSIVE=True und API-Key gesetzt,
+    sonst Yahoo Finance als Fallback.
     """
+    if _massive_enabled():
+        return fetch_options_chain_massive(ticker, dte_min, dte_max, max_expiries)
+
     try:
         stock = yf.Ticker(ticker)
         expirations = stock.options          # Liste aller verfügbaren Verfallsdaten
@@ -358,9 +428,19 @@ def _fix_off_hours_prices(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_batch_prices_massive(tickers: tuple) -> Dict[str, Optional[float]]:
+    """Holt Echtzeit-Kurse von Massive.com für mehrere Ticker."""
+    from data.massive_fetcher import get_current_price
+    return {t: get_current_price(t) for t in tickers}
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_batch_prices(tickers: tuple) -> Dict[str, Optional[float]]:
-    """Holt aktuelle Kurse für mehrere Ticker auf einmal."""
+    """Holt aktuelle Kurse für mehrere Ticker auf einmal.
+    Nutzt Massive.com wenn konfiguriert, sonst Yahoo Finance."""
+    if _massive_enabled():
+        return _fetch_batch_prices_massive(tickers)
     try:
         data = yf.download(list(tickers), period="2d", progress=False, auto_adjust=True)
         prices = {}
