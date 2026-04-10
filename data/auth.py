@@ -15,6 +15,7 @@ from datetime import datetime
 USERS: dict[str, str] = {
     # ── Admin ──────────────────────────────────────────────────────────────────
     "Oliver-Sth-00":    "Oliver Riebartsch",
+    "1111":             "Oliver Riebartsch",   # Schnell-Login (nur lokal testen)
 
     # ── Beta-Tester ───────────────────────────────────────────────────────────
     "Stefan-Sth-01":    "Stefan Zenkel",
