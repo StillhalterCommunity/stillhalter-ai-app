@@ -10,7 +10,7 @@ import pandas as pd
 import yfinance as yf
 import streamlit as st
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 
 # ── Stillhalter Trend Model — Modi ────────────────────────────────────────────
@@ -210,6 +210,27 @@ class TFSignal:
     ema_cross_bullish: bool = False   # Kaufsignal (Cross aufwärts)
     ema_cross_bearish: bool = False   # Verkaufssignal (Cross abwärts)
 
+    # ── Neue Umkehrindikatoren ─────────────────────────────────────────────
+    # Preisdivergenz (RSI / MACD vs. Preis)
+    div_bull_rsi: bool = False        # Bullische RSI-Divergenz (Preis ↓ aber RSI ↑)
+    div_bear_rsi: bool = False        # Bärische RSI-Divergenz (Preis ↑ aber RSI ↓)
+    div_bull_macd: bool = False       # Bullische MACD-Histogramm-Divergenz
+    div_bear_macd: bool = False       # Bärische MACD-Histogramm-Divergenz
+    div_strength: float = 0.0         # Stärke der Divergenz (0-100)
+
+    # Volatilitäts-Squeeze (Bollinger Bands inside Keltner Channels)
+    squeeze_active: bool = False      # BB innerhalb KC = Kompression
+    squeeze_release_bull: bool = False # Squeeze löst sich auf mit bullischem Momentum
+    squeeze_release_bear: bool = False # Squeeze löst sich auf mit bärischem Momentum
+    squeeze_momentum: float = 0.0     # Momentum-Wert im Squeeze (pos=bull, neg=bear)
+
+    # Volumen-Kapitulation (OBV-Divergenz + Klimax-Volumen)
+    obv_bull_div: bool = False        # OBV steigt während Preis fällt (Akkumulation)
+    obv_bear_div: bool = False        # OBV fällt während Preis steigt (Distribution)
+    vol_climax_bull: bool = False     # Volumenspike an Tiefpunkt (Kapitulation nach unten)
+    vol_climax_bear: bool = False     # Volumenspike an Hochpunkt (Kapitulation nach oben)
+    vol_z_score: float = 0.0          # Volumen Z-Score (>2.0 = Klimax)
+
     # Gesamt-Richtung
     direction: str = "neutral"       # "bullish" | "bearish" | "neutral"
     score: float = 0.0               # 0-100
@@ -277,6 +298,164 @@ def _resample_to_4h(df_1h: pd.DataFrame) -> pd.DataFrame:
         "Close": "last", "Volume": "sum"
     }).dropna()
     return resampled
+
+
+def _find_swing_lows(series: pd.Series, lookback: int = 5, n: int = 3) -> List[Tuple[int, float]]:
+    """Findet die letzten N Swing-Tiefs (lokale Minima)."""
+    vals = series.dropna().values
+    result = []
+    for i in range(lookback, len(vals) - lookback):
+        window = vals[i - lookback: i + lookback + 1]
+        if vals[i] == min(window):
+            result.append((i, vals[i]))
+    return result[-n:] if result else []
+
+
+def _find_swing_highs(series: pd.Series, lookback: int = 5, n: int = 3) -> List[Tuple[int, float]]:
+    """Findet die letzten N Swing-Hochs (lokale Maxima)."""
+    vals = series.dropna().values
+    result = []
+    for i in range(lookback, len(vals) - lookback):
+        window = vals[i - lookback: i + lookback + 1]
+        if vals[i] == max(window):
+            result.append((i, vals[i]))
+    return result[-n:] if result else []
+
+
+def _calc_divergence(close: pd.Series, indicator: pd.Series,
+                     lookback: int = 5) -> Tuple[bool, bool, float]:
+    """
+    Erkennt bullische / bärische Divergenz zwischen Preis und Indikator.
+    Gibt zurück: (bull_div, bear_div, strength 0-100)
+    """
+    if len(close) < 20 or len(indicator) < 20:
+        return False, False, 0.0
+    try:
+        price_lows  = _find_swing_lows(close, lookback, 3)
+        price_highs = _find_swing_highs(close, lookback, 3)
+        ind_clean   = indicator.dropna().reset_index(drop=True)
+
+        bull_div = False
+        bear_div = False
+        strength = 0.0
+
+        # Bullische Divergenz: Preis tieferes Tief, Indikator höheres Tief
+        if len(price_lows) >= 2:
+            (i1, p1), (i2, p2) = price_lows[-2], price_lows[-1]
+            if p2 < p1 and i2 < len(ind_clean) and i1 < len(ind_clean):
+                ind1, ind2 = ind_clean.iloc[i1], ind_clean.iloc[i2]
+                if ind2 > ind1:  # Indikator macht höheres Tief
+                    bull_div = True
+                    price_drop = (p1 - p2) / max(abs(p1), 1e-6)
+                    ind_rise   = (ind2 - ind1) / max(abs(ind1), 1e-6)
+                    strength   = min(100, (price_drop + ind_rise) * 200)
+
+        # Bärische Divergenz: Preis höheres Hoch, Indikator niedrigeres Hoch
+        if len(price_highs) >= 2:
+            (j1, h1), (j2, h2) = price_highs[-2], price_highs[-1]
+            if h2 > h1 and j2 < len(ind_clean) and j1 < len(ind_clean):
+                ind1, ind2 = ind_clean.iloc[j1], ind_clean.iloc[j2]
+                if ind2 < ind1:  # Indikator macht niedrigeres Hoch
+                    bear_div = True
+                    price_rise = (h2 - h1) / max(abs(h1), 1e-6)
+                    ind_drop   = (ind1 - ind2) / max(abs(ind1), 1e-6)
+                    strength   = min(100, (price_rise + ind_drop) * 200)
+
+        return bull_div, bear_div, round(strength, 1)
+    except Exception:
+        return False, False, 0.0
+
+
+def _calc_squeeze(close: pd.Series, high: pd.Series, low: pd.Series,
+                  bb_period: int = 20, bb_mult: float = 2.0,
+                  kc_period: int = 20, kc_mult: float = 1.5) -> Tuple[bool, bool, bool, float]:
+    """
+    TTM Squeeze: Bollinger Bands inside Keltner Channels.
+    Gibt zurück: (squeeze_active, release_bull, release_bear, momentum)
+    """
+    if len(close) < max(bb_period, kc_period) + 5:
+        return False, False, False, 0.0
+    try:
+        # Bollinger Bands
+        bb_mid   = close.rolling(bb_period).mean()
+        bb_std   = close.rolling(bb_period).std()
+        bb_upper = bb_mid + bb_mult * bb_std
+        bb_lower = bb_mid - bb_mult * bb_std
+
+        # Keltner Channels (ATR-basiert)
+        tr = pd.concat([
+            high - low,
+            (high - close.shift(1)).abs(),
+            (low  - close.shift(1)).abs(),
+        ], axis=1).max(axis=1)
+        kc_mid   = close.ewm(span=kc_period, adjust=False).mean()
+        kc_atr   = tr.ewm(span=kc_period, adjust=False).mean()
+        kc_upper = kc_mid + kc_mult * kc_atr
+        kc_lower = kc_mid - kc_mult * kc_atr
+
+        # Squeeze: BB innerhalb KC
+        in_squeeze  = (bb_upper < kc_upper) & (bb_lower > kc_lower)
+        curr_squeeze = bool(in_squeeze.iloc[-1])
+
+        # Momentum: lineare Regression der Close-Preise (letzten bb_period Kerzen)
+        y = close.iloc[-bb_period:].values
+        x = np.arange(len(y))
+        slope = float(np.polyfit(x, y, 1)[0]) if len(y) >= 2 else 0.0
+        # Normalisierung
+        price_scale = float(close.iloc[-1]) or 1.0
+        momentum = slope / price_scale * 100  # in % pro Kerze
+
+        # War vorher im Squeeze, jetzt nicht mehr → Release
+        prev_squeeze = bool(in_squeeze.iloc[-2]) if len(in_squeeze) > 1 else curr_squeeze
+        release = prev_squeeze and not curr_squeeze
+        release_bull = release and momentum > 0
+        release_bear = release and momentum < 0
+
+        return curr_squeeze, release_bull, release_bear, round(momentum, 4)
+    except Exception:
+        return False, False, False, 0.0
+
+
+def _calc_obv_volume(close: pd.Series, volume: pd.Series,
+                     lookback: int = 20) -> Tuple[bool, bool, bool, bool, float]:
+    """
+    OBV-Divergenz + Klimax-Volumen.
+    Gibt zurück: (obv_bull_div, obv_bear_div, vol_climax_bull, vol_climax_bear, vol_z_score)
+    """
+    if len(close) < lookback + 5 or len(volume) < lookback + 5:
+        return False, False, False, False, 0.0
+    try:
+        # OBV berechnen
+        direction = np.sign(close.diff().fillna(0))
+        obv = (direction * volume).cumsum()
+
+        # OBV-Divergenz (Preis vs. OBV Trend der letzten lookback Kerzen)
+        close_vals = close.iloc[-lookback:].values
+        obv_vals   = obv.iloc[-lookback:].values
+        x = np.arange(lookback)
+        close_slope = float(np.polyfit(x, close_vals, 1)[0])
+        obv_slope   = float(np.polyfit(x, obv_vals,   1)[0])
+
+        obv_bull_div = close_slope < 0 and obv_slope > 0   # Preis fällt, OBV steigt
+        obv_bear_div = close_slope > 0 and obv_slope < 0   # Preis steigt, OBV fällt
+
+        # Volumen Z-Score (aktuelle Kerze vs. Durchschnitt)
+        vol_mean = float(volume.iloc[-lookback:].mean())
+        vol_std  = float(volume.iloc[-lookback:].std()) or 1.0
+        vol_curr = float(volume.iloc[-1])
+        z = (vol_curr - vol_mean) / vol_std
+
+        # Klimax-Volumen an Extremen (Preis nahe Swing-Hoch/-Tief)
+        close_arr   = close.iloc[-lookback:].values
+        price_range = max(close_arr) - min(close_arr)
+        rel_pos     = (float(close.iloc[-1]) - min(close_arr)) / max(price_range, 1e-6)
+
+        vol_climax_bull = z > 2.0 and rel_pos < 0.2   # Klimax-Volumen nahe Tief
+        vol_climax_bear = z > 2.0 and rel_pos > 0.8   # Klimax-Volumen nahe Hoch
+
+        return obv_bull_div, obv_bear_div, vol_climax_bull, vol_climax_bear, round(z, 2)
+    except Exception:
+        return False, False, False, False, 0.0
 
 
 # ── Single TF Analysis ────────────────────────────────────────────────────────
@@ -362,6 +541,41 @@ def _analyze_tf(df: pd.DataFrame, tf_name: str, lookback: int = 3,
     sig.ema_bearish = sig.ema2 < sig.ema9
     sig.ema_cross_bullish = line_crossed_above(ema2, ema9, lookback)
     sig.ema_cross_bearish = line_crossed_below(ema2, ema9, lookback)
+
+    # ── Preisdivergenz (RSI & MACD vs. Preis) ──────────────────────────────
+    try:
+        bull_div_rsi,  bear_div_rsi,  str_rsi  = _calc_divergence(close, rsi,  lookback)
+        bull_div_macd, bear_div_macd, str_macd = _calc_divergence(close, hist, lookback)
+        sig.div_bull_rsi  = bull_div_rsi
+        sig.div_bear_rsi  = bear_div_rsi
+        sig.div_bull_macd = bull_div_macd
+        sig.div_bear_macd = bear_div_macd
+        sig.div_strength  = round((str_rsi + str_macd) / 2, 1)
+    except Exception:
+        pass
+
+    # ── Volatilitäts-Squeeze ──────────────────────────────────────────────
+    try:
+        sq_active, sq_bull, sq_bear, sq_mom = _calc_squeeze(close, high, low)
+        sig.squeeze_active       = sq_active
+        sig.squeeze_release_bull = sq_bull
+        sig.squeeze_release_bear = sq_bear
+        sig.squeeze_momentum     = sq_mom
+    except Exception:
+        pass
+
+    # ── Volumen-Kapitulation ──────────────────────────────────────────────
+    if "Volume" in df.columns:
+        try:
+            volume = df["Volume"]
+            obv_bd, obv_brd, vc_bull, vc_bear, vz = _calc_obv_volume(close, volume)
+            sig.obv_bull_div    = obv_bd
+            sig.obv_bear_div    = obv_brd
+            sig.vol_climax_bull = vc_bull
+            sig.vol_climax_bear = vc_bear
+            sig.vol_z_score     = vz
+        except Exception:
+            pass
 
     # ── Gesamt-Score ─────────────────────────────────────────────────────
     bull_pts = sum([
@@ -507,9 +721,10 @@ def analyze_multi_timeframe(ticker: str, lookback: int = 3,
 @dataclass
 class ConvergenceResult:
     """
-    Misst wie nah ein Ticker an einer idealen Konvergenz aller Indikatoren ist.
+    Misst wie nah ein Ticker an einer idealen Konvergenz aller 7 Indikatoren ist.
     Short Put:  Stoch kreuzt 20↑ · RSI kreuzt 30↑ · EMA2 kreuzt EMA9↑ · MACD hist neg→pos
-    Short Call: Stoch kreuzt 80↓ · RSI kreuzt 70↓ · EMA2 kreuzt EMA9↓ · MACD hist pos→neg
+                + Marktstruktur-Analyse · Volatilitätskompression · Volumendynamik
+    Short Call: Umgekehrt
     """
     strategy: str = "put"          # "put" | "call"
 
@@ -517,18 +732,6 @@ class ConvergenceResult:
     score: float = 0.0
     score_1d: float = 0.0
     score_4h: float = 0.0
-
-    # Teilscores 1D
-    stoch_1d: float = 0.0
-    rsi_1d: float = 0.0
-    ema_1d: float = 0.0
-    macd_1d: float = 0.0
-
-    # Teilscores 4H
-    stoch_4h: float = 0.0
-    rsi_4h: float = 0.0
-    ema_4h: float = 0.0
-    macd_4h: float = 0.0
 
     label: str = "–"               # "Perfekt" | "Sehr nah" | "Nah" | "Entfernt"
     bar: str = ""                  # visueller Balken "████░░░░░░"
@@ -594,10 +797,44 @@ def _proximity_put(tf: TFSignal) -> dict:
     else:
         macd_s = 20
 
+    # ── Preisdivergenz (bullisch = gut für Short Put) ──────────────────────
+    if tf.div_bull_rsi and tf.div_bull_macd:
+        div_s = min(100, 60 + tf.div_strength * 0.4)
+    elif tf.div_bull_rsi or tf.div_bull_macd:
+        div_s = min(100, 40 + tf.div_strength * 0.3)
+    elif tf.div_bear_rsi or tf.div_bear_macd:
+        div_s = 10   # falsche Richtung
+    else:
+        div_s = 25   # neutral
+
+    # ── Squeeze (aktiver Squeeze + bullisches Release) ─────────────────────
+    if tf.squeeze_release_bull:
+        sq_s = 100
+    elif tf.squeeze_active and tf.squeeze_momentum > 0:
+        sq_s = 75     # Squeeze aktiv, Momentum bullisch (Ausbruch erwartet)
+    elif tf.squeeze_active:
+        sq_s = 50     # Squeeze aktiv, Richtung unklar
+    elif tf.squeeze_release_bear:
+        sq_s = 5
+    else:
+        sq_s = 20
+
+    # ── Volumen-Kapitulation (bullisch) ────────────────────────────────────
+    if tf.vol_climax_bull:
+        vol_s = 100   # Kapitulationsvolumen an Tief = starkes Kaufsignal
+    elif tf.obv_bull_div:
+        vol_s = 75    # OBV steigt trotz fallendem Preis
+    elif tf.vol_climax_bear or tf.obv_bear_div:
+        vol_s = 10    # falsche Richtung
+    else:
+        vol_s = 30
+
     return {
-        "stoch": stoch_s, "rsi": rsi_s,
-        "ema": ema_s,     "macd": macd_s,
-        "total": (stoch_s + rsi_s + ema_s + macd_s) / 4,
+        "stoch": stoch_s, "rsi": rsi_s, "ema": ema_s, "macd": macd_s,
+        "div": div_s, "squeeze": sq_s, "volume": vol_s,
+        # Gewichtung: klassische 4 = 55%, neue 3 = 45%
+        "total": (stoch_s * 0.15 + rsi_s * 0.15 + ema_s * 0.13 + macd_s * 0.12 +
+                  div_s * 0.18 + sq_s * 0.15 + vol_s * 0.12),
     }
 
 
@@ -657,10 +894,44 @@ def _proximity_call(tf: TFSignal) -> dict:
     else:
         macd_s = 20
 
+    # ── Preisdivergenz (bärisch = gut für Short Call) ─────────────────────
+    if tf.div_bear_rsi and tf.div_bear_macd:
+        div_s = min(100, 60 + tf.div_strength * 0.4)
+    elif tf.div_bear_rsi or tf.div_bear_macd:
+        div_s = min(100, 40 + tf.div_strength * 0.3)
+    elif tf.div_bull_rsi or tf.div_bull_macd:
+        div_s = 10   # falsche Richtung
+    else:
+        div_s = 25   # neutral
+
+    # ── Squeeze (aktiver Squeeze + bärisches Release) ──────────────────────
+    if tf.squeeze_release_bear:
+        sq_s = 100
+    elif tf.squeeze_active and tf.squeeze_momentum < 0:
+        sq_s = 75     # Squeeze aktiv, Momentum bärisch (Ausbruch erwartet)
+    elif tf.squeeze_active:
+        sq_s = 50     # Squeeze aktiv, Richtung unklar
+    elif tf.squeeze_release_bull:
+        sq_s = 5
+    else:
+        sq_s = 20
+
+    # ── Volumen-Kapitulation (bärisch) ────────────────────────────────────
+    if tf.vol_climax_bear:
+        vol_s = 100   # Kapitulationsvolumen an Hoch = starkes Verkaufssignal
+    elif tf.obv_bear_div:
+        vol_s = 75    # OBV fällt trotz steigendem Preis
+    elif tf.vol_climax_bull or tf.obv_bull_div:
+        vol_s = 10    # falsche Richtung
+    else:
+        vol_s = 30
+
     return {
-        "stoch": stoch_s, "rsi": rsi_s,
-        "ema": ema_s,     "macd": macd_s,
-        "total": (stoch_s + rsi_s + ema_s + macd_s) / 4,
+        "stoch": stoch_s, "rsi": rsi_s, "ema": ema_s, "macd": macd_s,
+        "div": div_s, "squeeze": sq_s, "volume": vol_s,
+        # Gewichtung: klassische 4 = 55%, neue 3 = 45%
+        "total": (stoch_s * 0.15 + rsi_s * 0.15 + ema_s * 0.13 + macd_s * 0.12 +
+                  div_s * 0.18 + sq_s * 0.15 + vol_s * 0.12),
     }
 
 
@@ -679,7 +950,7 @@ def calc_convergence_score(mtf: MultiTFResult, strategy: str = "put") -> Converg
     """
     proximity_fn = _proximity_put if strategy == "put" else _proximity_call
 
-    zero = {"stoch": 0, "rsi": 0, "ema": 0, "macd": 0, "total": 0}
+    zero = {"stoch": 0, "rsi": 0, "ema": 0, "macd": 0, "div": 0, "squeeze": 0, "volume": 0, "total": 0}
 
     s_1d = proximity_fn(mtf.tf_1d) if mtf.tf_1d else zero
     s_4h = proximity_fn(mtf.tf_4h) if mtf.tf_4h else s_1d  # fallback auf 1D wenn kein 4H
@@ -705,10 +976,6 @@ def calc_convergence_score(mtf: MultiTFResult, strategy: str = "put") -> Converg
     return ConvergenceResult(
         strategy=strategy,
         score=combined, score_1d=score_1d, score_4h=score_4h,
-        stoch_1d=round(s_1d["stoch"], 1), rsi_1d=round(s_1d["rsi"], 1),
-        ema_1d=round(s_1d["ema"], 1),     macd_1d=round(s_1d["macd"], 1),
-        stoch_4h=round(s_4h["stoch"], 1), rsi_4h=round(s_4h["rsi"], 1),
-        ema_4h=round(s_4h["ema"], 1),     macd_4h=round(s_4h["macd"], 1),
         label=label, bar=bar,
     )
 

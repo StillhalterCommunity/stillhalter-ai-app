@@ -27,6 +27,7 @@ render_sidebar()
 
 from data.fetcher import fetch_price_history, fetch_earnings_date, calculate_dte
 from analysis.technicals import analyze_technicals
+from analysis.multi_timeframe import analyze_multi_timeframe, calc_convergence_score
 from data.watchlist import WATCHLIST, ALL_TICKERS, get_sector_for_ticker, SECTOR_ICONS
 
 
@@ -71,6 +72,94 @@ def _days_to_threshold(current: float, threshold: float, velocity: float) -> Opt
     if 1 <= days <= 30:
         return max(1, int(days))
     return None
+
+
+def _crossed_above(series: pd.Series, level: float, lookback: int = 3) -> bool:
+    """Erkennt ob series 'level' in letzten lookback Kerzen von unten gekreuzt hat."""
+    if len(series) < lookback + 1:
+        return False
+    s = series.dropna().iloc[-(lookback + 1):]
+    for i in range(len(s) - 1):
+        if s.iloc[i] < level <= s.iloc[i + 1]:
+            return True
+    return False
+
+
+def _crossed_below(series: pd.Series, level: float, lookback: int = 3) -> bool:
+    """Erkennt ob series 'level' in letzten lookback Kerzen von oben gekreuzt hat."""
+    if len(series) < lookback + 1:
+        return False
+    s = series.dropna().iloc[-(lookback + 1):]
+    for i in range(len(s) - 1):
+        if s.iloc[i] > level >= s.iloc[i + 1]:
+            return True
+    return False
+
+
+def _line_crossed_above(a: pd.Series, b: pd.Series, lookback: int = 3) -> bool:
+    """Erkennt ob Linie A Linie B von unten gekreuzt hat."""
+    if len(a) < lookback + 1 or len(b) < lookback + 1:
+        return False
+    a = a.dropna().reset_index(drop=True)
+    b = b.dropna().reset_index(drop=True)
+    n = min(len(a), len(b), lookback + 1)
+    a, b = a.iloc[-n:], b.iloc[-n:]
+    for i in range(len(a) - 1):
+        if a.iloc[i] <= b.iloc[i] and a.iloc[i + 1] > b.iloc[i + 1]:
+            return True
+    return False
+
+
+def _line_crossed_below(a: pd.Series, b: pd.Series, lookback: int = 3) -> bool:
+    """Erkennt ob Linie A Linie B von oben gekreuzt hat."""
+    if len(a) < lookback + 1 or len(b) < lookback + 1:
+        return False
+    a = a.dropna().reset_index(drop=True)
+    b = b.dropna().reset_index(drop=True)
+    n = min(len(a), len(b), lookback + 1)
+    a, b = a.iloc[-n:], b.iloc[-n:]
+    for i in range(len(a) - 1):
+        if a.iloc[i] >= b.iloc[i] and a.iloc[i + 1] < b.iloc[i + 1]:
+            return True
+    return False
+
+
+def _calc_ema_series(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def _calc_stoch_series(high: pd.Series, low: pd.Series, close: pd.Series,
+                        k_period: int = 14, smooth_k: int = 3) -> pd.Series:
+    """Berechnet vollständige Stochastik %K Serie."""
+    ll = low.rolling(k_period).min()
+    hh = high.rolling(k_period).max()
+    raw_k = 100 * (close - ll) / (hh - ll + 1e-10)
+    return raw_k.rolling(smooth_k).mean()
+
+
+def _calc_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    direction = np.sign(close.diff().fillna(0))
+    return (direction * volume).cumsum()
+
+
+def _squeeze_active(close: pd.Series, high: pd.Series, low: pd.Series) -> bool:
+    """Prüft ob Volatilitätskompression aktiv ist (Bollinger Bands inside Keltner Channels)."""
+    try:
+        if len(close) < 25:
+            return False
+        bb_mid   = close.rolling(20).mean()
+        bb_std   = close.rolling(20).std()
+        bb_upper = bb_mid + 2.0 * bb_std
+        bb_lower = bb_mid - 2.0 * bb_std
+        tr = pd.concat([high - low, (high - close.shift(1)).abs(),
+                         (low - close.shift(1)).abs()], axis=1).max(axis=1)
+        kc_mid   = close.ewm(span=20, adjust=False).mean()
+        kc_atr   = tr.ewm(span=20, adjust=False).mean()
+        kc_upper = kc_mid + 1.5 * kc_atr
+        kc_lower = kc_mid - 1.5 * kc_atr
+        return bool((bb_upper < kc_upper).iloc[-1] and (bb_lower > kc_lower).iloc[-1])
+    except Exception:
+        return False
 
 
 def calculate_radar_score(ticker: str, setup_type: str = "auto") -> dict:
@@ -258,17 +347,6 @@ def calculate_radar_score(ticker: str, setup_type: str = "auto") -> dict:
             trend_score  = max(5, 35 - (50 - trend_sc) * 0.5)
             trend_signal = f"↓ Abwärtstrend (Score {trend_sc:.0f}) — ungünstig für PUT"
 
-        # ── Gewichteter Radar-Score ────────────────────────────────────────
-        dim_scores = {
-            "RSI":        round(rsi_score,   1),
-            "Stochastik": round(stoch_score, 1),
-            "MACD":       round(macd_score,  1),
-            "Support":    round(sup_score,   1),
-            "Trend":      round(trend_score, 1),
-        }
-        weights = {"RSI": 0.30, "Stochastik": 0.25, "MACD": 0.20, "Support": 0.15, "Trend": 0.10}
-        radar_score = sum(dim_scores[k] * weights[k] for k in weights)
-
         # ── Setup-Typ bestimmen ────────────────────────────────────────────
         if setup_type == "auto":
             if tech.trend in ("bullish", "neutral"):
@@ -277,6 +355,192 @@ def calculate_radar_score(ticker: str, setup_type: str = "auto") -> dict:
                 best_setup = "Covered CALL"
         else:
             best_setup = setup_type
+
+        is_put = best_setup == "Short PUT"
+
+        # ── Ideal-Scenario-Signale (Aufwärtstrend / Abwärtstrend) ──────────
+        # Detektiert die exakten Setup-Crossover-Signale
+        ideal_signals = []
+        try:
+            stoch_k_series = _calc_stoch_series(high, low, close, 14, 3)
+            stoch_d_series = stoch_k_series.rolling(3).mean()
+            ema2_series    = _calc_ema_series(close, 2)
+            ema9_series    = _calc_ema_series(close, 9)
+
+            if is_put:
+                # Aufwärtstrend: Stoch %K kreuzt 20 aufwärts
+                if _crossed_above(stoch_k_series, 20.0, 3):
+                    ideal_signals.append("Stillhalter Dual Stochastik — Kaufsignal aktiv ✅✅")
+                # RSI kreuzt 30 aufwärts
+                if _crossed_above(rsi, 30.0, 3):
+                    ideal_signals.append("Stillhalter MACD Pro — RSI-Umkehr bestätigt ✅✅")
+                # EMA2 kreuzt EMA9 aufwärts
+                if _line_crossed_above(ema2_series, ema9_series, 3):
+                    ideal_signals.append("Stillhalter Trendmodel — Aufwärtswende ✅✅")
+                # MACD Hist neg→pos
+                if tech.sc_macd and tech.sc_macd.hist is not None:
+                    h = tech.sc_macd.hist
+                    if len(h) >= 2 and float(h.iloc[-2]) < 0 <= float(h.iloc[-1]):
+                        ideal_signals.append("Stillhalter MACD Pro — Momentum dreht bullisch ✅✅")
+            else:
+                # Abwärtstrend: Stoch %K kreuzt 80 abwärts
+                if _crossed_below(stoch_k_series, 80.0, 3):
+                    ideal_signals.append("Stillhalter Dual Stochastik — Verkaufssignal aktiv ✅✅")
+                # RSI kreuzt 70 abwärts
+                if _crossed_below(rsi, 70.0, 3):
+                    ideal_signals.append("Stillhalter MACD Pro — RSI-Überhitzung nachlässt ✅✅")
+                # EMA2 kreuzt EMA9 abwärts
+                if _line_crossed_below(ema2_series, ema9_series, 3):
+                    ideal_signals.append("Stillhalter Trendmodel — Abwärtswende ✅✅")
+                # MACD Hist pos→neg
+                if tech.sc_macd and tech.sc_macd.hist is not None:
+                    h = tech.sc_macd.hist
+                    if len(h) >= 2 and float(h.iloc[-2]) > 0 >= float(h.iloc[-1]):
+                        ideal_signals.append("Stillhalter MACD Pro — Momentum dreht bärisch ✅✅")
+        except Exception:
+            pass
+
+        # ── Marktstruktur-Analyse (Preisdivergenz) ─────────────────────────
+        marktstruktur_signal = None
+        marktstruktur_score  = 0.0
+        try:
+            rsi_vals = rsi.dropna()
+            if len(rsi_vals) >= 20:
+                # Bullische Divergenz: Preis tieferes Tief, RSI höheres Tief
+                price_recent = close.iloc[-20:]
+                rsi_recent   = rsi_vals.iloc[-20:]
+                price_min_i  = int(price_recent.values.argmin())
+                rsi_at_min   = float(rsi_recent.iloc[price_min_i]) if price_min_i < len(rsi_recent) else 50.0
+                rsi_now_val  = float(rsi_vals.iloc[-1])
+                price_low_val = float(price_recent.iloc[price_min_i])
+                price_curr    = float(close.iloc[-1])
+
+                if is_put:
+                    # Bullische Divergenz: Preis fiel, RSI nicht so tief
+                    if price_curr < price_low_val * 1.05 and rsi_now_val > rsi_at_min:
+                        diff = rsi_now_val - rsi_at_min
+                        marktstruktur_score  = min(100, 50 + diff * 2)
+                        marktstruktur_signal = "Marktstruktur-Analyse — bullische Divergenz erkannt ✅"
+                    else:
+                        marktstruktur_score = 20.0
+                else:
+                    # Bärische Divergenz: Preis stieg, RSI nicht so hoch
+                    price_max_i = int(price_recent.values.argmax())
+                    rsi_at_max  = float(rsi_recent.iloc[price_max_i]) if price_max_i < len(rsi_recent) else 50.0
+                    if price_curr > float(price_recent.iloc[price_max_i]) * 0.95 and rsi_now_val < rsi_at_max:
+                        diff = rsi_at_max - rsi_now_val
+                        marktstruktur_score  = min(100, 50 + diff * 2)
+                        marktstruktur_signal = "Marktstruktur-Analyse — bärische Divergenz erkannt ✅"
+                    else:
+                        marktstruktur_score = 20.0
+        except Exception:
+            marktstruktur_score = 20.0
+
+        if marktstruktur_signal is None:
+            marktstruktur_signal = "Marktstruktur-Analyse — keine Divergenz"
+
+        # ── Volatilitätskompression (Squeeze) ──────────────────────────────
+        volatil_signal = None
+        volatil_score  = 0.0
+        try:
+            squeeze = _squeeze_active(close, high, low)
+            if squeeze:
+                # Momentum-Richtung im Squeeze
+                y = close.iloc[-20:].values
+                x = np.arange(len(y))
+                slope_val = float(np.polyfit(x, y, 1)[0]) if len(y) >= 2 else 0.0
+                if (is_put and slope_val > 0) or (not is_put and slope_val < 0):
+                    volatil_score  = 80.0
+                    volatil_signal = "Volatilitätskompression — Ausbruch in Trendrichtung erwartet ✅"
+                else:
+                    volatil_score  = 55.0
+                    volatil_signal = "Volatilitätskompression — aktiv, Richtung unklar"
+            else:
+                volatil_score  = 20.0
+                volatil_signal = "Volatilitätskompression — kein aktiver Squeeze"
+        except Exception:
+            volatil_score  = 20.0
+            volatil_signal = "Volatilitätskompression — kein Signal"
+
+        # ── Volumendynamik (OBV + Klimax-Volumen) ──────────────────────────
+        vol_signal = None
+        vol_dyn_score = 0.0
+        try:
+            if "Volume" in hist.columns:
+                volume = hist["Volume"]
+                obv = _calc_obv(close, volume)
+                vol_mean = float(volume.iloc[-20:].mean())
+                vol_std  = float(volume.iloc[-20:].std()) or 1.0
+                vol_curr = float(volume.iloc[-1])
+                z = (vol_curr - vol_mean) / vol_std
+
+                close_arr = close.iloc[-20:].values
+                pr_range  = max(close_arr) - min(close_arr)
+                rel_pos   = (float(close.iloc[-1]) - min(close_arr)) / max(pr_range, 1e-6)
+
+                obv_slope = _slope(obv, 10)
+
+                if is_put:
+                    if z > 2.0 and rel_pos < 0.2:
+                        vol_dyn_score = 100.0
+                        vol_signal = "Volumendynamik — Kapitulation erkannt, Kaufzone ✅✅"
+                    elif obv_slope > 0 and float(close.diff(5).iloc[-1]) < 0:
+                        vol_dyn_score = 75.0
+                        vol_signal = "Volumendynamik — Akkumulation trotz fallender Preise ✅"
+                    else:
+                        vol_dyn_score = 25.0
+                        vol_signal = "Volumendynamik — kein besonderes Signal"
+                else:
+                    if z > 2.0 and rel_pos > 0.8:
+                        vol_dyn_score = 100.0
+                        vol_signal = "Volumendynamik — Verteilung erkannt, Verkaufszone ✅✅"
+                    elif obv_slope < 0 and float(close.diff(5).iloc[-1]) > 0:
+                        vol_dyn_score = 75.0
+                        vol_signal = "Volumendynamik — Distribution trotz steigender Preise ✅"
+                    else:
+                        vol_dyn_score = 25.0
+                        vol_signal = "Volumendynamik — kein besonderes Signal"
+            else:
+                vol_dyn_score = 20.0
+                vol_signal = "Volumendynamik — Daten nicht verfügbar"
+        except Exception:
+            vol_dyn_score = 20.0
+            vol_signal = "Volumendynamik — kein Signal"
+
+        # ── Convergence Score via multi_timeframe ──────────────────────────
+        conv_score_val = 0.0
+        conv_label     = "–"
+        try:
+            mtf = analyze_multi_timeframe(ticker)
+            conv_strategy = "put" if is_put else "call"
+            conv_res = calc_convergence_score(mtf, conv_strategy)
+            conv_score_val = conv_res.score
+            conv_label     = conv_res.label
+        except Exception:
+            pass
+
+        # ── Gewichteter Radar-Score ────────────────────────────────────────
+        # Kern-Indikatoren (klassisch) + neue Indikatoren (ergänzend)
+        dim_scores = {
+            "RSI":        round(rsi_score,          1),
+            "Stochastik": round(stoch_score,        1),
+            "MACD":       round(macd_score,         1),
+            "Support":    round(sup_score,          1),
+            "Trend":      round(trend_score,        1),
+        }
+        # Kern-Gewichtung: 85% klassisch + 15% neue Indikatoren
+        weights_classic = {
+            "RSI": 0.27, "Stochastik": 0.22, "MACD": 0.18, "Support": 0.13, "Trend": 0.09,
+        }
+        radar_score_classic = sum(dim_scores[k] * weights_classic[k] for k in weights_classic)
+        new_ind_score = (marktstruktur_score * 0.04 + volatil_score * 0.04 + vol_dyn_score * 0.03)
+        # Convergence-Bonus: bis zu 5 Punkte
+        conv_bonus = conv_score_val * 0.05
+        radar_score = min(100, radar_score_classic + new_ind_score + conv_bonus)
+
+        # Ideal-Signal-Bonus: jeder erkannte Crossover gibt +2 Punkte (max 8)
+        ideal_bonus = min(8, len(ideal_signals) * 2)
+        radar_score = min(100, radar_score + ideal_bonus)
 
         # ── Estimated Days (Median der Einzel-Schätzungen) ─────────────────
         day_estimates = [d for d in [rsi_days, stoch_days, macd_days] if d is not None]
@@ -289,14 +553,25 @@ def calculate_radar_score(ticker: str, setup_type: str = "auto") -> dict:
 
         # ── Konvergenz-Check: Wie viele Signale konvergieren? ──────────────
         converging = sum([
-            rsi_slope < -0.5 and rsi_now > 30,           # RSI fällt
-            stoch_slope < -1 and fast_k > 20,             # Stoch fällt
+            rsi_slope < -0.5 and rsi_now > 30 if is_put else rsi_slope > 0.5 and rsi_now < 70,
+            stoch_slope < -1 and fast_k > 20  if is_put else stoch_slope > 1 and fast_k < 80,
             (tech.sc_macd.hist is not None and
              tech.sc_macd.hist.iloc[-1] < 0 and
              _slope(tech.sc_macd.hist, 7) > 0)
-             if tech.sc_macd else False,                   # MACD dreht
-            price_slope < 0 and bool(tech.support_levels), # Kurs fällt Richtung Support
+             if (tech.sc_macd and is_put) else
+            (tech.sc_macd.hist is not None and
+             tech.sc_macd.hist.iloc[-1] > 0 and
+             _slope(tech.sc_macd.hist, 7) < 0)
+             if (tech.sc_macd and not is_put) else False,
+            price_slope < 0 and bool(tech.support_levels) if is_put
+            else price_slope > 0 and bool(tech.support_levels),
         ])
+
+        # Alle Signal-Texte zusammenbauen
+        all_signals = ideal_signals + [
+            rsi_signal, stoch_signal, macd_signal, sup_signal, trend_signal,
+            marktstruktur_signal, volatil_signal, vol_signal,
+        ]
 
         return {
             "ticker":      ticker,
@@ -306,13 +581,10 @@ def calculate_radar_score(ticker: str, setup_type: str = "auto") -> dict:
             "confidence":  confidence,
             "converging":  converging,   # 0–4: wie viele Indikatoren gleichzeitig
             "dim_scores":  dim_scores,
-            "signals": [
-                rsi_signal,
-                stoch_signal,
-                macd_signal,
-                sup_signal,
-                trend_signal,
-            ],
+            "signals":     all_signals,
+            "ideal_signals": ideal_signals,
+            "conv_score":  round(conv_score_val, 1),
+            "conv_label":  conv_label,
             "rsi_now":       round(rsi_now, 1),
             "fast_k":        round(fast_k, 1),
             "trend":         tech.trend,

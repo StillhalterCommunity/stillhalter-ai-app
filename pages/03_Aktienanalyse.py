@@ -8,8 +8,8 @@ import numpy as np
 import plotly.graph_objects as go
 
 st.set_page_config(
-    page_title="Aktienanalyse · Stillhalter AI App",
-    page_icon="📊",
+    page_title="Stillhalter Analyzer · Stillhalter AI App",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -57,7 +57,7 @@ def peg_info(peg):
 
 # ── Sidebar: Ticker-Auswahl ───────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📊 Aktie wählen")
+    st.markdown("## 🎯 Stillhalter Analyzer")
 
     analyse_universe = st.selectbox(
         "Universum",

@@ -30,6 +30,7 @@ render_sidebar()
 
 from data.universes import get_universe_tickers, UNIVERSE_OPTIONS
 from data.watchlist import ALL_TICKERS
+from analysis.multi_timeframe import analyze_multi_timeframe, calc_convergence_score
 
 SIGNAL_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "trend_signal_cache.pkl")
 
@@ -214,6 +215,21 @@ def _score_ticker(ticker: str, data: Optional[Dict] = None) -> Optional[Dict]:
         vol_ratio  = data.get("vol_ratio")
         vol_rating = "stark" if (vol_ratio or 0) >= 1.5 else "ok" if (vol_ratio or 0) >= 1.1 else "schwach"
 
+        # ── Convergence Score (bonus bis zu 20 Punkte) ─────────────────────
+        conv_score_val = 0.0
+        conv_label     = "–"
+        try:
+            mtf = analyze_multi_timeframe(ticker)
+            conv_strategy = "put" if signal_dir == "bullish" else "call"
+            conv_res = calc_convergence_score(mtf, conv_strategy)
+            conv_score_val = conv_res.score
+            conv_label     = conv_res.label
+            # Convergence-Bonus: 0-20 Punkte abhängig von Conv-Score (0-100)
+            conv_bonus = conv_score_val * 0.20
+            score = score + conv_bonus
+        except Exception:
+            pass
+
         return {
             "ticker":       ticker,
             "price":        data["price"],
@@ -226,6 +242,8 @@ def _score_ticker(ticker: str, data: Optional[Dict] = None) -> Optional[Dict]:
             "stoch":        round(stoch, 1) if stoch else None,
             "stoch_ok":     stoch_ok,
             "signal_quality": round(signal_quality, 2),
+            "conv_score":   round(conv_score_val, 1),
+            "conv_label":   conv_label,
             "signal_type":  "now",
         }
     except Exception:
@@ -289,6 +307,45 @@ def _score_approaching(ticker: str, data: Optional[Dict] = None) -> Optional[Dic
             (expected_dir == "bearish" and stoch is not None and stoch >= 25)
         )
 
+        # ── Convergence Score als Primär-Proximät-Maß ──────────────────────
+        conv_score_val = 0.0
+        conv_label     = "–"
+        try:
+            mtf = analyze_multi_timeframe(ticker)
+            conv_strategy = "put" if expected_dir == "bullish" else "call"
+            conv_res = calc_convergence_score(mtf, conv_strategy)
+            conv_score_val = conv_res.score
+            conv_label     = conv_res.label
+        except Exception:
+            pass
+
+        # ── 3 neue Indikatoren als GET READY Qualifizierer ─────────────────
+        extra_ready_signals = []
+        try:
+            mtf = analyze_multi_timeframe(ticker)
+            tf_1d = mtf.tf_1d
+            tf_4h = mtf.tf_4h
+
+            for tf_sig in [tf_1d, tf_4h]:
+                if tf_sig is None:
+                    continue
+                if expected_dir == "bullish":
+                    if (tf_sig.div_bull_rsi or tf_sig.div_bull_macd) and not extra_ready_signals:
+                        extra_ready_signals.append("Marktstruktur-Analyse")
+                    if tf_sig.squeeze_active and tf_sig.squeeze_momentum > 0 and len(extra_ready_signals) < 2:
+                        extra_ready_signals.append("Volatilitätskompression")
+                    if tf_sig.vol_climax_bull and len(extra_ready_signals) < 3:
+                        extra_ready_signals.append("Volumendynamik")
+                else:
+                    if (tf_sig.div_bear_rsi or tf_sig.div_bear_macd) and not extra_ready_signals:
+                        extra_ready_signals.append("Marktstruktur-Analyse")
+                    if tf_sig.squeeze_active and tf_sig.squeeze_momentum < 0 and len(extra_ready_signals) < 2:
+                        extra_ready_signals.append("Volatilitätskompression")
+                    if tf_sig.vol_climax_bear and len(extra_ready_signals) < 3:
+                        extra_ready_signals.append("Volumendynamik")
+        except Exception:
+            pass
+
         return {
             "ticker":       ticker,
             "price":        data["price"],
@@ -301,6 +358,9 @@ def _score_approaching(ticker: str, data: Optional[Dict] = None) -> Optional[Dic
             "stoch":        round(stoch, 1) if stoch else None,
             "stoch_ok":     stoch_ok,
             "signal_quality": 0.0,
+            "conv_score":   round(conv_score_val, 1),
+            "conv_label":   conv_label,
+            "extra_ready":  extra_ready_signals,
             "signal_type":  "approaching",
         }
     except Exception:
@@ -1134,10 +1194,14 @@ def _render_signal_card(sig: Dict, market_regime: Dict, show_backtest: bool = Tr
         cross_price = leading_r.get("cross_price")
         entry_str   = f"USD {cross_price:.2f}" if cross_price else f"USD {price:.2f}"
 
-        stoch_col = "#22c55e" if sig.get("stoch_ok") else "#f59e0b"
-        stoch_str = f"{stoch:.1f}" if stoch is not None else "–"
-        vol_str   = f"{vol_ratio:.1f}× Ø" if vol_ratio else "–"
-        vol_col   = "#22c55e" if (vol_ratio or 0) >= 1.5 else ("#f59e0b" if (vol_ratio or 0) >= 1.0 else "#ef4444")
+        stoch_col  = "#22c55e" if sig.get("stoch_ok") else "#f59e0b"
+        stoch_str  = f"{stoch:.1f}" if stoch is not None else "–"
+        vol_str    = f"{vol_ratio:.1f}× Ø" if vol_ratio else "–"
+        vol_col    = "#22c55e" if (vol_ratio or 0) >= 1.5 else ("#f59e0b" if (vol_ratio or 0) >= 1.0 else "#ef4444")
+        conv_label = sig.get("conv_label", "–")
+        conv_color = "#22c55e" if "Perfekt" in conv_label else (
+                     "#d4a843" if "Sehr nah" in conv_label else (
+                     "#f97316" if "Nah" in conv_label else "#555"))
 
         # ── Spalte A: Ticker + STI Score + Einstieg ───────────────────────────
         with ca:
@@ -1292,6 +1356,12 @@ def _render_signal_card(sig: Dict, market_regime: Dict, show_backtest: bool = Tr
                 f"{'stark ✓' if (vol_ratio or 0) >= 1.5 else 'ok' if (vol_ratio or 0) >= 1.0 else 'schwach'}"
                 f"</div></div>"
                 f"</div>"
+                f"<div style='background:#0e0e0e;border-radius:5px;padding:6px 8px;margin-bottom:8px'>"
+                f"<div style='font-size:0.58rem;color:#555;font-family:sans-serif;margin-bottom:2px'>"
+                f"⚡ Konvergenz</div>"
+                f"<div style='font-size:0.85rem;font-weight:700;color:{conv_color};"
+                f"font-family:sans-serif'>{conv_label}</div>"
+                f"</div>"
                 + bt_html
                 + entry_hint
                 + f"</div>"
@@ -1316,7 +1386,25 @@ def _render_approaching_card(sig: Dict) -> None:
     bar_w     = int(closeness)
     bar_col   = "#22c55e" if closeness > 70 else "#f59e0b" if closeness > 40 else "#60a5fa"
 
-    stoch_str = f"Stoch {stoch:.0f}" if stoch else ""
+    stoch_str    = f"Stoch {stoch:.0f}" if stoch else ""
+    conv_label   = sig.get("conv_label", "–")
+    extra_ready  = sig.get("extra_ready", [])
+
+    # Konvergenz-Farbe
+    conv_color = "#22c55e" if "Perfekt" in conv_label else (
+        "#d4a843" if "Sehr nah" in conv_label else (
+        "#f97316" if "Nah" in conv_label else "#555"))
+
+    # Extra-Signal-Tags
+    extra_html = ""
+    if extra_ready:
+        tags = "".join(
+            f"<span style='background:#1a1a2a;border:1px solid #2a2a4a;border-radius:4px;"
+            f"padding:2px 6px;font-size:0.6rem;color:#60a5fa;font-family:sans-serif;"
+            f"margin-right:4px'>{s}</span>"
+            for s in extra_ready
+        )
+        extra_html = f"<div style='margin-top:6px'>{tags}</div>"
 
     st.html(
         f"<div style='background:#0e0e12;border:1px solid #2a2a3a;border-radius:10px;"
@@ -1333,11 +1421,15 @@ def _render_approaching_card(sig: Dict) -> None:
         f"<span style='font-size:0.72rem;color:{dir_color};font-family:sans-serif;font-weight:700'>"
         f"{opt_type} wird vorbereitet</span>"
         f"<span style='font-size:0.72rem;color:#555;font-family:sans-serif'>"
-        f"Pot. Score {'+' if score > 0 else ''}{score}/6</span>"
+        f"Pot. Score {'+' if score > 0 else ''}{score:.1f}/6</span>"
         f"</div></div>"
         f"<div style='font-size:0.72rem;color:#666;font-family:sans-serif;margin-bottom:6px'>"
         f"STI Fast nähert sich STI Slow auf {_TF_LABELS.get(tf,tf)} · "
         f"Abstand {gap_pct:.2f}% · {stoch_str}</div>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+        f"<span style='font-size:0.65rem;color:{conv_color};font-family:sans-serif'>"
+        f"⚡ {conv_label}</span>"
+        f"</div>"
         f"<div style='background:#1a1a1a;border-radius:4px;height:6px;overflow:hidden'>"
         f"<div style='width:{bar_w}%;height:100%;background:{bar_col};"
         f"border-radius:4px;transition:width 0.3s'></div></div>"
@@ -1346,7 +1438,9 @@ def _render_approaching_card(sig: Dict) -> None:
         f"<span style='font-size:0.62rem;color:{bar_col};font-family:sans-serif'>"
         f"Nähe zum Cross: {closeness:.0f}%</span>"
         f"<span style='font-size:0.62rem;color:#333;font-family:sans-serif'>Cross!</span>"
-        f"</div></div>"
+        f"</div>"
+        + extra_html
+        + f"</div>"
     )
 
 # ══════════════════════════════════════════════════════════════════════════════

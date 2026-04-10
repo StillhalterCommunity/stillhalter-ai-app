@@ -614,27 +614,15 @@ if start_scan:
                 try:
                     tf = tf_cache.get(ticker)
                     if tf is None:
-                        return (0.0, "🔴 Entfernt", "░░░░░░░░░░",
-                                0, 0, 0, 0, 0, 0, 0, 0)
+                        return (0.0, "🔴 Entfernt")
                     c = calc_convergence_score(tf, conv_strategy)
-                    return (c.score, c.label, c.bar,
-                            c.stoch_1d, c.rsi_1d, c.ema_1d, c.macd_1d,
-                            c.stoch_4h, c.rsi_4h, c.ema_4h, c.macd_4h)
+                    return (c.score, c.label)
                 except Exception:
-                    return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+                    return (0.0, "–")
 
             conv_cols = results["Ticker"].apply(_conv_score)
-            results["Konvergenz"]    = [x[0] for x in conv_cols]
-            results["Konv. Label"]   = [x[1] for x in conv_cols]
-            results["Konv. Bar"]     = [x[2] for x in conv_cols]
-            results["Stoch(1D)◎"]   = [x[3] for x in conv_cols]
-            results["RSI(1D)◎"]     = [x[4] for x in conv_cols]
-            results["EMA(1D)◎"]     = [x[5] for x in conv_cols]
-            results["MACD(1D)◎"]    = [x[6] for x in conv_cols]
-            results["Stoch(4H)◎"]   = [x[7] for x in conv_cols]
-            results["RSI(4H)◎"]     = [x[8] for x in conv_cols]
-            results["EMA(4H)◎"]     = [x[9] for x in conv_cols]
-            results["MACD(4H)◎"]    = [x[10] for x in conv_cols]
+            results["Konvergenz"]  = [x[0] for x in conv_cols]
+            results["Konv."]       = [x[1] for x in conv_cols]
 
         progress_bar.progress(1.0)
         n_found = len(results)
@@ -708,26 +696,15 @@ else:
             try:
                 tf = _cached_tf.get(ticker)
                 if tf is None:
-                    return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+                    return (0.0, "–")
                 c = calc_convergence_score(tf, _conv_strategy)
-                return (c.score, c.label, c.bar,
-                        c.stoch_1d, c.rsi_1d, c.ema_1d, c.macd_1d,
-                        c.stoch_4h, c.rsi_4h, c.ema_4h, c.macd_4h)
+                return (c.score, c.label)
             except Exception:
-                return (0.0, "–", "░░░░░░░░░░", 0, 0, 0, 0, 0, 0, 0, 0)
+                return (0.0, "–")
 
         _cx = results["Ticker"].apply(_lazy_conv)
-        results["Konvergenz"]    = [x[0] for x in _cx]
-        results["Konv. Label"]   = [x[1] for x in _cx]
-        results["Konv. Bar"]     = [x[2] for x in _cx]
-        results["Stoch(1D)◎"]   = [x[3] for x in _cx]
-        results["RSI(1D)◎"]     = [x[4] for x in _cx]
-        results["EMA(1D)◎"]     = [x[5] for x in _cx]
-        results["MACD(1D)◎"]    = [x[6] for x in _cx]
-        results["Stoch(4H)◎"]   = [x[7] for x in _cx]
-        results["RSI(4H)◎"]     = [x[8] for x in _cx]
-        results["EMA(4H)◎"]     = [x[9] for x in _cx]
-        results["MACD(4H)◎"]    = [x[10] for x in _cx]
+        results["Konvergenz"] = [x[0] for x in _cx]
+        results["Konv."]      = [x[1] for x in _cx]
         st.session_state.scan_results = results
         st.session_state.tf_results = {**st.session_state.get("tf_results", {}), **_cached_tf}
 
@@ -866,10 +843,7 @@ else:
     # Tech-Spalten wenn vorhanden
     tech_cols = [c for c in ["RSI(1D)", "Stoch(1D)", "MACD(1D)", "SC Trend(1D)", "TF-Align"] if c in display_df.columns]
     # Konvergenz-Spalten
-    conv_cols_show = [c for c in ["Konv. Bar", "Konvergenz", "Konv. Label",
-                                  "Stoch(1D)◎", "RSI(1D)◎", "EMA(1D)◎", "MACD(1D)◎",
-                                  "Stoch(4H)◎", "RSI(4H)◎", "EMA(4H)◎", "MACD(4H)◎"]
-                      if c in display_df.columns]
+    conv_cols_show = [c for c in ["Konvergenz", "Konv."] if c in display_df.columns]
     show_cols = [c for c in base_cols + tech_cols + conv_cols_show + ["⭐ CRV"] if c in display_df.columns]
 
     col_config = {
@@ -907,24 +881,11 @@ else:
         "⚠️ Earnings":  st.column_config.TextColumn("Earnings", width="medium",
                                                       help="⚠️ Earnings-Termin fällt in die Laufzeit der Option"),
         # Konvergenz-Spalten
-        "Konv. Bar":    st.column_config.TextColumn("⚡ Konvergenz",
-                                                     help="Best Convergence — wie nah sind alle Indikatoren am idealen Einstiegszeitpunkt (████ = perfekt)"),
-        "Konvergenz":   st.column_config.ProgressColumn("Konv. Score", min_value=0, max_value=100,
-                                                          format="%.0f",
-                                                          help="0-100: Annäherung aller Indikatoren an ideale Konvergenz für diesen Setup-Typ"),
-        "Konv. Label":  st.column_config.TextColumn("Konv.", width="small"),
-        "Stoch(1D)◎":  st.column_config.ProgressColumn("Stoch 1D", min_value=0, max_value=100, format="%.0f",
-                                                          help="Stochastik-Annäherung 1D (100 = %K kreuzt Ideallinie)"),
-        "RSI(1D)◎":    st.column_config.ProgressColumn("RSI 1D", min_value=0, max_value=100, format="%.0f",
-                                                          help="RSI-Annäherung 1D (100 = RSI kreuzt 30/70)"),
-        "EMA(1D)◎":    st.column_config.ProgressColumn("Trend 1D", min_value=0, max_value=100, format="%.0f",
-                                                          help="Stillhalter Trendmodel-Annäherung 1D (100 = EMA kreuzt)"),
-        "MACD(1D)◎":   st.column_config.ProgressColumn("MACD 1D", min_value=0, max_value=100, format="%.0f",
-                                                          help="MACD-Histogramm-Annäherung 1D (100 = dreht Vorzeichen)"),
-        "Stoch(4H)◎":  st.column_config.ProgressColumn("Stoch 4H", min_value=0, max_value=100, format="%.0f"),
-        "RSI(4H)◎":    st.column_config.ProgressColumn("RSI 4H", min_value=0, max_value=100, format="%.0f"),
-        "EMA(4H)◎":    st.column_config.ProgressColumn("Trend 4H", min_value=0, max_value=100, format="%.0f"),
-        "MACD(4H)◎":   st.column_config.ProgressColumn("MACD 4H", min_value=0, max_value=100, format="%.0f"),
+        "Konvergenz": st.column_config.ProgressColumn(
+            "⚡ Konvergenz", min_value=0, max_value=100, format="%.0f",
+            help="Best Convergence 0–100: Annäherung aller 7 Indikatoren an idealen Einstiegszeitpunkt (4H · 1D)"
+        ),
+        "Konv.": st.column_config.TextColumn("Konv.", width="small"),
     }
 
     # ── Styling: Top-3 Zeilen + Spalten-Max/Min ────────────────────────────
