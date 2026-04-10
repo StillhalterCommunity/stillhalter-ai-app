@@ -35,6 +35,8 @@ def render_sidebar():
         st.page_link("pages/11_Prozess.py",                 label="11 · Prozess",            icon="📋")
         st.page_link("pages/12_IBKR_Integration.py",        label="12 · IBKR Integration",   icon="🔗")
         st.page_link("pages/13_Rechtliches.py",              label="13 · Datenschutz & Recht", icon="⚖️")
+        st.page_link("pages/14_Order_Planung.py",            label="14 · Order-Planung",       icon="📋")
+        st.page_link("pages/15_Datenquellen.py",             label="15 · Datenquellen",        icon="📡")
         st.html("<div style='border-top:1px solid #1e1e1e;margin:10px 0 4px 0'></div>")
         # Markt-Status Badge
         if market_open:
