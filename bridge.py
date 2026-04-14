@@ -50,14 +50,26 @@ def main():
         sys.exit(1)
 
     print("🚀 Starte Tunnel über serveo.net...")
-    print("   (Kein Account nötig — nutzt SSH, das auf deinem Mac schon vorhanden ist)\n")
+
+    # SSH-Key sicherstellen
+    import os
+    key_path = os.path.expanduser("~/.ssh/id_rsa")
+    if not os.path.exists(key_path):
+        print("   🔑 Kein SSH-Key gefunden — wird automatisch erstellt...", end=" ", flush=True)
+        subprocess.run(
+            ["ssh-keygen", "-t", "rsa", "-b", "2048", "-f", key_path, "-N", ""],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        print("✅")
 
     # SSH-Tunnel starten
     cmd = [
         "ssh", "-tt",
+        "-i", key_path,
         "-o", "StrictHostKeyChecking=no",
         "-o", "ServerAliveInterval=30",
         "-o", "ExitOnForwardFailure=yes",
+        "-o", "PasswordAuthentication=no",
         "-R", f"0:localhost:{TWS_PORT}",
         "serveo.net"
     ]
