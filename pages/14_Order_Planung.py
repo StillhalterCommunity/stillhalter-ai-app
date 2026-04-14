@@ -103,34 +103,72 @@ if not IB_INSYNC_INSTALLED:
 # ══════════════════════════════════════════════════════════════════════════════
 with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_connected):
 
-    st.html("""
-<div style='font-size:0.78rem;color:#888;line-height:1.6;margin-bottom:14px;
-     background:#0e0e0e;border-radius:8px;padding:12px;border-left:3px solid #3b82f6'>
-  <b style='color:#f0f0f0'>Voraussetzungen:</b><br>
-  1. TWS oder IB Gateway muss lokal laufen<br>
-  2. In TWS: Konfiguration → API → Einstellungen → "Enable ActiveX and Socket Clients" ✓<br>
-  3. Trusted IPs: 127.0.0.1 hinzufügen
-</div>
-""")
+    # Verbindungsmodus wählen
+    conn_mode = st.radio(
+        "Verbindungsart",
+        ["🏠 Lokal (localhost)", "🌐 Über ngrok (Railway / Cloud)"],
+        horizontal=True,
+    )
+    use_ngrok = "ngrok" in conn_mode
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    if not use_ngrok:
+        st.html("""
+<div style='font-size:0.78rem;color:#888;line-height:1.6;margin-bottom:10px;
+     background:#0e0e0e;border-radius:8px;padding:12px;border-left:3px solid #3b82f6'>
+  TWS muss auf demselben Rechner laufen wie die App (lokal via <code>streamlit run app.py</code>)
+</div>""")
+    else:
+        st.html("""
+<div style='font-size:0.78rem;color:#aaa;line-height:1.8;margin-bottom:10px;
+     background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
+  <b style='color:#a78bfa'>ngrok Setup (einmalig, 5 Min):</b><br>
+  1. Kostenlosen Account auf <b>ngrok.com</b> erstellen<br>
+  2. Mac Terminal: <code>brew install ngrok</code><br>
+  3. <code>ngrok config add-authtoken DEIN_TOKEN</code><br>
+  4. TWS öffnen → dann: <code>ngrok tcp 7497</code><br>
+  5. ngrok zeigt z.B. <b>tcp://0.tcp.eu.ngrok.io:15432</b> → unten eintragen<br>
+  6. In TWS: "Nur Verbindungen vom lokalen Host" → <b>deaktivieren</b>
+</div>""")
+
+    col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
-        host = st.text_input("Host", value="127.0.0.1", help="Normalerweise 127.0.0.1")
+        if use_ngrok:
+            saved_host = st.session_state.get("ngrok_host", "")
+            host = st.text_input(
+                "ngrok Host", value=saved_host,
+                placeholder="z.B. 0.tcp.eu.ngrok.io",
+                help="Den Hostnamen aus der ngrok-Ausgabe eintragen (ohne tcp://)"
+            )
+            if host:
+                st.session_state["ngrok_host"] = host
+        else:
+            host = st.text_input("Host", value="127.0.0.1")
+
     with col2:
-        mode = st.selectbox("Modus", ["Paper Trading (TWS)", "Live Trading (TWS)",
-                                       "Paper (Gateway)", "Live (Gateway)"])
-        port_map = {
-            "Paper Trading (TWS)": TWS_PORT_PAPER if IBKR_AVAILABLE else 7497,
-            "Live Trading (TWS)":  TWS_PORT_LIVE  if IBKR_AVAILABLE else 7496,
-            "Paper (Gateway)":     IB_GW_PORT_PAPER if IBKR_AVAILABLE else 4002,
-            "Live (Gateway)":      IB_GW_PORT_LIVE  if IBKR_AVAILABLE else 4001,
-        }
-        port = port_map[mode]
+        if use_ngrok:
+            saved_port = st.session_state.get("ngrok_port", 7497)
+            port = st.number_input(
+                "ngrok Port", min_value=1, max_value=65535,
+                value=saved_port, step=1,
+                help="Die Portnummer aus der ngrok-Ausgabe (die 5-stellige Zahl)"
+            )
+            st.session_state["ngrok_port"] = port
+        else:
+            mode = st.selectbox("Modus", ["Paper Trading (TWS)", "Live Trading (TWS)",
+                                           "Paper (Gateway)", "Live (Gateway)"])
+            port_map = {
+                "Paper Trading (TWS)": TWS_PORT_PAPER if IBKR_AVAILABLE else 7497,
+                "Live Trading (TWS)":  TWS_PORT_LIVE  if IBKR_AVAILABLE else 7496,
+                "Paper (Gateway)":     IB_GW_PORT_PAPER if IBKR_AVAILABLE else 4002,
+                "Live (Gateway)":      IB_GW_PORT_LIVE  if IBKR_AVAILABLE else 4001,
+            }
+            port = port_map[mode]
+
     with col3:
         client_id = st.number_input("Client ID", min_value=1, max_value=999,
                                      value=42, step=1)
 
-    is_live = "Live" in mode
+    is_live = not use_ngrok and "Live" in locals().get("mode", "")
     if is_live:
         st.warning("Live Trading ausgewählt — Orders werden mit echtem Geld platziert!")
 
