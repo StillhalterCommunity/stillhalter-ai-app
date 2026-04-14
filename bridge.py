@@ -1,10 +1,8 @@
 """
 Stillhalter AI App — TWS Bridge
 ================================
-Startet automatisch einen ngrok-Tunnel zu TWS und zeigt die Verbindungsdaten an.
-
-Einmalige Installation:
-  pip3 install pyngrok
+Startet automatisch einen SSH-Tunnel (serveo.net) zu TWS.
+Kein Account, kein Download, keine Kreditkarte nötig — SSH ist auf jedem Mac.
 
 Starten:
   python3 bridge.py
@@ -13,21 +11,13 @@ Dann in der App Seite 14 → "Über ngrok" → Host + Port aus dieser Ausgabe ei
 """
 
 import sys
-import time
+import subprocess
+import re
 import signal
+import socket
+import time
 
-# ── pyngrok prüfen ────────────────────────────────────────────────────────────
-try:
-    from pyngrok import ngrok, conf, exception as ngrok_exc
-except ImportError:
-    print("\n⚠️  pyngrok nicht installiert. Bitte einmalig ausführen:")
-    print("   pip3 install pyngrok\n")
-    sys.exit(1)
-
-# ── Konfiguration ─────────────────────────────────────────────────────────────
-TWS_PORT   = 7497   # Paper Trading TWS
-NGROK_AUTH = ""     # Optional: ngrok Auth-Token (ngrok.com → kostenloses Konto)
-                    # Ohne Token: Tunnel läuft, aber mit Verbindungslimit
+TWS_PORT = 7497   # Paper Trading TWS (Live: 7496)
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════╗
@@ -37,9 +27,8 @@ BANNER = """
 ╚══════════════════════════════════════════════════════════╝
 """
 
-def _check_tws_running() -> bool:
-    """Prüft ob TWS auf dem konfigurierten Port lauscht."""
-    import socket
+
+def _check_tws() -> bool:
     try:
         with socket.create_connection(("127.0.0.1", TWS_PORT), timeout=2):
             return True
@@ -47,24 +36,12 @@ def _check_tws_running() -> bool:
         return False
 
 
-def _cleanup(tunnel, signum=None, frame=None):
-    """Tunnel sauber schließen beim Beenden."""
-    print("\n\n🛑 Bridge wird beendet...")
-    try:
-        ngrok.disconnect(tunnel.public_url)
-        ngrok.kill()
-    except Exception:
-        pass
-    print("✅ Tunnel geschlossen. Tschüss!\n")
-    sys.exit(0)
-
-
 def main():
     print(BANNER)
 
-    # TWS-Status prüfen
+    # TWS prüfen
     print(f"🔍 Prüfe TWS auf Port {TWS_PORT}...", end=" ", flush=True)
-    if _check_tws_running():
+    if _check_tws():
         print("✅ TWS läuft")
     else:
         print("❌ TWS nicht gefunden!")
@@ -72,34 +49,65 @@ def main():
         print("   Dann dieses Skript erneut starten.\n")
         sys.exit(1)
 
-    # ngrok Auth-Token setzen falls vorhanden
-    if NGROK_AUTH:
-        conf.get_default().auth_token = NGROK_AUTH
+    print("🚀 Starte Tunnel über serveo.net...")
+    print("   (Kein Account nötig — nutzt SSH, das auf deinem Mac schon vorhanden ist)\n")
 
-    # Tunnel starten
-    print("🚀 Starte ngrok-Tunnel...", end=" ", flush=True)
-    try:
-        tunnel = ngrok.connect(TWS_PORT, "tcp")
-    except ngrok_exc.PyngrokNgrokError as e:
-        if "auth" in str(e).lower() or "token" in str(e).lower():
-            print("\n\n⚠️  ngrok Auth-Token fehlt oder ungültig.")
-            print("   1. Kostenlosen Account auf ngrok.com erstellen")
-            print("   2. Auth-Token kopieren")
-            print(f"   3. In bridge.py Zeile 'NGROK_AUTH = \"\"' deinen Token eintragen\n")
-        else:
-            print(f"\n❌ ngrok Fehler: {e}\n")
+    # SSH-Tunnel starten
+    cmd = [
+        "ssh", "-tt",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ExitOnForwardFailure=yes",
+        "-R", f"0:localhost:{TWS_PORT}",
+        "serveo.net"
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    def _cleanup(signum=None, frame=None):
+        print("\n\n🛑 Bridge wird beendet...")
+        proc.terminate()
+        print("✅ Tunnel geschlossen.\n")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _cleanup)
+    signal.signal(signal.SIGTERM, _cleanup)
+
+    # Auf Tunnel-URL warten
+    host = None
+    port = None
+    start = time.time()
+
+    for line in proc.stdout:
+        line = line.strip()
+
+        # URL erkennen: "Forwarding TCP connections from tcp://serveo.net:XXXXX"
+        match = re.search(r"tcp://([^:]+):(\d+)", line)
+        if match:
+            host = match.group(1)
+            port = match.group(2)
+            break
+
+        # Timeout nach 20 Sekunden
+        if time.time() - start > 20:
+            print("❌ Timeout — kein Tunnel erhalten.")
+            print("   serveo.net ist möglicherweise nicht erreichbar.")
+            print("   Bitte nochmal versuchen oder ngrok.com nutzen.\n")
+            proc.terminate()
+            sys.exit(1)
+
+    if not host or not port:
+        print("❌ Keine Tunnel-URL erhalten.")
+        proc.terminate()
         sys.exit(1)
 
-    # URL parsen
-    public_url = tunnel.public_url  # z.B. tcp://0.tcp.eu.ngrok.io:15432
-    host_port  = public_url.replace("tcp://", "")
-    host, port = host_port.rsplit(":", 1)
-
-    # Ctrl+C abfangen
-    signal.signal(signal.SIGINT, lambda s, f: _cleanup(tunnel, s, f))
-    signal.signal(signal.SIGTERM, lambda s, f: _cleanup(tunnel, s, f))
-
-    # Verbindungsdaten anzeigen
+    # Erfolgsmeldung
     print("✅ Tunnel aktiv!\n")
     print("═" * 56)
     print(f"  🔗 In der App eintragen (Seite 14 → 'Über ngrok'):")
@@ -108,18 +116,13 @@ def main():
     print(f"     Port:  {port}")
     print(f"")
     print("═" * 56)
-    print(f"\n  ⚡ TWS-Port {TWS_PORT} → {public_url}")
+    print(f"\n  ⚡ TWS-Port {TWS_PORT} → tcp://{host}:{port}")
     print(f"  🔒 Tunnel läuft bis du dieses Fenster schließt")
     print(f"\n  Zum Beenden: Ctrl+C\n")
 
-    # Alive-Status alle 30 Sekunden ausgeben
-    counter = 0
-    while True:
-        time.sleep(30)
-        counter += 1
-        mins = counter * 30 // 60
-        secs = (counter * 30) % 60
-        print(f"  ⏱  Aktiv seit {mins}:{secs:02d} Min  |  {public_url}", flush=True)
+    # Prozess am Leben halten
+    proc.wait()
+    print("\n⚠️  Tunnel wurde unerwartet beendet. Bitte neu starten.\n")
 
 
 if __name__ == "__main__":
