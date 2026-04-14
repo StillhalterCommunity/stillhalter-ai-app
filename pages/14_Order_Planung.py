@@ -106,10 +106,10 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
     # Verbindungsmodus wählen
     conn_mode = st.radio(
         "Verbindungsart",
-        ["🏠 Lokal (localhost)", "🌐 Über ngrok (Railway / Cloud)"],
+        ["🏠 Lokal (localhost)", "🌐 Über Tunnel (Railway / Cloud)"],
         horizontal=True,
     )
-    use_ngrok = "ngrok" in conn_mode
+    use_ngrok = "Tunnel" in conn_mode
 
     if not use_ngrok:
         st.html("""
@@ -121,13 +121,15 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
         st.html("""
 <div style='font-size:0.78rem;color:#aaa;line-height:1.8;margin-bottom:10px;
      background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
-  <b style='color:#a78bfa'>ngrok Setup (einmalig, 5 Min):</b><br>
-  1. Kostenlosen Account auf <b>ngrok.com</b> erstellen<br>
-  2. Mac Terminal: <code>brew install ngrok</code><br>
-  3. <code>ngrok config add-authtoken DEIN_TOKEN</code><br>
-  4. TWS öffnen → dann: <code>ngrok tcp 7497</code><br>
-  5. ngrok zeigt z.B. <b>tcp://0.tcp.eu.ngrok.io:15432</b> → unten eintragen<br>
-  6. In TWS: "Nur Verbindungen vom lokalen Host" → <b>deaktivieren</b>
+  <b style='color:#a78bfa'>So verbinden (kein Account nötig):</b><br>
+  1. TWS auf deinem Mac starten (Paper Trading)<br>
+  2. In TWS: "Nur Verbindungen vom lokalen Host" → <b>deaktivieren</b><br>
+  3. Mac Terminal öffnen und eingeben:<br>
+  <code style='background:#111;padding:3px 8px;border-radius:4px;display:inline-block;margin:4px 0'>
+    python3 bridge.py
+  </code><br>
+  4. Das Skript zeigt: <b>Host: serveo.net</b> und <b>Port: 12345</b><br>
+  5. Diese zwei Werte hier unten eintragen → Verbindung testen
 </div>""")
 
     col1, col2, col3 = st.columns([3, 1, 1])
@@ -135,9 +137,9 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
         if use_ngrok:
             saved_host = st.session_state.get("ngrok_host", "")
             host = st.text_input(
-                "ngrok Host", value=saved_host,
-                placeholder="z.B. 0.tcp.eu.ngrok.io",
-                help="Den Hostnamen aus der ngrok-Ausgabe eintragen (ohne tcp://)"
+                "Tunnel Host", value=saved_host,
+                placeholder="z.B. serveo.net",
+                help="Hostnamen aus der bridge.py Ausgabe eintragen (Zeile 'Host:')"
             )
             if host:
                 st.session_state["ngrok_host"] = host
@@ -148,9 +150,9 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
         if use_ngrok:
             saved_port = st.session_state.get("ngrok_port", 7497)
             port = st.number_input(
-                "ngrok Port", min_value=1, max_value=65535,
+                "Tunnel Port", min_value=1, max_value=65535,
                 value=saved_port, step=1,
-                help="Die Portnummer aus der ngrok-Ausgabe (die 5-stellige Zahl)"
+                help="Die Portnummer aus der bridge.py Ausgabe (Zeile 'Port:')"
             )
             st.session_state["ngrok_port"] = port
         else:
