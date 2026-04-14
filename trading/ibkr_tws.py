@@ -85,7 +85,12 @@ class AccountSummary:
 # ── Verbindung ────────────────────────────────────────────────────────────────
 
 def _get_ib():
-    """Importiert ib_insync — gibt None zurück wenn nicht installiert."""
+    """Importiert ib_insync und erstellt einen Event Loop falls keiner existiert."""
+    import asyncio
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
     try:
         from ib_insync import IB
         return IB()
