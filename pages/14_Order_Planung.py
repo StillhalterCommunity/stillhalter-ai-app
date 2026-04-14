@@ -244,6 +244,34 @@ with col_d:
 
 expiry_str = expiry_date.strftime("%Y%m%d")
 
+# ── Aktueller Kurs ────────────────────────────────────────────────────────────
+if ticker:
+    try:
+        import yfinance as yf
+        _info = yf.Ticker(ticker).fast_info
+        _price = float(_info.last_price or _info.previous_close or 0)
+        _prev  = float(_info.previous_close or 0)
+        _chg   = _price - _prev
+        _chg_pct = (_chg / _prev * 100) if _prev > 0 else 0
+        _color = "#22c55e" if _chg >= 0 else "#ef4444"
+        _sign  = "+" if _chg >= 0 else ""
+        if _price > 0:
+            st.html(f"""
+<div style='background:#0e0e0e;border:1px solid #222;border-radius:8px;
+     padding:10px 16px;margin:8px 0;display:inline-flex;align-items:center;gap:16px'>
+  <span style='font-size:0.78rem;color:#666;font-family:sans-serif'>{ticker} Kurs</span>
+  <span style='font-size:1.1rem;font-weight:700;color:#f0f0f0;font-family:sans-serif'>
+    ${_price:.2f}
+  </span>
+  <span style='font-size:0.82rem;color:{_color};font-family:sans-serif'>
+    {_sign}{_chg:.2f} ({_sign}{_chg_pct:.2f}%)
+  </span>
+  <span style='font-size:0.72rem;color:#444;font-family:sans-serif'>15 Min verzögert</span>
+</div>
+""")
+    except Exception:
+        pass
+
 st.markdown("")
 
 # ── Strike-Eingaben je Strategie ──────────────────────────────────────────────
