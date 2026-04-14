@@ -64,13 +64,22 @@ def calculate_crv_score(
 # ── Short Strangle Scan ───────────────────────────────────────────────────────
 
 def _mid(row) -> float:
-    """Midprice aus Bid/Ask oder LastPrice."""
+    """Midprice NUR aus Bid/Ask — gibt 0 zurück wenn kein echter Markt."""
     bid = float(row.get("bid", 0) or 0)
     ask = float(row.get("ask", 0) or 0)
-    last = float(row.get("lastPrice", 0) or 0)
-    if bid > 0 and ask > 0:
+    if bid > 0 and ask > 0 and ask >= bid:
         return (bid + ask) / 2
-    return last
+    return 0.0   # kein gültiger Markt → wird später herausgefiltert
+
+
+def _spread_pct(row) -> float:
+    """Spread in % des Midpreises. NaN wenn kein Markt."""
+    bid = float(row.get("bid", 0) or 0)
+    ask = float(row.get("ask", 0) or 0)
+    if bid > 0 and ask > 0 and ask >= bid:
+        mid = (bid + ask) / 2
+        return (ask - bid) / mid * 100 if mid > 0 else 999.0
+    return 999.0
 
 
 def scan_strangle(
@@ -82,6 +91,7 @@ def scan_strangle(
     min_oi: int = 5,
     otm_min: float = 10.0,
     otm_max: float = 50.0,
+    max_spread_pct: float = 60.0,    # max. Bid/Ask-Spread in % des Midpreises
 ) -> pd.DataFrame:
     """
     Scannt Short-Strangle-Kombinationen: SHORT PUT + SHORT CALL auf gleichem Verfallstag.
@@ -149,27 +159,54 @@ def scan_strangle(
             if p_exp.empty or c_exp.empty:
                 continue
 
-            # Mid-Price berechnen
-            p_exp["mid_price"] = p_exp.apply(_mid, axis=1)
-            c_exp["mid_price"] = c_exp.apply(_mid, axis=1)
+            # Bid/Ask validieren + Mid-Price berechnen (nur echter Markt)
+            for col in ("bid", "ask", "lastPrice"):
+                for df_ in (p_exp, c_exp):
+                    if col in df_.columns:
+                        df_[col] = pd.to_numeric(df_[col], errors="coerce").fillna(0.0)
+                    else:
+                        df_[col] = 0.0
+
+            p_exp["_has_market"] = (p_exp["bid"] > 0) & (p_exp["ask"] > 0) & (p_exp["ask"] >= p_exp["bid"])
+            c_exp["_has_market"] = (c_exp["bid"] > 0) & (c_exp["ask"] > 0) & (c_exp["ask"] >= c_exp["bid"])
+
+            # Mid-Price NUR aus Bid/Ask — kein lastPrice-Fallback
+            p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, 0.0)
+            c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, 0.0)
+
+            # Spread %
+            p_exp["_spread_pct"] = np.where(
+                p_exp["_has_market"] & (p_exp["mid_price"] > 0),
+                (p_exp["ask"] - p_exp["bid"]) / p_exp["mid_price"] * 100, 999.0)
+            c_exp["_spread_pct"] = np.where(
+                c_exp["_has_market"] & (c_exp["mid_price"] > 0),
+                (c_exp["ask"] - c_exp["bid"]) / c_exp["mid_price"] * 100, 999.0)
 
             # OTM% berechnen
             p_exp["otm_pct"] = ((current_price - p_exp["strike"].astype(float)) / current_price * 100).clip(lower=0)
             c_exp["otm_pct"] = ((c_exp["strike"].astype(float) - current_price) / current_price * 100).clip(lower=0)
 
-            # Filter anwenden
-            p_filt = p_exp[
-                (p_exp["otm_pct"] >= otm_min) & (p_exp["otm_pct"] <= otm_max) &
-                (p_exp["mid_price"] >= premium_min) &
-                (p_exp.get("impliedVolatility", pd.Series([1.0] * len(p_exp), index=p_exp.index)).fillna(0) >= iv_min) &
-                (p_exp.get("openInterest", pd.Series([min_oi] * len(p_exp), index=p_exp.index)).fillna(0) >= min_oi)
-            ]
-            c_filt = c_exp[
-                (c_exp["otm_pct"] >= otm_min) & (c_exp["otm_pct"] <= otm_max) &
-                (c_exp["mid_price"] >= premium_min) &
-                (c_exp.get("impliedVolatility", pd.Series([1.0] * len(c_exp), index=c_exp.index)).fillna(0) >= iv_min) &
-                (c_exp.get("openInterest", pd.Series([min_oi] * len(c_exp), index=c_exp.index)).fillna(0) >= min_oi)
-            ]
+            # Sparse-Market-Erkennung (wenn <20% echte Bid/Ask → Warnung aber kein Fallback)
+            p_sparse = p_exp["_has_market"].mean() < 0.20
+            c_sparse = c_exp["_has_market"].mean() < 0.20
+
+            # Filter anwenden — immer Bid UND Ask erforderlich
+            def _apply_filters(df_, sparse: bool) -> pd.DataFrame:
+                iv_col = df_.get("impliedVolatility", pd.Series([1.0]*len(df_), index=df_.index)).fillna(0)
+                oi_col = df_.get("openInterest",      pd.Series([min_oi]*len(df_), index=df_.index)).fillna(0)
+                mask = (
+                    df_["_has_market"] &                         # Bid UND Ask vorhanden
+                    (df_["_spread_pct"] <= max_spread_pct) &     # Spread nicht zu groß
+                    (df_["otm_pct"] >= otm_min) &
+                    (df_["otm_pct"] <= otm_max) &
+                    (df_["mid_price"] >= premium_min) &
+                    (iv_col >= iv_min) &
+                    (oi_col >= min_oi)
+                )
+                return df_[mask]
+
+            p_filt = _apply_filters(p_exp, p_sparse)
+            c_filt = _apply_filters(c_exp, c_sparse)
 
             if p_filt.empty or c_filt.empty:
                 continue
@@ -282,6 +319,7 @@ def scan_ticker(
             dte_min=dte_min, dte_max=dte_max,
             iv_min=iv_min, premium_min=premium_min,
             min_oi=min_oi, otm_min=otm_min, otm_max=otm_max,
+            max_spread_pct=max_spread_pct,
         )
 
     try:
@@ -358,24 +396,29 @@ def scan_ticker(
             mask &= df["impliedVolatility"].fillna(0) >= iv_min
 
         # ── Liquiditäts-Filter ────────────────────────────────────────────────
-        # Auto-Fallback: wenn Yahoo Finance kaum Bid/Ask liefert (<20%), auf lastPrice
-        # zurückfallen — passiert regelmäßig auch während Marktzeiten.
         bid_ask_rate = df["_has_market"].mean() if len(df) > 0 else 0.0
         sparse_market = bid_ask_rate < 0.20
 
-        if require_valid_market and not sparse_market:
-            # Normalmodus: nur echte Bid/Ask-Optionen
-            mask &= df["_has_market"]
-        elif require_valid_market and sparse_market:
-            # Fallback: lastPrice akzeptieren, aber mindestens > 0
-            mask &= (df["_has_market"] | (df["lastPrice"] > 0))
+        if require_valid_market:
+            if not sparse_market:
+                # Normalmodus: nur echte Bid/Ask-Optionen
+                mask &= df["_has_market"]
+                # Mid-Preis NUR aus Bid/Ask
+                df["mid_price"] = np.where(df["_has_market"],
+                                            (df["bid"] + df["ask"]) / 2, 0.0)
+            else:
+                # Sparse-Markt: lastPrice als Fallback erlauben, aber Mid bevorzugen
+                mask &= (df["_has_market"] | (df["lastPrice"] > 0))
+                df["mid_price"] = np.where(
+                    df["_has_market"],
+                    (df["bid"] + df["ask"]) / 2,  # echter Markt → Mid
+                    df["lastPrice"]                 # Fallback → Last
+                )
 
-        # Spread-Filter (nur auf Optionen mit echtem Markt anwenden)
+        # Spread-Filter: immer anwenden (nur auf Optionen mit echtem Markt)
         if max_spread_pct < 999.0:
-            # Optionen ohne Markt (NaN spread) werden bei require_valid_market
-            # bereits ausgeschlossen; wenn erlaubt, dann nicht am Spread messen
             valid_spread = df["_spread_pct"].notna() & (df["_spread_pct"] <= max_spread_pct)
-            no_spread    = df["_spread_pct"].isna()   # kein Bid/Ask → kein Spread
+            no_spread    = df["_spread_pct"].isna()
             mask &= (valid_spread | no_spread)
 
         df = df[mask].copy()
