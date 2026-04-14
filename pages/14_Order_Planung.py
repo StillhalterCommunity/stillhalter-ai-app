@@ -106,56 +106,64 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
     # Verbindungsmodus wählen
     conn_mode = st.radio(
         "Verbindungsart",
-        ["🏠 Lokal (localhost)", "🌐 Über Tunnel (Railway / Cloud)"],
+        ["🌐 Über Bridge (Railway / Cloud)", "🏠 Lokal (localhost)"],
         horizontal=True,
     )
-    use_ngrok = "Tunnel" in conn_mode
+    use_bridge = "Bridge" in conn_mode
 
-    if not use_ngrok:
+    if use_bridge:
+        st.html("""
+<div style='font-size:0.78rem;color:#aaa;line-height:1.9;margin-bottom:10px;
+     background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
+  <b style='color:#a78bfa'>So verbinden (einmalig ~2 Min, kein Account nötig):</b><br>
+  1. TWS auf deinem Mac starten (Paper Trading)<br>
+  2. Mac Terminal öffnen und eingeben:<br>
+  <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:4px 0;color:#22c55e'>
+    python3 "/Users/Riebartsch/Claude Code/options-dashboard/bridge.py"</code>
+  3. Das Skript zeigt eine <b>Tunnel-URL</b> → hier unten eintragen → Verbindung testen
+</div>""")
+
+        saved_url = st.session_state.get("bridge_url", "")
+        bridge_url = st.text_input(
+            "Tunnel-URL (aus bridge.py)",
+            value=saved_url,
+            placeholder="https://xxxxx.localhost.run",
+            help="Die vollständige URL die bridge.py anzeigt"
+        )
+        if bridge_url:
+            st.session_state["bridge_url"] = bridge_url.rstrip("/")
+
+        bridge_key = "stillhalter-bridge"   # muss mit bridge.py übereinstimmen
+
+        if st.button("Verbindung testen", key="test_bridge",
+                     disabled=not bridge_url):
+            try:
+                import requests as _req
+                r = _req.get(f"{bridge_url.rstrip('/')}/ping", timeout=8)
+                data = r.json()
+                if data.get("tws"):
+                    st.session_state.ibkr_connected = True
+                    st.session_state.ibkr_config = {"mode": "bridge",
+                                                     "url": bridge_url.rstrip("/"),
+                                                     "key": bridge_key}
+                    st.success("Verbunden — Bridge läuft, TWS erreichbar")
+                    st.rerun()
+                else:
+                    st.error("Bridge erreichbar, aber TWS antwortet nicht. "
+                             "Bitte TWS auf dem Mac starten.")
+            except Exception as e:
+                st.error(f"Keine Verbindung zur Bridge: {e}")
+
+    else:
         st.html("""
 <div style='font-size:0.78rem;color:#888;line-height:1.6;margin-bottom:10px;
      background:#0e0e0e;border-radius:8px;padding:12px;border-left:3px solid #3b82f6'>
-  TWS muss auf demselben Rechner laufen wie die App (lokal via <code>streamlit run app.py</code>)
+  Nur für lokalen Betrieb — TWS und App müssen auf demselben Rechner laufen.
 </div>""")
-    else:
-        st.html("""
-<div style='font-size:0.78rem;color:#aaa;line-height:1.8;margin-bottom:10px;
-     background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
-  <b style='color:#a78bfa'>So verbinden (kein Account nötig):</b><br>
-  1. TWS auf deinem Mac starten (Paper Trading)<br>
-  2. In TWS: "Nur Verbindungen vom lokalen Host" → <b>deaktivieren</b><br>
-  3. Mac Terminal öffnen und eingeben:<br>
-  <code style='background:#111;padding:3px 8px;border-radius:4px;display:inline-block;margin:4px 0'>
-    python3 bridge.py
-  </code><br>
-  4. Das Skript zeigt: <b>Host: serveo.net</b> und <b>Port: 12345</b><br>
-  5. Diese zwei Werte hier unten eintragen → Verbindung testen
-</div>""")
-
-    col1, col2, col3 = st.columns([3, 1, 1])
-    with col1:
-        if use_ngrok:
-            saved_host = st.session_state.get("ngrok_host", "")
-            host = st.text_input(
-                "Tunnel Host", value=saved_host,
-                placeholder="z.B. serveo.net",
-                help="Hostnamen aus der bridge.py Ausgabe eintragen (Zeile 'Host:')"
-            )
-            if host:
-                st.session_state["ngrok_host"] = host
-        else:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
             host = st.text_input("Host", value="127.0.0.1")
-
-    with col2:
-        if use_ngrok:
-            saved_port = st.session_state.get("ngrok_port", 7497)
-            port = st.number_input(
-                "Tunnel Port", min_value=1, max_value=65535,
-                value=saved_port, step=1,
-                help="Die Portnummer aus der bridge.py Ausgabe (Zeile 'Port:')"
-            )
-            st.session_state["ngrok_port"] = port
-        else:
+        with col2:
             mode = st.selectbox("Modus", ["Paper Trading (TWS)", "Live Trading (TWS)",
                                            "Paper (Gateway)", "Live (Gateway)"])
             port_map = {
@@ -165,14 +173,32 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                 "Live (Gateway)":      IB_GW_PORT_LIVE  if IBKR_AVAILABLE else 4001,
             }
             port = port_map[mode]
+        with col3:
+            client_id = st.number_input("Client ID", min_value=1, max_value=999,
+                                         value=42, step=1)
 
-    with col3:
-        client_id = st.number_input("Client ID", min_value=1, max_value=999,
-                                     value=42, step=1)
+        is_live = "Live" in mode
+        if is_live:
+            st.warning("Live Trading — Orders mit echtem Geld!")
 
-    is_live = not use_ngrok and "Live" in locals().get("mode", "")
-    if is_live:
-        st.warning("Live Trading ausgewählt — Orders werden mit echtem Geld platziert!")
+        if st.button("Verbindung testen", disabled=not IB_INSYNC_INSTALLED):
+            if IBKR_AVAILABLE:
+                cfg = IBKRConfig(host=host, port=port, client_id=client_id)
+                with st.spinner("Verbinde..."):
+                    ok, msg = test_connection(cfg)
+                if ok:
+                    st.session_state.ibkr_config = cfg
+                    st.session_state.ibkr_connected = True
+                    acc = get_account_summary(cfg)
+                    if acc:
+                        st.session_state.account_info = acc
+                    st.success(f"Verbunden: {msg}")
+                    st.rerun()
+                else:
+                    st.session_state.ibkr_connected = False
+                    st.error(f"Fehler: {msg}")
+
+    is_live = False  # default
 
     if st.button("Verbindung testen", disabled=not IB_INSYNC_INSTALLED):
         if IBKR_AVAILABLE:
@@ -522,38 +548,68 @@ with btn_col:
     )
 
 # ── Order ausführen ───────────────────────────────────────────────────────────
-if place_clicked and IBKR_AVAILABLE:
+if place_clicked:
     cfg = _config()
-    placed: list[PlacedOrder] = []
+    use_bridge_mode = isinstance(cfg, dict) and cfg.get("mode") == "bridge"
 
     with st.spinner(f"Platziere {len(orders_to_place)} Order(s) in TWS..."):
         for params in orders_to_place:
-            result = place_option_order(params, cfg)
-            placed.append(result)
-            # Zur Session-Historie hinzufügen
-            st.session_state.placed_orders.append({
-                "Zeit":        datetime.now().strftime("%H:%M:%S"),
-                "Ticker":      result.ticker,
-                "Beschreibung": result.description,
-                "Limit $":     f"${result.limit_price:.2f}",
-                "Order-ID":    result.order_id,
-                "Status":      result.status,
-                "Fehler":      result.error or "",
-            })
+            if use_bridge_mode:
+                # Bridge-Modus: HTTP-Request an lokale Bridge
+                import requests as _req
+                try:
+                    r = _req.post(
+                        f"{cfg['url']}/order",
+                        json={
+                            "ticker":      params.ticker,
+                            "expiration":  params.expiration,
+                            "strike":      params.strike,
+                            "right":       params.right,
+                            "action":      params.action,
+                            "quantity":    params.quantity,
+                            "limit_price": params.limit_price,
+                            "order_type":  params.order_type,
+                        },
+                        headers={"X-API-Key": cfg["key"]},
+                        timeout=15,
+                    )
+                    data = r.json()
+                    order_id = data.get("order_id", -1)
+                    error = data.get("error") if r.status_code != 200 else None
+                    desc = (f"{params.action} {params.quantity}x {params.ticker} "
+                            f"{params.strike}{params.right} {params.expiration}")
+                    st.session_state.placed_orders.append({
+                        "Zeit":         datetime.now().strftime("%H:%M:%S"),
+                        "Ticker":       params.ticker,
+                        "Beschreibung": desc,
+                        "Limit $":      f"${params.limit_price:.2f}",
+                        "Order-ID":     order_id,
+                        "Status":       "Held" if not error else "Fehler",
+                        "Fehler":       error or "",
+                    })
+                    if error:
+                        st.error(f"Fehler: {error}")
+                    else:
+                        st.success(f"Platziert (Held): {desc} · Order-ID {order_id}")
+                except Exception as e:
+                    st.error(f"Bridge nicht erreichbar: {e}")
 
-    # Ergebnis anzeigen
-    all_ok = all(p.error is None for p in placed)
-    if all_ok:
-        st.success(
-            f"Order(s) platziert! Bitte in TWS prüfen und manuell transmittieren. "
-            f"Order-IDs: {', '.join(str(p.order_id) for p in placed)}"
-        )
-    else:
-        for p in placed:
-            if p.error:
-                st.error(f"Fehler bei {p.description}: {p.error}")
-            else:
-                st.success(f"Platziert: {p.description} (ID {p.order_id})")
+            elif IBKR_AVAILABLE:
+                # Lokal-Modus: direkte ib_insync Verbindung
+                result = place_option_order(params, cfg)
+                st.session_state.placed_orders.append({
+                    "Zeit":         datetime.now().strftime("%H:%M:%S"),
+                    "Ticker":       result.ticker,
+                    "Beschreibung": result.description,
+                    "Limit $":      f"${result.limit_price:.2f}",
+                    "Order-ID":     result.order_id,
+                    "Status":       result.status,
+                    "Fehler":       result.error or "",
+                })
+                if result.error:
+                    st.error(f"Fehler: {result.error}")
+                else:
+                    st.success(f"Platziert: {result.description} (ID {result.order_id})")
 
     st.rerun()
 
