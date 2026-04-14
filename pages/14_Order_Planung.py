@@ -574,35 +574,42 @@ if st.session_state.placed_orders:
 # ══════════════════════════════════════════════════════════════════════════════
 # SETUP-ANLEITUNG (kollabiert)
 # ══════════════════════════════════════════════════════════════════════════════
-with st.expander("⚙️ TWS Setup-Anleitung"):
+with st.expander("⚙️ TWS Setup-Anleitung", expanded=True):
     st.markdown("""
-**Schritt 1 — TWS starten**
-- Trader Workstation (TWS) oder IB Gateway herunterladen und starten
-- Mit deinem IBKR-Account einloggen
+**Schritt 1 — TWS starten und einloggen**
+- Trader Workstation (TWS) öffnen und mit deinem IBKR-Account einloggen
 
-**Schritt 2 — API aktivieren**
-- TWS: Konfiguration → API → Einstellungen
-- ✓ "Enable ActiveX and Socket Clients" aktivieren
-- Port: `7497` (Paper) oder `7496` (Live)
-- Trusted IPs: `127.0.0.1` hinzufügen
-- Readonlyapi deaktivieren (damit Orders platziert werden können)
+**Schritt 2 — API-Einstellungen öffnen**
+- In TWS oben: **Bearbeiten → Globale Konfiguration**
+- Links in der Liste: **API → Einstellungen**
 
-**Schritt 3 — Held Orders verstehen**
-- `transmit=False` → Order erscheint in TWS **gelb** ("Held")
-- Sie wird **nicht** an die Börse gesendet bis du in TWS auf "Transmit" klickst
-- Du hast volle Kontrolle — die App kann nur Orders vorschlagen, nie automatisch senden
+**Schritt 3 — Diese Einstellungen vornehmen**
 
-**Schritt 4 — ib_insync installieren**
-```
-pip install ib_insync
-```
+| Einstellung | Wert |
+|---|---|
+| ✅ ActiveX- und Socket-Clients aktivieren | einschalten |
+| ☐ Schreibgeschützte API | **ausschalten** (sonst keine Orders möglich) |
+| Socket Port | `7497` (Paper Trading) |
+| ✅ Nur Verbindungen vom lokalen Host zulassen | einschalten |
+| Vertrauenswürdige IPs | `127.0.0.1` eintragen → **Erstellen** klicken |
+
+→ **Übernehmen** klicken, dann TWS neu starten
+
+**Schritt 4 — Verbindung hier testen**
+- Host: `127.0.0.1` · Modus: Paper Trading (TWS) · Client ID: `42`
+- Auf **"Verbindung testen"** klicken → bei Erfolg erscheinen deine Kontodaten
+
+**Schritt 5 — Held Orders verstehen**
+- Die App platziert Orders mit `transmit=False` → erscheinen in TWS **gelb ("Held")**
+- Sie werden **nicht** an die Börse gesendet
+- Du gibst die finale Freigabe direkt in TWS: Rechtsklick auf die Order → **Übertragen**
 
 **Port-Referenz**
 
 | Software | Modus | Port |
 |---|---|---|
-| TWS | Paper | 7497 |
-| TWS | Live | 7496 |
+| TWS | Paper Trading | 7497 |
+| TWS | Live Trading | 7496 |
 | IB Gateway | Paper | 4002 |
 | IB Gateway | Live | 4001 |
 """)
