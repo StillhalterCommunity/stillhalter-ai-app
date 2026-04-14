@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Stillhalter AI App — Value Aktien Scanner
 Bewertet die Watchlist nach Qualität als Value-Aktie für Stillhalter-Strategien.

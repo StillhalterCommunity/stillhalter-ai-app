@@ -3,6 +3,7 @@ Stillhalter AI App — Authentifizierung & Login-Tracking
 Nutzerspezifische Passwörter + CSV-Protokollierung.
 """
 
+from __future__ import annotations
 import csv
 import os
 from datetime import datetime
