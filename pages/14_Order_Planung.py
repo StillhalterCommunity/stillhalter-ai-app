@@ -112,14 +112,20 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
     use_bridge = "Bridge" in conn_mode
 
     if use_bridge:
-        st.html("""
+        import os as _os
+        _app_dir    = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        _bridge_py  = _os.path.join(_app_dir, "bridge.py")
+        _bridge_cmd = f'python3 "{_bridge_py}"'
+
+        st.html(f"""
 <div style='font-size:0.78rem;color:#aaa;line-height:1.9;margin-bottom:10px;
      background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
   <b style='color:#a78bfa'>So verbinden (einmalig ~2 Min, kein Account nötig):</b><br>
   1. TWS auf deinem Mac/PC starten (Paper Trading, Port 7497)<br>
-  2. Terminal öffnen im App-Ordner und eingeben:<br>
-  <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:4px 0;color:#22c55e'>
-    python3 bridge.py</code>
+  2. Diesen Befehl kopieren und im Terminal ausführen:<br>
+  <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:6px 0;
+       color:#22c55e;word-break:break-all'>
+    {_bridge_cmd}</code>
   3. Das Skript zeigt eine <b>Tunnel-URL</b> (z.B. https://xxxxx.localhost.run) → hier unten eintragen<br>
   <span style='color:#6b7280'>✓ API-Key wird automatisch verwendet — kein manuelles Eintragen nötig</span>
 </div>""")
