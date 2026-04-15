@@ -1,6 +1,7 @@
 """
 Stillhalter AI App — Sentiment Analyse
-Chris Camillo Social Arbitrage: Virale Trends → Börsenchancen
+Chris Camillo Social Arbitrage: Virale Trends automatisch entdecken →
+Produkte identifizieren → Aktien mappen → Einpreisung bewerten.
 """
 
 from __future__ import annotations
@@ -21,690 +22,664 @@ from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 render_sidebar()
 
-# ── Signal-Keywords (Chris Camillo Demand-Signale) ────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# BRAND → TICKER DATENBANK
+# ══════════════════════════════════════════════════════════════════════════════
+BRAND_TICKER: dict[str, str | None] = {
+    # ── Consumer Tech ─────────────────────────────────────────────────────────
+    "apple":        "AAPL",  "iphone":     "AAPL",  "airpods":  "AAPL",
+    "apple watch":  "AAPL",  "macbook":    "AAPL",  "ipad":     "AAPL",
+    "nvidia":       "NVDA",  "geforce":    "NVDA",  "rtx":      "NVDA",
+    "amd":          "AMD",   "ryzen":      "AMD",   "radeon":   "AMD",
+    "intel":        "INTC",
+    "meta":         "META",  "instagram":  "META",  "quest":    "META",
+    "google":       "GOOGL", "pixel":      "GOOGL", "gemini":   "GOOGL",
+    "microsoft":    "MSFT",  "xbox":       "MSFT",  "copilot":  "MSFT",
+    "sony":         "SONY",  "playstation":"SONY",  "ps5":      "SONY",
+    "nintendo":     "NTDOY", "switch":     "NTDOY",
+    "amazon":       "AMZN",  "prime video":"AMZN",  "kindle":   "AMZN",
+    "netflix":      "NFLX",
+    "spotify":      "SPOT",
+    "arm":          "ARM",
+    "palantir":     "PLTR",
+    # ── Elektromobilität ──────────────────────────────────────────────────────
+    "tesla":        "TSLA",  "model y":    "TSLA",  "model 3":  "TSLA",
+    "cybertruck":   "TSLA",
+    "rivian":       "RIVN",
+    "lucid":        "LCID",
+    # ── Getränke ──────────────────────────────────────────────────────────────
+    "celsius":      "CELH",  "celsius energy": "CELH",
+    "monster energy":"MNST", "monster":    "MNST",
+    "dutch bros":   "BROS",
+    "starbucks":    "SBUX",
+    "coca-cola":    "KO",    "coke":       "KO",
+    "pepsi":        "PEP",
+    # ── Food ──────────────────────────────────────────────────────────────────
+    "chipotle":     "CMG",
+    "mcdonald":     "MCD",   "mcdonalds":  "MCD",
+    "domino":       "DPZ",   "dominos":    "DPZ",
+    "shake shack":  "SHAK",
+    "wingstop":     "WING",
+    "yum brands":   "YUM",   "taco bell":  "YUM",   "kfc": "YUM",
+    # ── Gesundheit / GLP-1 ────────────────────────────────────────────────────
+    "ozempic":      "NVO",   "wegovy":     "NVO",   "semaglutide": "NVO",
+    "mounjaro":     "LLY",   "tirzepatide":"LLY",   "zepbound": "LLY",
+    "hims":         "HIMS",
+    # ── Mode / Sport ──────────────────────────────────────────────────────────
+    "nike":         "NKE",   "air max":    "NKE",   "jordan":   "NKE",
+    "adidas":       "ADDYY",
+    "lululemon":    "LULU",  "lulu":       "LULU",
+    "on running":   "ONON",  "on cloud":   "ONON",
+    "hoka":         "DECK",  "ugg":        "DECK",
+    "skechers":     "SKX",
+    "under armour": "UAA",
+    # ── Home / Lifestyle ──────────────────────────────────────────────────────
+    "stanley":      "SWK",   "stanley cup":"SWK",   "stanley tumbler": "SWK",
+    "yeti":         "YETI",
+    "peloton":      "PTON",
+    "traeger":      "COOK",
+    # ── Einzelhandel ──────────────────────────────────────────────────────────
+    "costco":       "COST",
+    "target":       "TGT",
+    "walmart":      "WMT",
+    "home depot":   "HD",
+    # ── Reise / Mobility ──────────────────────────────────────────────────────
+    "airbnb":       "ABNB",
+    "uber":         "UBER",
+    "lyft":         "LYFT",
+    "booking":      "BKNG",
+    # ── Fintech ───────────────────────────────────────────────────────────────
+    "coinbase":     "COIN",
+    "robinhood":    "HOOD",
+    "affirm":       "AFRM",
+    # ── Entertainment ─────────────────────────────────────────────────────────
+    "disney":       "DIS",   "disney+":    "DIS",
+    "warner":       "WBD",
+    # ── Snowflake / Cloud ─────────────────────────────────────────────────────
+    "snowflake":    "SNOW",
+    "salesforce":   "CRM",
+}
+
+# ── Bullish Demand-Signale ─────────────────────────────────────────────────────
 BULLISH_KEYWORDS = [
-    "sold out", "selling out", "sell out", "obsessed", "addicted",
-    "can't stop", "cant stop", "can't find", "cant find", "impossible to find",
-    "viral", "trending", "everywhere", "amazing", "incredible", "insane",
-    "game changer", "game-changer", "must have", "need this", "love this",
-    "waiting list", "wait list", "back order", "backorder", "pre-order", "preorder",
-    "shipped", "just got", "unboxing", "recommend", "life changing", "worth it",
-    "everyone is", "everyone has", "blew up", "blowing up", "can't believe",
-    "cant believe", "mind blown", "10/10", "absolutely love", "buying more",
-    "restocking", "shortage", "overwhelming demand", "popular", "selling fast",
-    "so good", "best purchase", "changed my life", "hooked",
-    "ausverkauft", "überall", "alle kaufen", "süchtig", "empfehle",
-    "ausgezeichnet", "begeistert",
+    "sold out", "selling out", "obsessed", "addicted", "can't stop", "cant stop",
+    "can't find", "cant find", "impossible to find", "viral", "trending",
+    "everywhere", "amazing", "incredible", "game changer", "must have",
+    "need this", "love this", "waiting list", "backorder", "pre-order",
+    "blew up", "blowing up", "everyone has", "best purchase", "changed my life",
+    "buying more", "shortage", "overwhelming", "selling fast", "hooked",
+    "restocking", "10/10", "absolutely love", "can't believe how good",
+    "just got mine", "finally arrived", "worth every penny",
 ]
-
 BEARISH_KEYWORDS = [
-    "returning", "returned", "return it", "disappointed", "disappointing",
-    "terrible", "broken", "defective", "defect", "recall", "recalled",
-    "lawsuit", "sued", "scandal", "avoid", "stay away", "worst",
-    "waste of money", "overpriced", "cancelled", "cancel", "switching to",
-    "moved to", "stopped using", "don't buy", "dont buy", "regret",
-    "refund", "complaint", "dangerous", "unsafe", "inferior", "overrated",
-    "not worth", "cheaply made", "quality issues", "falling apart",
-    "enttäuscht", "zurückgeben", "schlecht", "kaputt", "vermeiden",
-    "rückruf", "klage", "überteuert",
+    "returning", "returned", "disappointed", "terrible", "broken", "defective",
+    "recall", "recalled", "lawsuit", "avoid", "stay away", "worst ever",
+    "waste of money", "overpriced", "switching away", "stopped using",
+    "don't buy", "regret", "refund", "dangerous", "overrated",
 ]
 
-# ── Preset-Ideen (Chris Camillo Stil) ────────────────────────────────────────
-PRESET_IDEAS = [
-    {"emoji": "🥤", "topic": "Celsius Energy Drink", "ticker": "CELH"},
-    {"emoji": "☕", "topic": "Stanley Cup Tumbler",   "ticker": "SWK"},
-    {"emoji": "🎮", "topic": "NVIDIA RTX GPU",        "ticker": "NVDA"},
-    {"emoji": "🧘", "topic": "Lululemon Leggings",    "ticker": "LULU"},
-    {"emoji": "💊", "topic": "Ozempic Weight Loss",   "ticker": "NVO"},
-    {"emoji": "👟", "topic": "On Running Shoes",      "ticker": "ONON"},
-    {"emoji": "🌮", "topic": "Chipotle Mexican Grill","ticker": "CMG"},
-    {"emoji": "🚗", "topic": "Tesla Cybertruck",      "ticker": "TSLA"},
+# ── Subreddits für Consumer-Trend-Entdeckung ──────────────────────────────────
+CONSUMER_SUBREDDITS = [
+    "all",
+    "BuyItForLife", "Frugal", "Deals",
+    "fitness", "running", "bodybuilding",
+    "femalefashionadvice", "malefashionadvice", "streetwear", "sneakers",
+    "EatCheapAndHealthy", "loseit", "keto",
+    "gaming", "pcmasterrace", "hardware",
+    "personalfinance", "investing",
+    "homeimprovement", "DIY",
 ]
 
-# ── Daten-Funktionen ──────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# DATEN-FUNKTIONEN
+# ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=900, show_spinner=False)
-def _fetch_reddit(query: str, limit: int = 40) -> list[dict]:
-    """Reddit via öffentlichem JSON-API — kein API-Key nötig."""
-    import requests
+def _find_brands(text: str) -> list[str]:
+    """Findet Marken-Erwähnungen in einem Text."""
+    text_lower = text.lower()
+    return [brand for brand in BRAND_TICKER if brand in text_lower]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _google_trending(country: str = "united_states") -> list[str]:
+    """Aktuelle Google Trending Searches (pytrends)."""
     try:
-        url = (
-            f"https://www.reddit.com/search.json"
-            f"?q={requests.utils.quote(query)}&sort=hot&limit={limit}&t=week"
-        )
-        r = requests.get(url, headers={"User-Agent": "StillhalterApp/2.0"}, timeout=12)
-        if r.status_code != 200:
-            return []
-        posts = []
-        for child in r.json().get("data", {}).get("children", []):
-            p = child.get("data", {})
-            posts.append({
-                "title":        p.get("title", ""),
-                "text":         p.get("selftext", "")[:600],
-                "score":        p.get("score", 0),
-                "comments":     p.get("num_comments", 0),
-                "subreddit":    p.get("subreddit", ""),
-                "url":          "https://reddit.com" + p.get("permalink", ""),
-                "upvote_ratio": p.get("upvote_ratio", 0.5),
-                "created":      datetime.utcfromtimestamp(
-                                    p.get("created_utc", 0)).strftime("%d.%m.%Y"),
-            })
-        return sorted(posts, key=lambda x: x["score"], reverse=True)
+        from pytrends.request import TrendReq
+        pt = TrendReq(hl="en-US", tz=360, timeout=(10, 30))
+        df = pt.trending_searches(pn=country)
+        return df[0].tolist()[:25]
     except Exception:
         return []
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _fetch_google_trends(keyword: str) -> tuple[pd.DataFrame, dict]:
-    """Google Trends via pytrends — liefert Interesse + verwandte Suchanfragen."""
-    try:
-        from pytrends.request import TrendReq
-        pt = TrendReq(hl="de-DE", tz=60, timeout=(10, 30))
-        pt.build_payload([keyword], timeframe="now 30-d")
-        interest = pt.interest_over_time()
-        related_raw = pt.related_queries()
-        related: dict = {}
-        if keyword in related_raw:
-            top = related_raw[keyword].get("top")
-            if top is not None and not top.empty:
-                related["top"] = top.head(10).to_dict("records")
-            rising = related_raw[keyword].get("rising")
-            if rising is not None and not rising.empty:
-                related["rising"] = rising.head(10).to_dict("records")
-        return interest, related
-    except ImportError:
-        return pd.DataFrame(), {"error": "pytrends nicht installiert"}
-    except Exception as e:
-        return pd.DataFrame(), {"error": str(e)}
-
-
 @st.cache_data(ttl=900, show_spinner=False)
-def _fetch_nitter(query: str) -> list[dict]:
-    """X/Twitter-Posts via Nitter RSS (öffentliche Instanzen, kein Account)."""
-    try:
-        import feedparser
-    except ImportError:
-        return [{"error": "feedparser nicht installiert"}]
-
-    INSTANCES = [
-        "https://nitter.privacydev.net",
-        "https://nitter.poast.org",
-        "https://nitter.1d4.us",
-        "https://nitter.tiekoetter.com",
-        "https://nitter.adminforge.de",
-    ]
-    encoded = query.replace(" ", "+")
-    for inst in INSTANCES:
+def _reddit_scan(subreddits: tuple[str, ...], min_score: int) -> list[dict]:
+    """Scannt Reddit-Posts auf Produkt-Erwähnungen (nur Titel + Text, kein API-Key)."""
+    import requests
+    posts: list[dict] = []
+    seen: set[str] = set()
+    for sub in subreddits:
         try:
-            feed = feedparser.parse(
-                f"{inst}/search/rss?q={encoded}&f=tweets",
-                request_headers={"User-Agent": "StillhalterApp/2.0"},
-            )
-            if feed.entries:
-                return [
-                    {
-                        "text": re.sub(r"<[^>]+>", "", e.get("summary", ""))[:400],
-                        "link": e.get("link", ""),
-                        "date": e.get("published", ""),
-                    }
-                    for e in feed.entries[:30]
-                ]
+            url = f"https://www.reddit.com/r/{sub}/hot.json?limit=30"
+            r = requests.get(url, headers={"User-Agent": "StillhalterApp/2.0"}, timeout=10)
+            if r.status_code != 200:
+                continue
+            for child in r.json().get("data", {}).get("children", []):
+                p = child.get("data", {})
+                pid = p.get("id", "")
+                if pid in seen or p.get("score", 0) < min_score:
+                    continue
+                seen.add(pid)
+                title = p.get("title", "")
+                text  = p.get("selftext", "")[:600]
+                combined = title + " " + text
+                brands = _find_brands(combined)
+                if not brands:
+                    continue
+                bull = sum(1 for kw in BULLISH_KEYWORDS if kw in combined.lower())
+                bear = sum(1 for kw in BEARISH_KEYWORDS if kw in combined.lower())
+                posts.append({
+                    "id":        pid,
+                    "title":     title,
+                    "score":     p.get("score", 0),
+                    "comments":  p.get("num_comments", 0),
+                    "subreddit": p.get("subreddit", sub),
+                    "url":       "https://reddit.com" + p.get("permalink", ""),
+                    "brands":    brands,
+                    "bull":      bull,
+                    "bear":      bear,
+                    "text":      text[:300],
+                })
         except Exception:
             continue
-    return []
+    return posts
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def _fetch_yt_comments(video_url: str) -> list[str]:
-    """YouTube-Kommentare via youtube-comment-downloader (kein API-Key)."""
+@st.cache_data(ttl=600, show_spinner=False)
+def _reddit_comments(post_id: str, limit: int = 30) -> list[str]:
+    """Lädt die Top-Kommentare eines Reddit-Posts."""
+    import requests
     try:
-        from youtube_comment_downloader import YoutubeCommentDownloader
-        dl = YoutubeCommentDownloader()
+        url = f"https://www.reddit.com/comments/{post_id}.json?limit={limit}&depth=1"
+        r = requests.get(url, headers={"User-Agent": "StillhalterApp/2.0"}, timeout=10)
+        if r.status_code != 200:
+            return []
         comments = []
-        for i, c in enumerate(dl.get_comments_from_url(video_url, sort_by=0)):
-            comments.append(c.get("text", ""))
-            if i >= 199:
-                break
-        return comments
-    except ImportError:
-        return ["__IMPORT_ERROR__"]
-    except Exception as e:
-        return [f"__ERROR__: {e}"]
+        for item in r.json():
+            for child in item.get("data", {}).get("children", []):
+                body = child.get("data", {}).get("body", "")
+                if body and body != "[deleted]":
+                    comments.append(body[:400])
+        return comments[:30]
+    except Exception:
+        return []
 
 
-def _analyze_sentiment(texts: list[str]) -> dict:
-    """Berechnet Bullish/Bearish-Score aus einer Liste von Texten."""
-    all_text = " ".join(texts).lower()
+@st.cache_data(ttl=3600, show_spinner=False)
+def _stock_info(ticker: str) -> dict:
+    """Kurs + 30/90-Tage-Rendite via yfinance."""
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(ticker).history(period="3mo")
+        if hist.empty or len(hist) < 5:
+            return {}
+        cur    = float(hist["Close"].iloc[-1])
+        p30    = float(hist["Close"].iloc[max(-22, -len(hist))])
+        p90    = float(hist["Close"].iloc[0])
+        r30    = (cur - p30) / p30 * 100
+        r90    = (cur - p90) / p90 * 100
 
-    bull_found: list[tuple[str, int]] = []
-    bear_found: list[tuple[str, int]] = []
+        if r90 > 35:
+            label, color = "Stark eingepreist", "#ef4444"
+            hint = f"Aktie +{r90:.0f}% in 90 Tagen — Markt kennt den Trend bereits"
+        elif r90 > 15:
+            label, color = "Teilweise eingepreist", "#f59e0b"
+            hint = f"Aktie +{r90:.0f}% in 90 Tagen — Trend bereits bekannt, noch Upside möglich"
+        elif r90 > 0:
+            label, color = "Kaum eingepreist ✅", "#22c55e"
+            hint = f"Aktie nur +{r90:.0f}% in 90 Tagen — Trend noch nicht reflektiert"
+        elif r90 > -15:
+            label, color = "Nicht eingepreist ✅", "#22c55e"
+            hint = f"Aktie seitwärts/fallend trotz Trend — frühes Signal"
+        else:
+            label, color = "Gegenläufig 📉", "#8b5cf6"
+            hint = f"Aktie -{abs(r90):.0f}% trotz Trend — Konträr-Signal prüfen"
 
-    for kw in BULLISH_KEYWORDS:
-        count = all_text.count(kw.lower())
-        if count > 0:
-            bull_found.append((kw, count))
-    for kw in BEARISH_KEYWORDS:
-        count = all_text.count(kw.lower())
-        if count > 0:
-            bear_found.append((kw, count))
-
-    bull_score = sum(c for _, c in bull_found)
-    bear_score = sum(c for _, c in bear_found)
-    total = bull_score + bear_score
-
-    net = (bull_score - bear_score) / max(total, 1) * 100
-
-    if net >= 40:
-        label, color, icon = "Stark Bullish",  "#22c55e", "🚀"
-    elif net >= 15:
-        label, color, icon = "Bullish",        "#86efac", "📈"
-    elif net >= -15:
-        label, color, icon = "Neutral",        "#f59e0b", "➡️"
-    elif net >= -40:
-        label, color, icon = "Bearish",        "#f87171", "📉"
-    else:
-        label, color, icon = "Stark Bearish",  "#ef4444", "💥"
-
-    return {
-        "bull_score":  bull_score,
-        "bear_score":  bear_score,
-        "net_score":   round(net, 1),
-        "label":       label,
-        "color":       color,
-        "icon":        icon,
-        "bull_found":  sorted(bull_found, key=lambda x: x[1], reverse=True)[:8],
-        "bear_found":  sorted(bear_found, key=lambda x: x[1], reverse=True)[:8],
-        "total_texts": len(texts),
-    }
+        return {
+            "price": cur, "r30": r30, "r90": r90,
+            "label": label, "color": color, "hint": hint,
+        }
+    except Exception:
+        return {}
 
 
-def _highlight(text: str, kw_list: list[str], color: str) -> str:
-    """Hebt Schlüsselwörter in einem Text farbig hervor (HTML)."""
-    for kw in sorted(kw_list, key=len, reverse=True):
-        pattern = re.compile(re.escape(kw), re.IGNORECASE)
-        text = pattern.sub(
-            f'<span style="background:{color}22;color:{color};'
-            f'border-radius:3px;padding:0 2px;font-weight:600">{kw}</span>',
-            text,
+def _aggregate_brands(posts: list[dict], trending_google: list[str]) -> list[dict]:
+    """Aggregiert Marken-Erwähnungen und berechnet Trend-Score."""
+    from collections import defaultdict
+    brand_data: dict[str, dict] = defaultdict(lambda: {
+        "posts": [], "subreddits": set(), "bull": 0, "bear": 0,
+        "google": False, "reddit_score_sum": 0,
+    })
+
+    # Reddit-Daten
+    for post in posts:
+        for brand in post["brands"]:
+            bd = brand_data[brand]
+            bd["posts"].append(post)
+            bd["subreddits"].add(post["subreddit"])
+            bd["bull"] += post["bull"]
+            bd["bear"] += post["bear"]
+            bd["reddit_score_sum"] += post["score"]
+
+    # Google Trends ergänzen
+    for term in trending_google:
+        term_lower = term.lower()
+        for brand in BRAND_TICKER:
+            if brand in term_lower or term_lower in brand:
+                brand_data[brand]["google"] = True
+
+    # Ticker zuordnen + Score berechnen
+    results = []
+    for brand, bd in brand_data.items():
+        ticker = BRAND_TICKER.get(brand)
+        n_posts = len(bd["posts"])
+        total_sig = bd["bull"] + bd["bear"]
+        net_sentiment = (bd["bull"] - bd["bear"]) / max(total_sig, 1) * 100 if total_sig > 0 else 0
+        trend_score = (
+            n_posts * 10
+            + bd["reddit_score_sum"] / 1000
+            + bd["bull"] * 5
+            + (20 if bd["google"] else 0)
         )
-    return text
+        results.append({
+            "brand":          brand,
+            "ticker":         ticker,
+            "n_posts":        n_posts,
+            "subreddits":     sorted(bd["subreddits"]),
+            "bull":           bd["bull"],
+            "bear":           bd["bear"],
+            "net_sentiment":  round(net_sentiment, 1),
+            "google":         bd["google"],
+            "trend_score":    round(trend_score, 1),
+            "top_posts":      sorted(bd["posts"], key=lambda x: x["score"], reverse=True)[:5],
+        })
+    return sorted(results, key=lambda x: x["trend_score"], reverse=True)
 
 
-# ── Header ─────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# UI — HEADER
+# ══════════════════════════════════════════════════════════════════════════════
 h1, h2 = st.columns([1, 6])
 with h1:
     st.markdown(get_logo_html("white", 36), unsafe_allow_html=True)
 with h2:
     st.markdown(
         '<div class="sc-page-title">Sentiment Analyse</div>'
-        '<div class="sc-page-subtitle">Chris Camillo Social Arbitrage · '
-        'Virale Trends → Börsenchancen · Reddit · Google Trends · X/Twitter · YouTube</div>',
+        '<div class="sc-page-subtitle">'
+        'Chris Camillo Social Arbitrage · Virale Trends automatisch entdecken · '
+        'Reddit · Google Trends · Produkt→Aktie → Einpreisung</div>',
         unsafe_allow_html=True,
     )
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ── Erklärung ──────────────────────────────────────────────────────────────────
-with st.expander("💡 **Was ist Chris Camillo Social Arbitrage?**", expanded=False):
+with st.expander("💡 **Wie funktioniert die Sentiment Analyse?**", expanded=False):
     st.markdown("""
-    **Chris Camillo** ist einer der erfolgreichsten Privatanleger, der mit **„Social Arbitrage"**
-    über 20 Jahre eine Rendite von >3.000% erzielte — ohne Bloomberg-Terminal oder Insider-Info.
+    **Chris Camillo** investiert nach der **„Social Arbitrage"** Methode:
+    Erkenne Produkt-Trends auf Social Media, **bevor** die Wall Street davon weiß.
 
-    **Die Kernidee:**
-    > *„Ich investiere in Dinge, die ich im echten Leben beobachte —
-    > bevor die Wall Street sie entdeckt."*
+    **Der Ablauf dieser App:**
 
-    **Was er sucht:**
-    - 🔥 Produkte, über die alle reden — aber die Börse noch nichts weiß
-    - 🛒 **„Sold out"**, **„Can't find it"**, **„Obsessed"** = echte Nachfrage-Signale
-    - 📱 Viraler Social-Media-Content mit echter emotionaler Reaktion
-    - 🏭 **Supply-Chain-Gewinner**: Nicht nur das Endprodukt, auch Zulieferer
+    | Schritt | Was passiert |
+    |---|---|
+    | 1️⃣ Scan | Reddit Hot-Posts + Google Trending Searches werden automatisch ausgewertet |
+    | 2️⃣ Extrakt | App findet Marken- und Produkt-Erwähnungen in Titeln und Posts |
+    | 3️⃣ Mapping | Jedes Produkt wird einer börsennotierten Aktie zugeordnet |
+    | 4️⃣ Einpreisung | Kursperformance zeigt, ob der Markt den Trend schon kennt |
 
-    **Vorgehen:**
-    1. Trend-Thema eingeben (z.B. *"Stanley Cup"*, *"Celsius Energy"*, *"Ozempic"*)
-    2. App scannt Reddit, Google Trends & X/Twitter auf Social-Signale
-    3. Signal-Score zeigt Bullish/Bearish-Trend
-    4. Ticker zuweisen → Aktie weiter analysieren im Watchlist Scanner
+    **Bullish-Signale** (Chris Camillo sucht genau das):
+    > *"sold out", "obsessed", "can't find it", "everywhere", "waiting list"*
+
+    **Kaum eingepreist** = früher Einstieg möglich → Aktie noch nicht gestiegen
+    **Stark eingepreist** = Trend bekannt, Upside begrenzt → eher vermeiden
+
+    💡 **Tipp:** Beste Signale kommen von Produkten, die offline/im echten Leben
+    viral gehen — während die Aktie noch seitwärts läuft.
     """)
 
-# ── Quick-Presets ──────────────────────────────────────────────────────────────
-st.markdown(
-    "<div style='font-size:0.78rem;color:#666;margin:10px 0 6px 0'>"
-    "📌 <b>Schnell-Ideen</b> — beliebte Trend-Themen mit einem Klick laden:</div>",
-    unsafe_allow_html=True,
-)
-preset_cols = st.columns(len(PRESET_IDEAS))
-for i, p in enumerate(PRESET_IDEAS):
-    with preset_cols[i]:
-        if st.button(
-            f"{p['emoji']} {p['topic'].split()[0]}",
-            use_container_width=True,
-            help=f"{p['topic']} · Ticker: {p['ticker']}",
-            key=f"preset_{i}",
-        ):
-            st.session_state["sent_topic"]  = p["topic"]
-            st.session_state["sent_ticker"] = p["ticker"]
-            st.rerun()
+# ── Scan-Einstellungen ─────────────────────────────────────────────────────────
+with st.expander("⚙️ Scan-Einstellungen", expanded=False):
+    sc1, sc2, sc3 = st.columns(3)
+    with sc1:
+        selected_subs = st.multiselect(
+            "Reddit Subreddits",
+            CONSUMER_SUBREDDITS,
+            default=["all", "BuyItForLife", "fitness", "femalefashionadvice", "gaming"],
+            help="Welche Subreddits sollen nach Trend-Produkten gescannt werden?",
+        )
+    with sc2:
+        min_score = st.number_input(
+            "Min. Reddit Upvotes", 50, 10000, 200, step=50,
+            help="Nur Posts mit mindestens dieser Anzahl Upvotes werden berücksichtigt",
+        )
+    with sc3:
+        trends_country = st.selectbox(
+            "Google Trends Land",
+            ["united_states", "germany", "united_kingdom", "canada", "australia"],
+            help="Für welches Land sollen Google Trending Searches geladen werden?",
+        )
 
-# ── Eingabe ────────────────────────────────────────────────────────────────────
+# ── Scan-Button ────────────────────────────────────────────────────────────────
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-col_topic, col_ticker, col_btn = st.columns([4, 2, 1])
-with col_topic:
-    topic = st.text_input(
-        "Trend-Thema",
-        value=st.session_state.get("sent_topic", ""),
-        placeholder="z.B. Celsius Energy Drink, Stanley Cup, Ozempic …",
-        help="Produkt, Marke oder Trend-Begriff — wird auf Reddit, Google & Twitter gesucht",
+scan_col, info_col = st.columns([2, 5])
+with scan_col:
+    scan_btn = st.button(
+        "🔍 Trending Produkte scannen",
+        type="primary",
+        use_container_width=True,
+        help="Scannt Reddit + Google Trends und findet virale Produkte",
     )
-with col_ticker:
-    ticker = st.text_input(
-        "Börsen-Ticker (optional)",
-        value=st.session_state.get("sent_ticker", ""),
-        placeholder="z.B. CELH, NVDA, LULU",
-        help="Zugehörige Aktie — für direkten Link zum Watchlist Scanner",
-    ).upper().strip()
-with col_btn:
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-    scan_btn = st.button("🔍 Analysieren", type="primary", use_container_width=True)
+with info_col:
+    st.markdown(
+        "<div style='padding-top:8px;font-size:0.78rem;color:#555'>"
+        "Scannt Reddit Hot-Posts + Google Trending Searches automatisch · "
+        "Ergebnisse werden 15 Min. gecacht · Kein API-Key nötig"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
-if not topic:
+if not scan_btn and "sentiment_results" not in st.session_state:
     st.info(
-        "👆 **Thema eingeben** oder oben ein Schnell-Preset wählen — "
-        "dann startet die Social-Sentiment-Analyse.",
+        "👆 **'Trending Produkte scannen'** klicken — App findet automatisch, "
+        "welche Produkte gerade viral gehen und welche Aktien davon profitieren.",
         icon="🧭",
     )
     st.stop()
 
-# ── Analyse starten ────────────────────────────────────────────────────────────
-st.markdown(f"<div style='height:4px'></div>", unsafe_allow_html=True)
+# ── Scan ausführen ─────────────────────────────────────────────────────────────
+if scan_btn or "sentiment_results" not in st.session_state:
+    _progress = st.progress(0, text="Verbinde mit Reddit …")
+    reddit_posts = _reddit_scan(
+        tuple(selected_subs if selected_subs else ["all", "BuyItForLife"]),
+        min_score,
+    )
+    _progress.progress(50, text="Lade Google Trends …")
+    google_trends = _google_trending(trends_country)
+    _progress.progress(80, text="Aggregiere Ergebnisse …")
+    results = _aggregate_brands(reddit_posts, google_trends)
+    _progress.progress(100, text="Fertig!")
+    _progress.empty()
 
-tab_trends, tab_reddit, tab_twitter, tab_yt = st.tabs([
-    "📈 Google Trends",
-    "🟠 Reddit",
-    "🐦 X / Twitter",
-    "📺 YouTube",
-])
+    st.session_state["sentiment_results"]      = results
+    st.session_state["sentiment_google"]       = google_trends
+    st.session_state["sentiment_reddit_count"] = len(reddit_posts)
+    st.session_state["sentiment_scan_time"]    = datetime.now().strftime("%H:%M")
 
-# Daten parallel laden (alle gecacht)
-with st.spinner(f"Scanne Social Media für **{topic}** …"):
-    reddit_posts = _fetch_reddit(topic)
-    trends_df, trends_related = _fetch_google_trends(topic)
-    tweets = _fetch_nitter(topic)
+results        = st.session_state["sentiment_results"]
+google_trends  = st.session_state["sentiment_google"]
+reddit_count   = st.session_state["sentiment_reddit_count"]
+scan_time      = st.session_state["sentiment_scan_time"]
 
-# Alle Texte für Gesamt-Sentiment sammeln
-all_texts: list[str] = []
-for p in reddit_posts:
-    all_texts.append(p["title"] + " " + p.get("text", ""))
-for t in tweets:
-    if isinstance(t, dict) and "text" in t:
-        all_texts.append(t["text"])
-if not trends_df.empty and topic in trends_df.columns:
-    # Trends-Score als Proxy für Interesse
-    last_val = int(trends_df[topic].iloc[-1]) if len(trends_df) > 0 else 0
-    if last_val > 70:
-        all_texts.append(" ".join(["trending viral everywhere"] * 3))
-
-sentiment = _analyze_sentiment(all_texts)
-
-# ── Signal-Card (immer sichtbar) ───────────────────────────────────────────────
-s = sentiment
-bar_pct_bull = min(100, s["bull_score"])
-bar_pct_bear = min(100, s["bear_score"])
-total_bar = max(s["bull_score"] + s["bear_score"], 1)
-bull_bar_w = int(s["bull_score"] / total_bar * 100)
-bear_bar_w = 100 - bull_bar_w
-
-ticker_badge = (
-    f'<a href="?page=04_Watchlist_Scanner" target="_self" '
-    f'style="background:#d4a843;color:#000;font-size:0.78rem;'
-    f'font-weight:700;padding:3px 10px;border-radius:20px;'
-    f'text-decoration:none;margin-left:12px">→ {ticker} scannen</a>'
-    if ticker else ""
+# ── Scan-Info ──────────────────────────────────────────────────────────────────
+st.markdown(
+    f"<div style='font-size:0.75rem;color:#333;margin-bottom:12px'>"
+    f"✅ Scan um {scan_time} · "
+    f"{reddit_count} Reddit-Posts analysiert · "
+    f"{len(google_trends)} Google Trends · "
+    f"{len(results)} Trend-Produkte gefunden"
+    f"</div>",
+    unsafe_allow_html=True,
 )
 
-st.markdown(f"""
-<div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid {s["color"]};
-            border-radius:14px;padding:20px 24px;margin:12px 0'>
-  <div style='display:flex;align-items:center;margin-bottom:12px'>
-    <span style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.2rem;
-                 color:{s["color"]}'>{s["icon"]} {s["label"]}</span>
-    <span style='font-family:RedRose,sans-serif;font-size:0.8rem;color:#555;margin-left:16px'>
-      Score: <b style='color:#f0f0f0'>{s["net_score"]:+.0f}</b>
-      &nbsp;·&nbsp; {s["total_texts"]} Quellen analysiert
-      &nbsp;·&nbsp; {s["bull_score"]} Bullish-Treffer · {s["bear_score"]} Bearish-Treffer
-    </span>
-    {ticker_badge}
-  </div>
-  <div style='display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:12px'>
-    <div style='width:{bull_bar_w}%;background:#22c55e'></div>
-    <div style='width:{bear_bar_w}%;background:#ef4444'></div>
-  </div>
-  <div style='display:flex;gap:32px'>
-    <div>
-      <div style='font-size:0.72rem;color:#22c55e;text-transform:uppercase;
-                  letter-spacing:0.1em;margin-bottom:4px'>🚀 Bullish Signale</div>
-      <div style='font-size:0.82rem;color:#aaa'>
-        {" &nbsp;·&nbsp; ".join(
-            f'<b style="color:#22c55e">{kw}</b> <span style="color:#555">×{n}</span>'
-            for kw, n in s["bull_found"][:5]
-        ) or '<span style="color:#444">keine gefunden</span>'}
-      </div>
-    </div>
-    <div>
-      <div style='font-size:0.72rem;color:#ef4444;text-transform:uppercase;
-                  letter-spacing:0.1em;margin-bottom:4px'>💥 Bearish Signale</div>
-      <div style='font-size:0.82rem;color:#aaa'>
-        {" &nbsp;·&nbsp; ".join(
-            f'<b style="color:#ef4444">{kw}</b> <span style="color:#555">×{n}</span>'
-            for kw, n in s["bear_found"][:5]
-        ) or '<span style="color:#444">keine gefunden</span>'}
-      </div>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+if not results:
+    st.warning(
+        "Keine Trend-Produkte gefunden. Bitte Subreddits oder Min. Upvotes anpassen "
+        "und erneut scannen.",
+        icon="⚠️",
+    )
+    st.stop()
+
+# ── Google Trends Sidebar ──────────────────────────────────────────────────────
+if google_trends:
+    with st.expander(f"📈 Google Trending Searches ({len(google_trends)} Begriffe)", expanded=False):
+        gt_cols = st.columns(4)
+        for i, term in enumerate(google_trends):
+            matched = [b for b in BRAND_TICKER if b in term.lower() or term.lower() in b]
+            badge = f" → **{BRAND_TICKER[matched[0]]}**" if matched else ""
+            gt_cols[i % 4].markdown(f"· {term}{badge}")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — GOOGLE TRENDS
+# ERGEBNISSE — TREND-KARTEN
 # ══════════════════════════════════════════════════════════════════════════════
-with tab_trends:
-    if "error" in trends_related:
-        st.warning(
-            f"⚠️ Google Trends nicht verfügbar: {trends_related['error']}\n\n"
-            "Bitte `pytrends` installieren: `pip install pytrends`",
-            icon="⚠️",
-        )
-    elif trends_df.empty:
-        st.info(
-            "📊 Keine Google-Trends-Daten — evtl. Rate-Limit erreicht. "
-            "Kurz warten und neu laden.",
-            icon="📊",
-        )
+st.markdown(
+    "<div style='font-size:1.0rem;font-weight:700;color:#f0f0f0;margin:16px 0 10px'>"
+    "📦 Entdeckte Trend-Produkte",
+    unsafe_allow_html=True,
+)
+
+for i, item in enumerate(results[:20]):
+    brand   = item["brand"].title()
+    ticker  = item["ticker"]
+    score   = item["trend_score"]
+    nsubs   = len(item["subreddits"])
+    bull    = item["bull"]
+    bear    = item["bear"]
+    net     = item["net_sentiment"]
+    google  = item["google"]
+
+    # Sentiment-Label
+    if net >= 40:
+        sent_label, sent_color = "🚀 Stark Bullish", "#22c55e"
+    elif net >= 10:
+        sent_label, sent_color = "📈 Bullish", "#86efac"
+    elif net >= -10:
+        sent_label, sent_color = "➡️ Neutral", "#f59e0b"
     else:
-        import plotly.graph_objects as go
+        sent_label, sent_color = "📉 Bearish", "#ef4444"
 
-        col_trend = topic if topic in trends_df.columns else trends_df.columns[0]
-        last_val  = int(trends_df[col_trend].iloc[-1])
-        max_val   = int(trends_df[col_trend].max())
-        avg_val   = int(trends_df[col_trend].mean())
+    # Stock-Daten (gecacht)
+    sinfo: dict = {}
+    if ticker:
+        sinfo = _stock_info(ticker)
 
-        g1, g2, g3 = st.columns(3)
-        with g1:
-            st.metric("Aktuelles Interesse", f"{last_val}/100",
-                      delta=f"{last_val - avg_val:+.0f} vs. Ø",
-                      delta_color="normal")
-        with g2:
-            st.metric("Peak (30 Tage)", f"{max_val}/100")
-        with g3:
-            trend_dir = "↑ steigend" if last_val > avg_val else "↓ fallend"
-            st.metric("Trend", trend_dir)
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=trends_df.index,
-            y=trends_df[col_trend],
-            mode="lines",
-            name="Google Interesse",
-            line=dict(color="#d4a843", width=2),
-            fill="tozeroy",
-            fillcolor="rgba(212,168,67,0.08)",
-        ))
-        fig.update_layout(
-            template="plotly_dark",
-            paper_bgcolor="#0e0e0e",
-            plot_bgcolor="#0e0e0e",
-            height=280,
-            margin=dict(l=0, r=0, t=20, b=0),
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor="#1e1e1e", range=[0, 105]),
-            showlegend=False,
+    # Card HTML
+    price_badge = ""
+    if sinfo:
+        r90_color = "#22c55e" if sinfo["r90"] >= 0 else "#ef4444"
+        r90_sign  = "+" if sinfo["r90"] >= 0 else ""
+        price_badge = (
+            f'<span style="background:#111;border:1px solid #333;border-radius:20px;'
+            f'padding:2px 10px;font-size:0.78rem;color:#f0f0f0;margin-left:8px">'
+            f'${sinfo["price"]:.2f}'
+            f' <span style="color:{r90_color}">{r90_sign}{sinfo["r90"]:.0f}%</span>'
+            f'<span style="color:#444;font-size:0.68rem"> 90T</span>'
+            f'</span>'
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        if trends_related:
-            rc1, rc2 = st.columns(2)
-            with rc1:
-                if "top" in trends_related:
-                    st.markdown("**🔝 Top verwandte Suchanfragen**")
-                    for item in trends_related["top"]:
-                        val = item.get("value", 0)
-                        bar = int(val / 100 * 200) if val <= 100 else 200
-                        st.markdown(
-                            f'<div style="display:flex;align-items:center;gap:8px;'
-                            f'margin-bottom:4px">'
-                            f'<div style="width:120px;font-size:0.8rem;color:#ccc">'
-                            f'{item["query"]}</div>'
-                            f'<div style="flex:1;background:#1e1e1e;border-radius:3px;height:6px">'
-                            f'<div style="width:{min(val,100)}%;background:#d4a843;'
-                            f'height:6px;border-radius:3px"></div></div>'
-                            f'<div style="font-size:0.75rem;color:#555;width:30px">{val}</div>'
-                            f'</div>',
-                            unsafe_allow_html=True,
-                        )
-            with rc2:
-                if "rising" in trends_related:
-                    st.markdown("**📈 Aufsteigende Suchanfragen**")
-                    for item in trends_related["rising"]:
-                        val_raw = item.get("value", 0)
-                        label = f"+{val_raw}%" if val_raw < 5000 else "Breakout 🔥"
-                        st.markdown(
-                            f'<div style="font-size:0.8rem;color:#ccc;'
-                            f'margin-bottom:4px">'
-                            f'<b style="color:#22c55e">{item["query"]}</b>'
-                            f' <span style="color:#555;font-size:0.72rem">'
-                            f'{label}</span></div>',
-                            unsafe_allow_html=True,
-                        )
+    ticker_badge = (
+        f'<span style="background:#d4a843;color:#000;font-weight:700;font-size:0.75rem;'
+        f'padding:2px 8px;border-radius:12px;margin-left:6px">{ticker}</span>'
+        if ticker else
+        '<span style="color:#444;font-size:0.75rem;margin-left:6px">kein Ticker</span>'
+    )
+    google_badge = (
+        '<span style="background:#1a3a1a;color:#22c55e;font-size:0.7rem;'
+        'padding:1px 7px;border-radius:10px;margin-left:6px">📈 Google Trending</span>'
+        if google else ""
+    )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — REDDIT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_reddit:
-    if not reddit_posts:
-        st.info(
-            f'Keine Reddit-Posts für **{topic}** gefunden. '
-            'Reddit kann kurzzeitig nicht erreichbar sein — bitte kurz warten.',
-            icon="🟠",
+    pricing_html = ""
+    if sinfo:
+        pricing_html = (
+            f'<div style="font-size:0.75rem;margin-top:6px">'
+            f'<span style="color:{sinfo["color"]};font-weight:600">'
+            f'Eingepreist: {sinfo["label"]}</span>'
+            f' <span style="color:#444">— {sinfo["hint"]}</span>'
+            f'</div>'
         )
-    else:
-        bull_kws = [kw for kw, _ in s["bull_found"]]
-        bear_kws = [kw for kw, _ in s["bear_found"]]
 
-        rc1, rc2, rc3 = st.columns(3)
-        with rc1:
-            st.metric("Posts gefunden", len(reddit_posts))
-        with rc2:
-            top_score = reddit_posts[0]["score"] if reddit_posts else 0
-            st.metric("Top Upvotes", f"{top_score:,}")
-        with rc3:
-            subs = list({p["subreddit"] for p in reddit_posts})
-            st.metric("Subreddits", len(subs))
+    subs_html = " · ".join(f"r/{s}" for s in item["subreddits"][:6])
+    top_posts  = item["top_posts"]
 
+    with st.expander(
+        f"{'🔥' if score > 50 else '📦'} {brand}  {ticker or ''}  "
+        f"{'📈 Google' if google else ''}  "
+        f"· Score {score:.0f} · {item['n_posts']} Posts · {nsubs} Subreddits",
+        expanded=False,
+    ):
+        # Header-Zeile
         st.markdown(
-            f"<div style='font-size:0.75rem;color:#555;margin-bottom:8px'>"
-            f"Subreddits: {', '.join(f'r/{s}' for s in subs[:8])}</div>",
+            f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;'
+            f'margin-bottom:8px">'
+            f'<span style="font-size:1.05rem;font-weight:700;color:#f0f0f0">{brand}</span>'
+            f'{ticker_badge}{price_badge}{google_badge}'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-        for p in reddit_posts[:15]:
-            ratio_color = "#22c55e" if p["upvote_ratio"] > 0.75 else "#f59e0b"
-            title_html  = _highlight(p["title"], bull_kws, "#22c55e")
-            title_html  = _highlight(title_html, bear_kws, "#ef4444")
-            text_html   = _highlight(p.get("text", ""), bull_kws, "#22c55e")
-            text_html   = _highlight(text_html, bear_kws, "#ef4444")
+        # Metriken-Zeile
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Reddit Posts", item["n_posts"])
+        m2.metric("Subreddits", nsubs)
+        m3.metric("Bullish Signale", bull)
+        m4.metric("Sentiment Score", f"{net:+.0f}")
 
+        # Pricing-In
+        if sinfo:
+            r30c = "#22c55e" if sinfo["r30"] >= 0 else "#ef4444"
+            r90c = "#22c55e" if sinfo["r90"] >= 0 else "#ef4444"
             st.markdown(
-                f'<div style="background:#111;border:1px solid #1e1e1e;border-radius:10px;'
-                f'padding:12px 16px;margin-bottom:6px">'
-                f'<div style="font-size:0.88rem;color:#f0f0f0;margin-bottom:4px">'
-                f'{title_html}</div>'
-                f'<div style="display:flex;gap:16px;font-size:0.74rem;color:#555;'
-                f'margin-bottom:{6 if text_html.strip() else 0}px">'
-                f'<span>r/{p["subreddit"]}</span>'
-                f'<span>▲ {p["score"]:,}</span>'
-                f'<span>💬 {p["comments"]}</span>'
-                f'<span style="color:{ratio_color}">'
-                f'{int(p["upvote_ratio"]*100)}% Upvotes</span>'
-                f'<span>{p["created"]}</span>'
-                f'<a href="{p["url"]}" target="_blank" '
-                f'style="color:#d4a843;text-decoration:none">→ Reddit</a>'
+                f'<div style="background:#0a0a0a;border:1px solid {sinfo["color"]}33;'
+                f'border-left:3px solid {sinfo["color"]};border-radius:8px;'
+                f'padding:10px 14px;margin:8px 0">'
+                f'<div style="font-size:0.85rem;font-weight:700;color:{sinfo["color"]};'
+                f'margin-bottom:4px">Einpreisung: {sinfo["label"]}</div>'
+                f'<div style="font-size:0.78rem;color:#888">{sinfo["hint"]}</div>'
+                f'<div style="font-size:0.75rem;color:#555;margin-top:4px">'
+                f'30 Tage: <span style="color:{r30c}">{sinfo["r30"]:+.1f}%</span>'
+                f' &nbsp;|&nbsp; '
+                f'90 Tage: <span style="color:{r90c}">{sinfo["r90"]:+.1f}%</span>'
                 f'</div>'
-                + (
-                    f'<div style="font-size:0.78rem;color:#666;line-height:1.5">'
-                    f'{text_html[:300]}{"…" if len(text_html) > 300 else ""}</div>'
-                    if text_html.strip() else ""
-                )
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — X / TWITTER (NITTER RSS)
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_twitter:
-    if not tweets:
-        st.warning(
-            "🐦 Keine Tweets gefunden — Nitter-Instanzen können zeitweise offline sein. "
-            "Bitte `feedparser` installieren (`pip install feedparser`) und erneut versuchen.",
-            icon="🐦",
-        )
-    elif len(tweets) == 1 and "error" in tweets[0]:
-        st.warning(
-            "🐦 feedparser nicht installiert.\n\n"
-            "Bitte ausführen: `pip install feedparser`",
-            icon="⚠️",
-        )
-    else:
-        bull_kws = [kw for kw, _ in s["bull_found"]]
-        bear_kws = [kw for kw, _ in s["bear_found"]]
-
-        st.metric("Tweets gefunden", len(tweets))
-
-        for t in tweets:
-            if not isinstance(t, dict) or "text" not in t:
-                continue
-            text_html = _highlight(t["text"], bull_kws, "#22c55e")
-            text_html = _highlight(text_html, bear_kws, "#ef4444")
-            st.markdown(
-                f'<div style="background:#111;border:1px solid #1e1e1e;border-radius:10px;'
-                f'padding:10px 14px;margin-bottom:5px">'
-                f'<div style="font-size:0.85rem;color:#e0e0e0;line-height:1.55">'
-                f'{text_html}</div>'
-                + (
-                    f'<div style="font-size:0.72rem;color:#555;margin-top:4px">'
-                    f'{t.get("date","")}'
-                    + (
-                        f' &nbsp;·&nbsp; <a href="{t["link"]}" target="_blank" '
-                        f'style="color:#d4a843;text-decoration:none">→ X</a>'
-                        if t.get("link") else ""
-                    )
-                    + "</div>"
-                )
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — YOUTUBE KOMMENTARE
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_yt:
-    st.markdown("""
-    **YouTube Kommentar-Analyse**
-
-    Paste eine YouTube-Video-URL — die App lädt die neuesten Kommentare
-    und analysiert sie auf Bullish/Bearish-Signale (kein API-Key nötig).
-    """)
-
-    yt_url = st.text_input(
-        "YouTube Video URL",
-        placeholder="https://www.youtube.com/watch?v=...",
-        help="z.B. ein virales Produkt-Review oder Haul-Video",
-    )
-
-    if yt_url and st.button("📺 Kommentare analysieren", type="primary"):
-        with st.spinner("Lade YouTube-Kommentare …"):
-            comments = _fetch_yt_comments(yt_url)
-
-        if not comments:
-            st.warning("Keine Kommentare gefunden oder Video geschützt.")
-        elif comments[0] == "__IMPORT_ERROR__":
-            st.error(
-                "❌ `youtube-comment-downloader` nicht installiert.\n\n"
-                "Bitte ausführen: `pip install youtube-comment-downloader`"
-            )
-        elif comments[0].startswith("__ERROR__"):
-            st.error(f"❌ Fehler: {comments[0][9:]}")
-        else:
-            yt_sentiment = _analyze_sentiment(comments)
-            ys = yt_sentiment
-
-            st.markdown(
-                f'<div style="background:#111;border:1px solid #1e1e1e;'
-                f'border-top:3px solid {ys["color"]};border-radius:12px;'
-                f'padding:16px 20px;margin:8px 0">'
-                f'<b style="color:{ys["color"]};font-size:1.1rem">'
-                f'{ys["icon"]} {ys["label"]}</b>'
-                f'<span style="color:#555;font-size:0.8rem;margin-left:12px">'
-                f'Score: {ys["net_score"]:+.0f} · {len(comments)} Kommentare</span>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
+        else:
+            st.markdown(
+                '<div style="font-size:0.78rem;color:#555;margin:4px 0">'
+                'Keine Börsendaten (kein Ticker zugeordnet oder Markt geschlossen)'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-            bull_kws = [kw for kw, _ in ys["bull_found"]]
-            bear_kws = [kw for kw, _ in ys["bear_found"]]
-
-            yt1, yt2 = st.columns(2)
-            with yt1:
-                st.markdown("**🚀 Bullish Signale**")
-                for kw, n in ys["bull_found"]:
-                    st.markdown(
-                        f'<span style="color:#22c55e">{kw}</span> '
-                        f'<span style="color:#555">×{n}</span>  ',
-                        unsafe_allow_html=True,
-                    )
-            with yt2:
-                st.markdown("**💥 Bearish Signale**")
-                for kw, n in ys["bear_found"]:
-                    st.markdown(
-                        f'<span style="color:#ef4444">{kw}</span> '
-                        f'<span style="color:#555">×{n}</span>  ',
-                        unsafe_allow_html=True,
-                    )
-
-            st.markdown("**📝 Kommentar-Auszug**")
-            for c in comments[:10]:
-                c_html = _highlight(c, bull_kws, "#22c55e")
-                c_html = _highlight(c_html, bear_kws, "#ef4444")
-                st.markdown(
-                    f'<div style="background:#111;border:1px solid #1e1e1e;'
-                    f'border-radius:8px;padding:8px 12px;margin-bottom:4px;'
-                    f'font-size:0.82rem;color:#ccc;line-height:1.5">'
-                    f'{c_html}</div>',
-                    unsafe_allow_html=True,
-                )
-    else:
-        st.markdown("""
-        **Wo finde ich geeignete Videos?**
-        1. YouTube suchen: z.B. *"Celsius Energy Drink review 2024"*
-        2. Video mit vielen Kommentaren auswählen (Produktreviews, Hauls, Unboxings)
-        3. URL oben einfügen → Kommentare werden analysiert
-
-        💡 **Tipp:** Videos mit 1.000+ Kommentaren liefern die besten Signale.
-        """)
-
-        # YouTube-Suchlink
-        yt_search = topic.replace(" ", "+")
+        # Quellen-Info
         st.markdown(
-            f'🔗 [YouTube nach **{topic}** durchsuchen →](https://www.youtube.com/results?search_query={yt_search})',
+            f'<div style="font-size:0.75rem;color:#444;margin-bottom:8px">'
+            f'Gefunden in: {subs_html}</div>',
+            unsafe_allow_html=True,
         )
 
-# ── Analyse-Info-Footer ────────────────────────────────────────────────────────
+        # Reddit Posts
+        if top_posts:
+            st.markdown("**📰 Gefundene Posts:**")
+            for p in top_posts[:4]:
+                # Schlüsselwörter hervorheben
+                title_hl = p["title"]
+                for kw in BULLISH_KEYWORDS:
+                    if kw in title_hl.lower():
+                        title_hl = re.sub(
+                            re.escape(kw),
+                            f'<b style="color:#22c55e">{kw}</b>',
+                            title_hl, flags=re.IGNORECASE
+                        )
+                for kw in BEARISH_KEYWORDS:
+                    if kw in title_hl.lower():
+                        title_hl = re.sub(
+                            re.escape(kw),
+                            f'<b style="color:#ef4444">{kw}</b>',
+                            title_hl, flags=re.IGNORECASE
+                        )
+
+                st.markdown(
+                    f'<div style="background:#0e0e0e;border:1px solid #1e1e1e;'
+                    f'border-radius:8px;padding:8px 12px;margin-bottom:5px">'
+                    f'<div style="font-size:0.82rem;color:#d0d0d0">{title_hl}</div>'
+                    f'<div style="font-size:0.72rem;color:#444;margin-top:3px">'
+                    f'r/{p["subreddit"]} · ▲ {p["score"]:,} · '
+                    f'💬 {p["comments"]} · '
+                    f'<a href="{p["url"]}" target="_blank" '
+                    f'style="color:#d4a843;text-decoration:none">→ Reddit</a>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+        # Kommentare laden (on-demand)
+        if top_posts:
+            best_post = top_posts[0]
+            if st.button(
+                f"💬 Top-Kommentare von r/{best_post['subreddit']} laden",
+                key=f"comments_{brand}_{i}",
+            ):
+                with st.spinner("Lade Kommentare …"):
+                    comments = _reddit_comments(best_post["id"])
+                if comments:
+                    bull_found = [kw for kw in BULLISH_KEYWORDS
+                                  if any(kw in c.lower() for c in comments)]
+                    bear_found = [kw for kw in BEARISH_KEYWORDS
+                                  if any(kw in c.lower() for c in comments)]
+                    if bull_found or bear_found:
+                        st.markdown(
+                            f'<div style="font-size:0.78rem;margin:6px 0">'
+                            + "".join(
+                                f'<span style="background:#0a1a0a;color:#22c55e;'
+                                f'border-radius:4px;padding:1px 6px;margin:2px">{kw}</span>'
+                                for kw in bull_found
+                            )
+                            + "".join(
+                                f'<span style="background:#1a0a0a;color:#ef4444;'
+                                f'border-radius:4px;padding:1px 6px;margin:2px">{kw}</span>'
+                                for kw in bear_found
+                            )
+                            + "</div>",
+                            unsafe_allow_html=True,
+                        )
+                    for c in comments[:8]:
+                        st.markdown(
+                            f'<div style="background:#0e0e0e;border:1px solid #1a1a1a;'
+                            f'border-radius:6px;padding:7px 11px;margin-bottom:4px;'
+                            f'font-size:0.80rem;color:#bbb;line-height:1.5">{c}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+        # Action Buttons
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        ab1, ab2, ab3 = st.columns(3)
+        if ticker:
+            with ab1:
+                if st.button(f"🔍 {ticker} im Scanner", key=f"scan_{brand}_{i}",
+                             use_container_width=True):
+                    st.session_state["scan_ticker_prefill"] = ticker
+                    st.switch_page("pages/04_Watchlist_Scanner.py")
+            with ab2:
+                if st.button(f"📊 {ticker} analysieren", key=f"anl_{brand}_{i}",
+                             use_container_width=True):
+                    st.session_state["selected_ticker"] = ticker
+                    st.switch_page("pages/03_Aktienanalyse.py")
+        with ab3 if ticker else ab1:
+            st.markdown(
+                f'<a href="https://finance.yahoo.com/quote/{ticker or ""}" '
+                f'target="_blank" style="display:block;text-align:center;'
+                f'background:#1a1a1a;border:1px solid #333;border-radius:8px;'
+                f'padding:5px;color:#d4a843;font-size:0.8rem;text-decoration:none">'
+                f'→ Yahoo Finance</a>' if ticker else "",
+                unsafe_allow_html=True,
+            )
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
     f'<div style="font-size:0.72rem;color:#333;text-align:center">'
-    f'Datenquellen: Reddit (öffentliche JSON-API) · '
-    f'Google Trends (pytrends) · X/Twitter (Nitter RSS) · '
-    f'YouTube (youtube-comment-downloader) · '
-    f'Zuletzt aktualisiert: {datetime.now().strftime("%H:%M")}'
+    f'Datenquellen: Reddit JSON-API (kein Key) · Google Trends (pytrends) · '
+    f'Kursdaten: Yahoo Finance · Scan: {scan_time}'
     f'</div>',
     unsafe_allow_html=True,
 )
