@@ -370,11 +370,15 @@ with c14:
           "#22c55e", "pages/14_Order_Planung.py", "📋", "Order-Planung")
 
 # ── Zeile 8 ───────────────────────────────────────────────────────────────────
-c15, _ = st.columns(2, gap="large")
+c15, c16 = st.columns(2, gap="large")
 with c15:
     _card("15", "DATENQUELLEN",
           "Yahoo Finance vs. Massive.com · API-Konfiguration · Verbindungstest",
           "#3b82f6", "pages/15_Datenquellen.py", "📡", "Datenquellen")
+with c16:
+    _card("16", "SENTIMENT ANALYSE",
+          "Chris Camillo Social Arbitrage · Reddit · Google Trends · X/Twitter · YouTube · Bullish/Bearish Signale",
+          "#8b5cf6", "pages/16_Sentiment_Analyse.py", "🧭", "Sentiment Analyse")
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
