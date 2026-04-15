@@ -116,11 +116,12 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
 <div style='font-size:0.78rem;color:#aaa;line-height:1.9;margin-bottom:10px;
      background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
   <b style='color:#a78bfa'>So verbinden (einmalig ~2 Min, kein Account nötig):</b><br>
-  1. TWS auf deinem Mac starten (Paper Trading)<br>
-  2. Mac Terminal öffnen und eingeben:<br>
+  1. TWS auf deinem Mac/PC starten (Paper Trading, Port 7497)<br>
+  2. Terminal öffnen im App-Ordner und eingeben:<br>
   <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:4px 0;color:#22c55e'>
-    python3 "/Users/Riebartsch/Claude Code/options-dashboard/bridge.py"</code>
-  3. Das Skript zeigt eine <b>Tunnel-URL</b> → hier unten eintragen → Verbindung testen
+    python3 bridge.py</code>
+  3. Das Skript zeigt eine <b>Tunnel-URL</b> (z.B. https://xxxxx.localhost.run) → hier unten eintragen<br>
+  <span style='color:#6b7280'>✓ API-Key wird automatisch verwendet — kein manuelles Eintragen nötig</span>
 </div>""")
 
         saved_url = st.session_state.get("bridge_url", "")
@@ -197,26 +198,6 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                 else:
                     st.session_state.ibkr_connected = False
                     st.error(f"Fehler: {msg}")
-
-    is_live = False  # default
-
-    if st.button("Verbindung testen", disabled=not IB_INSYNC_INSTALLED):
-        if IBKR_AVAILABLE:
-            cfg = IBKRConfig(host=host, port=port, client_id=client_id)
-            with st.spinner("Verbinde..."):
-                ok, msg = test_connection(cfg)
-            if ok:
-                st.session_state.ibkr_config = cfg
-                st.session_state.ibkr_connected = True
-                # Kontoinfos holen
-                acc = get_account_summary(cfg)
-                if acc:
-                    st.session_state.account_info = acc
-                st.success(f"Verbunden: {msg}")
-                st.rerun()
-            else:
-                st.session_state.ibkr_connected = False
-                st.error(f"Fehler: {msg}")
 
     if st.session_state.ibkr_connected:
         st.success("Verbunden mit TWS")
@@ -511,17 +492,78 @@ elif strategy == "Short Call Spread":
 
 st.html(preview_html)
 
-# ── Hinweis-Box: Freigabe-Workflow ────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# ORDER AUSFÜHREN — Methode 1: Basket Trader Export (für alle Nutzer)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _generate_basket_csv(orders: list) -> str:
+    """TWS Basket Trader CSV-Format (File → Import → Basket Trader in TWS)."""
+    header = ("Action,Quantity,Symbol,SecType,"
+              "LastTradingDayOrContractMonth,Strike,Right,"
+              "Exchange,Currency,TimeInForce,OrderType,LmtPrice,Comment")
+    lines = [header]
+    for o in orders:
+        ot = getattr(o, "order_type", "LMT")
+        lmt = f"{o.limit_price:.2f}" if ot == "LMT" else ""
+        lines.append(
+            f"{o.action},{o.quantity},{o.ticker},OPT,"
+            f"{o.expiration},{o.strike:.2f},{o.right},"
+            f"SMART,USD,DAY,{ot},{lmt},Stillhalter AI App"
+        )
+    return "\n".join(lines)
+
+
 st.html("""
-<div style='background:#0a0814;border:1px solid #8b5cf6;border-radius:10px;
-     padding:14px 18px;margin:16px 0;font-size:0.80rem;color:#c4b5fd;line-height:1.7'>
-  <b style='color:#a78bfa'>Wie funktioniert die Held-Order?</b><br>
-  1. App platziert Order in TWS mit <code>transmit=False</code><br>
-  2. TWS zeigt die Order <b>gelb</b> ("Held") an — sie wird <b>nicht</b> an die Börse gesendet<br>
-  3. Du prüfst die Order in TWS → klickst auf <b>"Transmit"</b> für die finale Freigabe<br>
-  4. Alternativ: In TWS auf "Cancel" klicken um die Order zu verwerfen
+<div style='font-size:0.95rem;font-weight:700;color:#f0f0f0;margin:20px 0 6px'>
+  🚀 Order übertragen
 </div>
 """)
+
+# Methode 1: Basket Export
+with st.container():
+    st.markdown("""
+<div style='background:#0a120a;border:1px solid #22c55e;border-radius:12px;
+     padding:16px 20px;margin-bottom:10px'>
+<div style='font-size:0.88rem;font-weight:700;color:#22c55e;margin-bottom:6px'>
+  📥 Methode 1 — TWS Basket Trader (empfohlen · für alle Nutzer)</div>
+<div style='font-size:0.78rem;color:#6b7280;line-height:1.6'>
+  Exportiert die Order als CSV-Datei → in TWS importieren → in Ruhe prüfen → absenden.<br>
+  <b>TWS:</b> File → Import → Basket Trader → CSV auswählen → Submit All<br>
+  <span style='color:#4ade80'>✓ Kein Bridge · Kein Tunnel · Funktioniert für alle Nutzer</span>
+</div></div>
+""", unsafe_allow_html=True)
+
+    if orders_to_place:
+        csv_data = _generate_basket_csv(orders_to_place)
+        fname = f"order_{ticker}_{expiry_str}.csv"
+        st.download_button(
+            "📥 Als TWS-Basket-Datei exportieren",
+            data=csv_data,
+            file_name=fname,
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+            help="TWS → File → Import → Basket Trader → Datei öffnen → Submit All",
+        )
+    else:
+        st.button("📥 Als TWS-Basket-Datei exportieren", disabled=True,
+                  use_container_width=True,
+                  help="Bitte oben Ticker und Strike eingeben")
+
+st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+# Methode 2: Direkte TWS-Verbindung (Bridge oder lokal)
+st.markdown("""
+<div style='background:#0e0e14;border:1px solid #374151;border-radius:12px;
+     padding:14px 18px;margin-bottom:10px'>
+<div style='font-size:0.88rem;font-weight:700;color:#9ca3af;margin-bottom:6px'>
+  🔌 Methode 2 — Direkt in TWS platzieren (Bridge / Lokal)</div>
+<div style='font-size:0.78rem;color:#4b5563;line-height:1.6'>
+Platziert die Order live in TWS als <b>"Held"</b> (gelb, noch nicht übertragen).<br>
+Du gibst die finale Freigabe direkt in TWS durch Klick auf <b>Transmit</b>.<br>
+<i>Voraussetzung: TWS Verbindung oben konfiguriert und getestet.</i>
+</div></div>
+""", unsafe_allow_html=True)
 
 # ── Order-Button ──────────────────────────────────────────────────────────────
 btn_disabled = not (st.session_state.ibkr_connected and IB_INSYNC_INSTALLED)
