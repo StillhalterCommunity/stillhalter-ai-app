@@ -205,20 +205,13 @@ def main():
     signal.signal(signal.SIGTERM, _cleanup)
 
     # Auf Tunnel-URL warten
-    # localhost.run gibt alle Zeilen aus — wir loggen sie damit die echte URL sichtbar ist
+    # localhost.run nutzt seit 2024 .lhr.life als Domain (alt: .localhost.run)
     tunnel_url = None
     start = time.time()
     for line in proc.stdout:
         line = line.strip()
-        if line:
-            print(f"  [tunnel] {line}")
-
-        # localhost.run URL-Formate (haben sich über Zeit geändert):
-        # Alt: "tunneled with tls termination, https://xxxxx.localhost.run"
-        # Neu: "https://xxxxx.lhr.life"
-        # Beide abfangen, aber "admin.localhost.run" ausschließen (das ist localhost.run selbst)
         match = re.search(
-            r"https://(?!admin\.localhost\.run)([\w\-]+\.localhost\.run|[\w\-]+\.lhr\.life)",
+            r"https://(?!admin\.localhost\.run)([\w\-]+\.lhr\.life|[\w\-]+\.localhost\.run)",
             line
         )
         if match:
