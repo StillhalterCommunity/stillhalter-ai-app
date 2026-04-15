@@ -144,22 +144,41 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
 
         if st.button("Verbindung testen", key="test_bridge",
                      disabled=not bridge_url):
+            import requests as _req
             try:
-                import requests as _req
                 r = _req.get(f"{bridge_url.rstrip('/')}/ping", timeout=8)
-                data = r.json()
-                if data.get("tws"):
-                    st.session_state.ibkr_connected = True
-                    st.session_state.ibkr_config = {"mode": "bridge",
-                                                     "url": bridge_url.rstrip("/"),
-                                                     "key": bridge_key}
-                    st.success("Verbunden — Bridge läuft, TWS erreichbar")
-                    st.rerun()
-                else:
-                    st.error("Bridge erreichbar, aber TWS antwortet nicht. "
-                             "Bitte TWS auf dem Mac starten.")
+            except _req.exceptions.ConnectionError:
+                st.error("❌ URL nicht erreichbar — Tunnel-URL prüfen oder bridge.py neu starten.")
+                r = None
+            except _req.exceptions.Timeout:
+                st.error("❌ Timeout — bridge.py läuft, antwortet aber zu langsam. Nochmal versuchen.")
+                r = None
             except Exception as e:
-                st.error(f"Keine Verbindung zur Bridge: {e}")
+                st.error(f"❌ Verbindungsfehler: {e}")
+                r = None
+
+            if r is not None:
+                if r.status_code != 200:
+                    st.error(f"❌ Bridge antwortet mit HTTP {r.status_code} — Tunnel noch aktiv?")
+                else:
+                    try:
+                        data = r.json()
+                    except ValueError:
+                        st.error("❌ Antwort ist kein JSON — falsche URL oder Tunnel abgelaufen?\n\n"
+                                 "bridge.py neu starten und neue Tunnel-URL eintragen.")
+                        data = None
+
+                    if data is not None:
+                        if data.get("tws"):
+                            st.session_state.ibkr_connected = True
+                            st.session_state.ibkr_config = {"mode": "bridge",
+                                                             "url": bridge_url.rstrip("/"),
+                                                             "key": bridge_key}
+                            st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
+                            st.rerun()
+                        else:
+                            st.error("⚠️ Bridge erreichbar, aber TWS antwortet nicht. "
+                                     "Bitte TWS auf dem Mac starten (Paper Trading, Port 7497).")
 
     else:
         st.html("""
