@@ -126,19 +126,37 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
   <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:6px 0;
        color:#22c55e;word-break:break-all'>
     {_bridge_cmd}</code>
-  3. Das Skript zeigt eine <b>Tunnel-URL</b> (z.B. https://xxxxx.localhost.run) → hier unten eintragen<br>
-  <span style='color:#6b7280'>✓ API-Key wird automatisch verwendet — kein manuelles Eintragen nötig</span>
+  3. Das Skript zeigt eine <b>Tunnel-URL</b> → beim ersten Mal hier eintragen, danach wird sie gespeichert<br>
+  <span style='color:#6b7280'>✓ API-Key & URL werden automatisch gespeichert — nur einmalig nötig</span>
 </div>""")
 
-        saved_url = st.session_state.get("bridge_url", "")
+        # URL aus Datei laden (persistiert über App-Neustarts)
+        import os as _os, json as _json
+        _cfg_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".bridge_config.json")
+        def _load_bridge_url() -> str:
+            try:
+                with open(_cfg_path) as _f:
+                    return _json.load(_f).get("url", "")
+            except Exception:
+                return ""
+        def _save_bridge_url(url: str):
+            try:
+                with open(_cfg_path, "w") as _f:
+                    _json.dump({"url": url}, _f)
+            except Exception:
+                pass
+
+        if "bridge_url" not in st.session_state:
+            st.session_state["bridge_url"] = _load_bridge_url()
+
         bridge_url = st.text_input(
             "Tunnel-URL (aus bridge.py)",
-            value=saved_url,
-            placeholder="https://xxxxx.localhost.run",
-            help="Die vollständige URL die bridge.py anzeigt"
+            value=st.session_state.get("bridge_url", ""),
+            placeholder="https://admin.localhost.run",
+            help="Wird nach erfolgreicher Verbindung automatisch gespeichert"
         )
         if bridge_url:
-            st.session_state["bridge_url"] = bridge_url.rstrip("/")
+            st.session_state["bridge_url"] = bridge_url.strip().rstrip("/")
 
         bridge_key = "stillhalter-bridge"   # muss mit bridge.py übereinstimmen
 
@@ -152,10 +170,10 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
             try:
                 r = _req.get(f"{_url}/ping", timeout=8) if _url else None
             except _req.exceptions.ConnectionError:
-                st.error("❌ URL nicht erreichbar — Tunnel-URL prüfen oder bridge.py neu starten.")
+                st.error("❌ URL nicht erreichbar — bridge.py gestartet? TWS läuft?")
                 r = None
             except _req.exceptions.Timeout:
-                st.error("❌ Timeout — bridge.py läuft, antwortet aber zu langsam. Nochmal versuchen.")
+                st.error("❌ Timeout — bridge.py antwortet zu langsam. Nochmal versuchen.")
                 r = None
             except Exception as e:
                 st.error(f"❌ Verbindungsfehler: {e}")
@@ -168,8 +186,8 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                     try:
                         data = r.json()
                     except ValueError:
-                        st.error("❌ Antwort ist kein JSON — falsche URL oder Tunnel abgelaufen?\n\n"
-                                 "bridge.py neu starten und neue Tunnel-URL eintragen.")
+                        st.error("❌ Antwort ist kein JSON — Tunnel abgelaufen?\n\n"
+                                 "bridge.py neu starten, dann nochmal versuchen.")
                         data = None
 
                     if data is not None:
@@ -178,6 +196,7 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                             st.session_state.ibkr_config = {"mode": "bridge",
                                                              "url": _url,
                                                              "key": bridge_key}
+                            _save_bridge_url(_url)   # ← dauerhaft speichern
                             st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
                             st.rerun()
                         else:

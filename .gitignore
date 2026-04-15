@@ -29,3 +29,4 @@ secrets.toml
 
 # Nutzerdaten (DSGVO — nicht in Git!)
 data/login_log.csv
+.bridge_config.json
