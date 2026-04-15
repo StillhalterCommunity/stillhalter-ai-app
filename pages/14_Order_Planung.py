@@ -104,10 +104,17 @@ if not IB_INSYNC_INSTALLED:
 with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_connected):
 
     import os as _os, json as _json
-    _app_dir    = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    _bridge_py  = _os.path.join(_app_dir, "bridge.py")
-    _bridge_cmd = f'python3 "{_bridge_py}"'
-    _cfg_path   = _os.path.join(_app_dir, ".bridge_config.json")
+    _app_dir  = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    _cfg_path = _os.path.join(_app_dir, ".bridge_config.json")
+
+    # Auf Railway läuft die App im Container (/mount/src/... oder /app/...)
+    # → __file__-Pfad existiert nicht auf dem Mac des Users → nur "python3 bridge.py" anzeigen
+    _on_railway = (
+        _os.environ.get("RAILWAY_ENVIRONMENT") is not None
+        or _app_dir.startswith("/mount/src")
+        or _app_dir.startswith("/app")
+    )
+    _bridge_cmd = "python3 bridge.py" if _on_railway else f'python3 "{_os.path.join(_app_dir, "bridge.py")}"'
 
     def _load_bridge_url() -> str:
         try:
@@ -126,12 +133,17 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
     if "bridge_url" not in st.session_state:
         st.session_state["bridge_url"] = _load_bridge_url()
 
+    _step2 = (
+        "2. Terminal öffnen, in den <b>App-Ordner</b> (options-dashboard) navigieren und eingeben:"
+        if _on_railway else
+        "2. Diesen Befehl im Terminal ausführen:"
+    )
     st.html(f"""
 <div style='font-size:0.78rem;color:#aaa;line-height:1.9;margin-bottom:10px;
      background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
   <b style='color:#a78bfa'>So verbinden (einmalig, kein Account nötig):</b><br>
   1. TWS auf deinem Mac starten (Paper Trading, Port 7497)<br>
-  2. Diesen Befehl im Terminal ausführen:<br>
+  {_step2}<br>
   <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:6px 0;
        color:#22c55e;word-break:break-all'>{_bridge_cmd}</code>
   3. Tunnel-URL aus dem Terminal unten eintragen — wird danach automatisch gespeichert
