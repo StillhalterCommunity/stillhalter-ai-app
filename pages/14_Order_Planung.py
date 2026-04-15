@@ -145,8 +145,12 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
         if st.button("Verbindung testen", key="test_bridge",
                      disabled=not bridge_url):
             import requests as _req
+            _url = (bridge_url or "").strip().rstrip("/")
+            if not _url.startswith("http"):
+                st.error("❌ Bitte eine gültige Tunnel-URL eingeben (beginnt mit https://…)")
+                _url = None
             try:
-                r = _req.get(f"{bridge_url.rstrip('/')}/ping", timeout=8)
+                r = _req.get(f"{_url}/ping", timeout=8) if _url else None
             except _req.exceptions.ConnectionError:
                 st.error("❌ URL nicht erreichbar — Tunnel-URL prüfen oder bridge.py neu starten.")
                 r = None
@@ -172,7 +176,7 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                         if data.get("tws"):
                             st.session_state.ibkr_connected = True
                             st.session_state.ibkr_config = {"mode": "bridge",
-                                                             "url": bridge_url.rstrip("/"),
+                                                             "url": _url,
                                                              "key": bridge_key}
                             st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
                             st.rerun()
