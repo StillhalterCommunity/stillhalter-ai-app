@@ -70,43 +70,88 @@ if not market_open:
 
 # ── Preset-Defaults ───────────────────────────────────────────────────────────
 PRESETS = {
+    # ── Klassische Presets ────────────────────────────────────────────────────
     "Konservativ 🟢": dict(dte_min=21, dte_max=45, d_min=-0.20, d_max=-0.05,
                            iv_min=0, iv_max=200, otm_min=5, otm_max=20,
-                           prem_min=0.10, oi_min=50, max_spread=40.0),
+                           prem_min=0.10, oi_min=50, max_spread=40.0,
+                           prem_pct_min=0.0),
     "Ausgewogen 🟡":  dict(dte_min=14, dte_max=60, d_min=-0.30, d_max=-0.05,
                            iv_min=0, iv_max=200, otm_min=3, otm_max=25,
-                           prem_min=0.05, oi_min=10, max_spread=60.0),
+                           prem_min=0.05, oi_min=10, max_spread=60.0,
+                           prem_pct_min=0.0),
     "Aggressiv 🔴":   dict(dte_min=7, dte_max=45, d_min=-0.40, d_max=-0.05,
                            iv_min=0, iv_max=300, otm_min=0, otm_max=30,
-                           prem_min=0.01, oi_min=0, max_spread=80.0),
+                           prem_min=0.01, oi_min=0, max_spread=80.0,
+                           prem_pct_min=0.0),
+    # ── IV-basierte Presets ───────────────────────────────────────────────────
+    "Low IV 📘":  dict(dte_min=1, dte_max=42, d_min=-0.25, d_max=-0.05,
+                       iv_min=0,  iv_max=30,  otm_min=3,  otm_max=15,
+                       prem_min=0.05, oi_min=10, max_spread=50.0,
+                       prem_pct_min=0.4),
+    "Mid IV 📙":  dict(dte_min=1, dte_max=42, d_min=-0.35, d_max=-0.05,
+                       iv_min=30, iv_max=60,  otm_min=5,  otm_max=20,
+                       prem_min=0.05, oi_min=10, max_spread=60.0,
+                       prem_pct_min=0.7),
+    "High IV 📕": dict(dte_min=1, dte_max=42, d_min=-0.45, d_max=-0.05,
+                       iv_min=60, iv_max=999, otm_min=7,  otm_max=30,
+                       prem_min=0.05, oi_min=5,  max_spread=80.0,
+                       prem_pct_min=1.0),
 }
 
 # Preset-Auswahl via Session-State
 if "preset" not in st.session_state:
     st.session_state.preset = None
 
-pc1, pc2, pc3, pc4 = st.columns([2, 2, 2, 6])
+# ── Zeile 1: Klassische Presets ───────────────────────────────────────────────
+st.markdown("<div style='font-size:0.72rem;color:#555;margin-bottom:4px'>Klassisch</div>",
+            unsafe_allow_html=True)
+pc1, pc2, pc3, pc_gap = st.columns([2, 2, 2, 6])
 with pc1:
     if st.button("Konservativ 🟢", use_container_width=True,
-                 help="DTE 21–45 · Delta ≤ 0.20 · OTM ≥ 5% · OI ≥ 50"):
-        st.session_state.preset = "Konservativ 🟢"
-        st.rerun()
+                 help="DTE 21–45 · Delta ≤ 0.20 · OTM 5–20% · OI ≥ 50"):
+        st.session_state.preset = "Konservativ 🟢"; st.rerun()
 with pc2:
     if st.button("Ausgewogen 🟡", use_container_width=True,
-                 help="DTE 14–60 · Delta ≤ 0.30 · OTM ≥ 3% · OI ≥ 10"):
-        st.session_state.preset = "Ausgewogen 🟡"
-        st.rerun()
+                 help="DTE 14–60 · Delta ≤ 0.30 · OTM 3–25% · OI ≥ 10"):
+        st.session_state.preset = "Ausgewogen 🟡"; st.rerun()
 with pc3:
     if st.button("Aggressiv 🔴", use_container_width=True,
-                 help="DTE 7–45 · Delta ≤ 0.40 · OTM ≥ 0% · OI ≥ 0"):
-        st.session_state.preset = "Aggressiv 🔴"
-        st.rerun()
-with pc4:
-    if st.session_state.preset:
-        st.info(f"✅ Preset aktiv: **{st.session_state.preset}** — Filter unten sind vorbelegt")
-        if st.button("✖ Preset zurücksetzen", key="reset_preset"):
-            st.session_state.preset = None
-            st.rerun()
+                 help="DTE 7–45 · Delta ≤ 0.40 · OTM 0–30% · OI ≥ 0"):
+        st.session_state.preset = "Aggressiv 🔴"; st.rerun()
+
+# ── Zeile 2: IV-Presets ────────────────────────────────────────────────────────
+st.markdown("<div style='font-size:0.72rem;color:#555;margin:6px 0 4px'>IV-Kategorie</div>",
+            unsafe_allow_html=True)
+iv1, iv2, iv3, iv_gap = st.columns([2, 2, 2, 6])
+with iv1:
+    if st.button("Low IV 📘", use_container_width=True,
+                 help="IV 0–30% · DTE 1–42 · OTM 3–15% · Min. 0,4% Rendite/LZ · Delta ≤ 0.25"):
+        st.session_state.preset = "Low IV 📘"; st.rerun()
+with iv2:
+    if st.button("Mid IV 📙", use_container_width=True,
+                 help="IV 30–60% · DTE 1–42 · OTM 5–20% · Min. 0,7% Rendite/LZ · Delta ≤ 0.35"):
+        st.session_state.preset = "Mid IV 📙"; st.rerun()
+with iv3:
+    if st.button("High IV 📕", use_container_width=True,
+                 help="IV >60% · DTE 1–42 · OTM 7–30% · Min. 1,0% Rendite/LZ · Delta ≤ 0.45"):
+        st.session_state.preset = "High IV 📕"; st.rerun()
+
+# ── Preset-Status ─────────────────────────────────────────────────────────────
+if st.session_state.preset:
+    _pname = st.session_state.preset
+    _pdata = PRESETS[_pname]
+    _iv_label = (f"IV {_pdata['iv_min']}–{_pdata['iv_max']}% · "
+                 if _pdata.get("iv_max", 999) < 999 else f"IV >{_pdata['iv_min']}% · ")
+    _pct_label = (f" · Min. {_pdata['prem_pct_min']}% Rendite/LZ"
+                  if _pdata.get("prem_pct_min", 0) > 0 else "")
+    st.info(
+        f"✅ **{_pname}** aktiv — "
+        f"{_iv_label}DTE {_pdata['dte_min']}–{_pdata['dte_max']} · "
+        f"OTM {_pdata['otm_min']}–{_pdata['otm_max']}% · "
+        f"Delta ≤ {abs(_pdata['d_min'])}{_pct_label}"
+    )
+    if st.button("✖ Preset zurücksetzen", key="reset_preset"):
+        st.session_state.preset = None; st.rerun()
 
 # Preset-Werte laden
 _p = PRESETS.get(st.session_state.preset, {})
@@ -215,7 +260,8 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
         prem_min = st.number_input("Mind. Prämie ($)", 0.0, 20.0,
                                     _p.get("prem_min", 0.05), 0.05, format="%.2f")
         prem_day = st.number_input("Mind. Prämie/Tag ($)", 0.0, 5.0, 0.0, 0.01, format="%.3f")
-        min_yield_laufzeit = st.number_input("Mind. Rendite % LZ", 0.0, 20.0, 0.0, 0.1,
+        min_yield_laufzeit = st.number_input("Mind. Rendite % LZ", 0.0, 20.0,
+                                              _p.get("prem_pct_min", 0.0), 0.1,
                                               format="%.1f",
                                               help="Mindestrendite auf Laufzeit (% auf Strike)")
         min_yield_day_pct = st.number_input("Mind. Rendite %/Tag", 0.0, 1.0, 0.0, 0.01,
