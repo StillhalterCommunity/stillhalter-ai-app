@@ -167,7 +167,9 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
             st.error("❌ Bitte eine gültige URL eingeben (beginnt mit https://…)")
             _url = None
         try:
-            r = _req.get(f"{_url}/ping", timeout=8) if _url else None
+            r = _req.get(f"{_url}/ping", timeout=8,
+                         allow_redirects=True,
+                         headers={"Accept": "application/json"}) if _url else None
         except _req.exceptions.ConnectionError:
             st.error("❌ URL nicht erreichbar — bridge.py gestartet? TWS läuft?")
             r = None
@@ -180,12 +182,14 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
 
         if r is not None:
             if r.status_code != 200:
-                st.error(f"❌ Bridge antwortet mit HTTP {r.status_code} — Tunnel noch aktiv?")
+                st.error(f"❌ HTTP {r.status_code} — Antwort: `{r.text[:300]}`")
             else:
                 try:
                     data = r.json()
                 except ValueError:
-                    st.error("❌ Kein JSON — Tunnel abgelaufen? bridge.py neu starten.")
+                    st.error(f"❌ Antwort ist kein JSON.\n\n"
+                             f"**Status:** {r.status_code}  \n"
+                             f"**Antwort:** `{r.text[:400]}`")
                     data = None
 
                 if data is not None:
