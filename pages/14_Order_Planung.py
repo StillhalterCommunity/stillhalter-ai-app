@@ -103,149 +103,91 @@ if not IB_INSYNC_INSTALLED:
 # ══════════════════════════════════════════════════════════════════════════════
 with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_connected):
 
-    # Verbindungsmodus wählen
-    conn_mode = st.radio(
-        "Verbindungsart",
-        ["🌐 Über Bridge (Railway / Cloud)", "🏠 Lokal (localhost)"],
-        horizontal=True,
-    )
-    use_bridge = "Bridge" in conn_mode
+    import os as _os, json as _json
+    _app_dir    = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    _bridge_py  = _os.path.join(_app_dir, "bridge.py")
+    _bridge_cmd = f'python3 "{_bridge_py}"'
+    _cfg_path   = _os.path.join(_app_dir, ".bridge_config.json")
 
-    if use_bridge:
-        import os as _os
-        _app_dir    = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-        _bridge_py  = _os.path.join(_app_dir, "bridge.py")
-        _bridge_cmd = f'python3 "{_bridge_py}"'
+    def _load_bridge_url() -> str:
+        try:
+            with open(_cfg_path) as _f:
+                return _json.load(_f).get("url", "")
+        except Exception:
+            return ""
 
-        st.html(f"""
+    def _save_bridge_url(url: str):
+        try:
+            with open(_cfg_path, "w") as _f:
+                _json.dump({"url": url}, _f)
+        except Exception:
+            pass
+
+    if "bridge_url" not in st.session_state:
+        st.session_state["bridge_url"] = _load_bridge_url()
+
+    st.html(f"""
 <div style='font-size:0.78rem;color:#aaa;line-height:1.9;margin-bottom:10px;
      background:#0a0a14;border-radius:8px;padding:14px;border-left:3px solid #8b5cf6'>
-  <b style='color:#a78bfa'>So verbinden (einmalig ~2 Min, kein Account nötig):</b><br>
-  1. TWS auf deinem Mac/PC starten (Paper Trading, Port 7497)<br>
-  2. Diesen Befehl kopieren und im Terminal ausführen:<br>
+  <b style='color:#a78bfa'>So verbinden (einmalig, kein Account nötig):</b><br>
+  1. TWS auf deinem Mac starten (Paper Trading, Port 7497)<br>
+  2. Diesen Befehl im Terminal ausführen:<br>
   <code style='background:#111;padding:4px 10px;border-radius:4px;display:block;margin:6px 0;
-       color:#22c55e;word-break:break-all'>
-    {_bridge_cmd}</code>
-  3. Das Skript zeigt eine <b>Tunnel-URL</b> → beim ersten Mal hier eintragen, danach wird sie gespeichert<br>
-  <span style='color:#6b7280'>✓ API-Key & URL werden automatisch gespeichert — nur einmalig nötig</span>
+       color:#22c55e;word-break:break-all'>{_bridge_cmd}</code>
+  3. Tunnel-URL aus dem Terminal unten eintragen — wird danach automatisch gespeichert
 </div>""")
 
-        # URL aus Datei laden (persistiert über App-Neustarts)
-        import os as _os, json as _json
-        _cfg_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".bridge_config.json")
-        def _load_bridge_url() -> str:
-            try:
-                with open(_cfg_path) as _f:
-                    return _json.load(_f).get("url", "")
-            except Exception:
-                return ""
-        def _save_bridge_url(url: str):
-            try:
-                with open(_cfg_path, "w") as _f:
-                    _json.dump({"url": url}, _f)
-            except Exception:
-                pass
+    bridge_url = st.text_input(
+        "Tunnel-URL (aus bridge.py)",
+        value=st.session_state.get("bridge_url", ""),
+        placeholder="https://admin.localhost.run",
+        help="Wird nach erfolgreicher Verbindung dauerhaft gespeichert"
+    )
+    if bridge_url:
+        st.session_state["bridge_url"] = bridge_url.strip().rstrip("/")
 
-        if "bridge_url" not in st.session_state:
-            st.session_state["bridge_url"] = _load_bridge_url()
+    bridge_key = "stillhalter-bridge"
 
-        bridge_url = st.text_input(
-            "Tunnel-URL (aus bridge.py)",
-            value=st.session_state.get("bridge_url", ""),
-            placeholder="https://admin.localhost.run",
-            help="Wird nach erfolgreicher Verbindung automatisch gespeichert"
-        )
-        if bridge_url:
-            st.session_state["bridge_url"] = bridge_url.strip().rstrip("/")
+    if st.button("Verbindung testen", key="test_bridge", disabled=not bridge_url):
+        import requests as _req
+        _url = (bridge_url or "").strip().rstrip("/")
+        if not _url.startswith("http"):
+            st.error("❌ Bitte eine gültige URL eingeben (beginnt mit https://…)")
+            _url = None
+        try:
+            r = _req.get(f"{_url}/ping", timeout=8) if _url else None
+        except _req.exceptions.ConnectionError:
+            st.error("❌ URL nicht erreichbar — bridge.py gestartet? TWS läuft?")
+            r = None
+        except _req.exceptions.Timeout:
+            st.error("❌ Timeout — bridge.py antwortet zu langsam. Nochmal versuchen.")
+            r = None
+        except Exception as e:
+            st.error(f"❌ Verbindungsfehler: {e}")
+            r = None
 
-        bridge_key = "stillhalter-bridge"   # muss mit bridge.py übereinstimmen
+        if r is not None:
+            if r.status_code != 200:
+                st.error(f"❌ Bridge antwortet mit HTTP {r.status_code} — Tunnel noch aktiv?")
+            else:
+                try:
+                    data = r.json()
+                except ValueError:
+                    st.error("❌ Kein JSON — Tunnel abgelaufen? bridge.py neu starten.")
+                    data = None
 
-        if st.button("Verbindung testen", key="test_bridge",
-                     disabled=not bridge_url):
-            import requests as _req
-            _url = (bridge_url or "").strip().rstrip("/")
-            if not _url.startswith("http"):
-                st.error("❌ Bitte eine gültige Tunnel-URL eingeben (beginnt mit https://…)")
-                _url = None
-            try:
-                r = _req.get(f"{_url}/ping", timeout=8) if _url else None
-            except _req.exceptions.ConnectionError:
-                st.error("❌ URL nicht erreichbar — bridge.py gestartet? TWS läuft?")
-                r = None
-            except _req.exceptions.Timeout:
-                st.error("❌ Timeout — bridge.py antwortet zu langsam. Nochmal versuchen.")
-                r = None
-            except Exception as e:
-                st.error(f"❌ Verbindungsfehler: {e}")
-                r = None
-
-            if r is not None:
-                if r.status_code != 200:
-                    st.error(f"❌ Bridge antwortet mit HTTP {r.status_code} — Tunnel noch aktiv?")
-                else:
-                    try:
-                        data = r.json()
-                    except ValueError:
-                        st.error("❌ Antwort ist kein JSON — Tunnel abgelaufen?\n\n"
-                                 "bridge.py neu starten, dann nochmal versuchen.")
-                        data = None
-
-                    if data is not None:
-                        if data.get("tws"):
-                            st.session_state.ibkr_connected = True
-                            st.session_state.ibkr_config = {"mode": "bridge",
-                                                             "url": _url,
-                                                             "key": bridge_key}
-                            _save_bridge_url(_url)   # ← dauerhaft speichern
-                            st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
-                            st.rerun()
-                        else:
-                            st.error("⚠️ Bridge erreichbar, aber TWS antwortet nicht. "
-                                     "Bitte TWS auf dem Mac starten (Paper Trading, Port 7497).")
-
-    else:
-        st.html("""
-<div style='font-size:0.78rem;color:#888;line-height:1.6;margin-bottom:10px;
-     background:#0e0e0e;border-radius:8px;padding:12px;border-left:3px solid #3b82f6'>
-  Nur für lokalen Betrieb — TWS und App müssen auf demselben Rechner laufen.
-</div>""")
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            host = st.text_input("Host", value="127.0.0.1")
-        with col2:
-            mode = st.selectbox("Modus", ["Paper Trading (TWS)", "Live Trading (TWS)",
-                                           "Paper (Gateway)", "Live (Gateway)"])
-            port_map = {
-                "Paper Trading (TWS)": TWS_PORT_PAPER if IBKR_AVAILABLE else 7497,
-                "Live Trading (TWS)":  TWS_PORT_LIVE  if IBKR_AVAILABLE else 7496,
-                "Paper (Gateway)":     IB_GW_PORT_PAPER if IBKR_AVAILABLE else 4002,
-                "Live (Gateway)":      IB_GW_PORT_LIVE  if IBKR_AVAILABLE else 4001,
-            }
-            port = port_map[mode]
-        with col3:
-            client_id = st.number_input("Client ID", min_value=1, max_value=999,
-                                         value=42, step=1)
-
-        is_live = "Live" in mode
-        if is_live:
-            st.warning("Live Trading — Orders mit echtem Geld!")
-
-        if st.button("Verbindung testen", disabled=not IB_INSYNC_INSTALLED):
-            if IBKR_AVAILABLE:
-                cfg = IBKRConfig(host=host, port=port, client_id=client_id)
-                with st.spinner("Verbinde..."):
-                    ok, msg = test_connection(cfg)
-                if ok:
-                    st.session_state.ibkr_config = cfg
-                    st.session_state.ibkr_connected = True
-                    acc = get_account_summary(cfg)
-                    if acc:
-                        st.session_state.account_info = acc
-                    st.success(f"Verbunden: {msg}")
-                    st.rerun()
-                else:
-                    st.session_state.ibkr_connected = False
-                    st.error(f"Fehler: {msg}")
+                if data is not None:
+                    if data.get("tws"):
+                        st.session_state.ibkr_connected = True
+                        st.session_state.ibkr_config = {"mode": "bridge",
+                                                         "url": _url,
+                                                         "key": bridge_key}
+                        _save_bridge_url(_url)
+                        st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
+                        st.rerun()
+                    else:
+                        st.error("⚠️ Bridge erreichbar, aber TWS antwortet nicht. "
+                                 "TWS auf dem Mac starten (Paper Trading, Port 7497).")
 
     if st.session_state.ibkr_connected:
         st.success("Verbunden mit TWS")
