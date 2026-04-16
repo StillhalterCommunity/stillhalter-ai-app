@@ -508,74 +508,12 @@ st.html(preview_html)
 # ORDER AUSFÜHREN — Methode 1: Basket Trader Export (für alle Nutzer)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _generate_basket_csv(orders: list) -> str:
-    """TWS Basket Trader CSV-Format (File → Import → Basket Trader in TWS)."""
-    header = ("Action,Quantity,Symbol,SecType,"
-              "LastTradingDayOrContractMonth,Strike,Right,"
-              "Exchange,Currency,TimeInForce,OrderType,LmtPrice,Comment")
-    lines = [header]
-    for o in orders:
-        ot = getattr(o, "order_type", "LMT")
-        lmt = f"{o.limit_price:.2f}" if ot == "LMT" else ""
-        lines.append(
-            f"{o.action},{o.quantity},{o.ticker},OPT,"
-            f"{o.expiration},{o.strike:.2f},{o.right},"
-            f"SMART,USD,DAY,{ot},{lmt},Stillhalter AI App"
-        )
-    return "\n".join(lines)
-
 
 st.html("""
 <div style='font-size:0.95rem;font-weight:700;color:#f0f0f0;margin:20px 0 6px'>
   🚀 Order übertragen
 </div>
 """)
-
-# Methode 1: Basket Export
-with st.container():
-    st.markdown("""
-<div style='background:#0a120a;border:1px solid #22c55e;border-radius:12px;
-     padding:16px 20px;margin-bottom:10px'>
-<div style='font-size:0.88rem;font-weight:700;color:#22c55e;margin-bottom:6px'>
-  📥 Methode 1 — TWS Basket Trader (empfohlen · für alle Nutzer)</div>
-<div style='font-size:0.78rem;color:#6b7280;line-height:1.6'>
-  Exportiert die Order als CSV-Datei → in TWS importieren → in Ruhe prüfen → absenden.<br>
-  <b>TWS:</b> File → Import → Basket Trader → CSV auswählen → Submit All<br>
-  <span style='color:#4ade80'>✓ Kein Bridge · Kein Tunnel · Funktioniert für alle Nutzer</span>
-</div></div>
-""", unsafe_allow_html=True)
-
-    if orders_to_place:
-        csv_data = _generate_basket_csv(orders_to_place)
-        fname = f"order_{ticker}_{expiry_str}.csv"
-        st.download_button(
-            "📥 Als TWS-Basket-Datei exportieren",
-            data=csv_data,
-            file_name=fname,
-            mime="text/csv",
-            type="primary",
-            use_container_width=True,
-            help="TWS → File → Import → Basket Trader → Datei öffnen → Submit All",
-        )
-    else:
-        st.button("📥 Als TWS-Basket-Datei exportieren", disabled=True,
-                  use_container_width=True,
-                  help="Bitte oben Ticker und Strike eingeben")
-
-st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-# Methode 2: Direkte TWS-Verbindung (Bridge oder lokal)
-st.markdown("""
-<div style='background:#0e0e14;border:1px solid #374151;border-radius:12px;
-     padding:14px 18px;margin-bottom:10px'>
-<div style='font-size:0.88rem;font-weight:700;color:#9ca3af;margin-bottom:6px'>
-  🔌 Methode 2 — Direkt in TWS platzieren (Bridge / Lokal)</div>
-<div style='font-size:0.78rem;color:#4b5563;line-height:1.6'>
-Platziert die Order live in TWS als <b>"Held"</b> (gelb, noch nicht übertragen).<br>
-Du gibst die finale Freigabe direkt in TWS durch Klick auf <b>Transmit</b>.<br>
-<i>Voraussetzung: TWS Verbindung oben konfiguriert und getestet.</i>
-</div></div>
-""", unsafe_allow_html=True)
 
 # ── Order-Button ──────────────────────────────────────────────────────────────
 btn_disabled = not st.session_state.ibkr_connected
