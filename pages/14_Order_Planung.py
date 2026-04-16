@@ -101,37 +101,45 @@ if not IB_INSYNC_INSTALLED:
 # ══════════════════════════════════════════════════════════════════════════════
 # TWS VERBINDUNG
 # ══════════════════════════════════════════════════════════════════════════════
+import os as _os
+_app_dir   = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+_on_railway = (
+    _os.environ.get("RAILWAY_ENVIRONMENT") is not None
+    or _app_dir.startswith("/mount/src")
+    or _app_dir.startswith("/app")
+)
+_bridge_cmd = "python3 bridge.py" if _on_railway else f'python3 "{_os.path.join(_app_dir, "bridge.py")}"'
+_bridge_key = "stillhalter-bridge"
+
+# URL-Persistenz: Query-Parameter überlebt Deployments (Browser speichert sie)
+_qp = st.query_params.get("burl", "")
+if "bridge_url" not in st.session_state:
+    st.session_state["bridge_url"] = _qp or ""
+
+# Auto-Connect: beim Seitenload still pingen wenn URL vorhanden und noch nicht verbunden
+if not st.session_state.ibkr_connected and st.session_state.get("bridge_url"):
+    try:
+        import requests as _req_auto
+        _r = _req_auto.get(f"{st.session_state['bridge_url']}/ping", timeout=3)
+        _d = _r.json()
+        if _d.get("tws"):
+            st.session_state.ibkr_connected = True
+            st.session_state.ibkr_config = {
+                "mode": "bridge",
+                "url":  st.session_state["bridge_url"],
+                "key":  _bridge_key,
+            }
+    except Exception:
+        pass
+
 with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_connected):
 
-    import os as _os, json as _json
-    _app_dir  = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    _cfg_path = _os.path.join(_app_dir, ".bridge_config.json")
-
-    # Auf Railway läuft die App im Container (/mount/src/... oder /app/...)
-    # → __file__-Pfad existiert nicht auf dem Mac des Users → nur "python3 bridge.py" anzeigen
-    _on_railway = (
-        _os.environ.get("RAILWAY_ENVIRONMENT") is not None
-        or _app_dir.startswith("/mount/src")
-        or _app_dir.startswith("/app")
-    )
-    _bridge_cmd = "python3 bridge.py" if _on_railway else f'python3 "{_os.path.join(_app_dir, "bridge.py")}"'
-
-    def _load_bridge_url() -> str:
-        try:
-            with open(_cfg_path) as _f:
-                return _json.load(_f).get("url", "")
-        except Exception:
-            return ""
-
     def _save_bridge_url(url: str):
+        st.session_state["bridge_url"] = url
         try:
-            with open(_cfg_path, "w") as _f:
-                _json.dump({"url": url}, _f)
+            st.query_params["burl"] = url   # im Browser-URL speichern
         except Exception:
             pass
-
-    if "bridge_url" not in st.session_state:
-        st.session_state["bridge_url"] = _load_bridge_url()
 
     _step2 = (
         "2. Terminal öffnen, in den <b>App-Ordner</b> (options-dashboard) navigieren und eingeben:"
@@ -152,13 +160,11 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
     bridge_url = st.text_input(
         "Tunnel-URL (aus bridge.py)",
         value=st.session_state.get("bridge_url", ""),
-        placeholder="https://admin.localhost.run",
-        help="Wird nach erfolgreicher Verbindung dauerhaft gespeichert"
+        placeholder="https://f51b9182572609.lhr.life",
+        help="Wird im Browser gespeichert — beim nächsten Besuch automatisch verbunden"
     )
     if bridge_url:
         st.session_state["bridge_url"] = bridge_url.strip().rstrip("/")
-
-    bridge_key = "stillhalter-bridge"
 
     if st.button("Verbindung testen", key="test_bridge", disabled=not bridge_url):
         import requests as _req
@@ -197,7 +203,7 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
                         st.session_state.ibkr_connected = True
                         st.session_state.ibkr_config = {"mode": "bridge",
                                                          "url": _url,
-                                                         "key": bridge_key}
+                                                         "key": _bridge_key}
                         _save_bridge_url(_url)
                         st.success("✅ Verbunden — Bridge läuft, TWS erreichbar")
                         st.rerun()
