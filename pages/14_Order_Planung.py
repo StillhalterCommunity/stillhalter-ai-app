@@ -572,15 +572,14 @@ Du gibst die finale Freigabe direkt in TWS durch Klick auf <b>Transmit</b>.<br>
 """, unsafe_allow_html=True)
 
 # ── Order-Button ──────────────────────────────────────────────────────────────
-btn_disabled = not (st.session_state.ibkr_connected and IB_INSYNC_INSTALLED)
-btn_label = "📋 Order in TWS platzieren (Held)" if not btn_disabled else \
-            "🔌 Zuerst TWS verbinden" if not st.session_state.ibkr_connected else \
-            "⚠️ ib_insync nicht installiert"
+btn_disabled = not st.session_state.ibkr_connected
+btn_label = "🚀 Order in TWS platzieren (Held)" if not btn_disabled else \
+            "🔌 Zuerst TWS verbinden"
 
 confirm_col, btn_col = st.columns([3, 1])
 with confirm_col:
-    is_live_mode = st.session_state.ibkr_config and \
-                   st.session_state.ibkr_config.port in (7496, 4001)
+    cfg_dict = st.session_state.ibkr_config or {}
+    is_live_mode = isinstance(cfg_dict, dict) and cfg_dict.get("live", False)
     if is_live_mode:
         confirmed = st.checkbox(
             "Ich bestätige: Dies ist Live Trading mit echtem Geld",
