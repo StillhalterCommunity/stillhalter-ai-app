@@ -1008,11 +1008,19 @@ class TechFilterParams:
     alignment_direction: str = "bullish"  # "bullish" | "bearish"
     min_aligned_tfs: int = 2              # mind. 2 von 3
 
+    # ── Filter-Modus ──────────────────────────────────────────────────────────
+    filter_mode: str = "AND"   # "AND" = alle müssen passen | "OR" = mind. einer | "SCORE" = Score-basiert
+    min_convergence_score: float = 0.0   # Minimum Score (0-100), nur relevant wenn filter_mode="SCORE"
+
 
 def matches_tech_filter(result: MultiTFResult, params: TechFilterParams) -> bool:
     """
     Prüft ob ein Ticker die technischen Filterkriterien erfüllt.
-    Gibt True zurück wenn alle aktiven Filter erfüllt sind.
+
+    filter_mode:
+      "AND"   = Alle aktiven Filter müssen erfüllt sein (klassisch, streng)
+      "OR"    = Mindestens einer der aktiven Filter muss erfüllt sein
+      "SCORE" = Mindest-Konvergenz-Score (flexibel, empfohlen — berücksichtigt zeitliche Nähe)
     """
     def get_tf(tf_name: str) -> Optional[TFSignal]:
         mapping = {"4H": result.tf_4h, "1D": result.tf_1d, "1W": result.tf_1w}
@@ -1023,12 +1031,10 @@ def matches_tech_filter(result: MultiTFResult, params: TechFilterParams) -> bool
             return True
         if category == "ema":
             return {
-                # Neue Strings (Scanner UI)
                 "SC Trend bullish ↑":            tf.ema_bullish,
                 "SC Trend bearish ↓":            tf.ema_bearish,
                 "Kaufsignal (Cross ↑)":          tf.ema_cross_bullish,
                 "Verkaufssignal (Cross ↓)":      tf.ema_cross_bearish,
-                # Legacy-Mapping für Rückwärtskompatibilität
                 "EMA bullish (EMA2 > EMA9)":     tf.ema_bullish,
                 "EMA bearish (EMA2 < EMA9)":     tf.ema_bearish,
                 "EMA Cross Aufwärts":            tf.ema_cross_bullish,
@@ -1062,51 +1068,93 @@ def matches_tech_filter(result: MultiTFResult, params: TechFilterParams) -> bool
             }.get(filter_str, True)
         return True
 
-    # Stillhalter Trend Model Filter
+    def check_on_any_tf(filter_str: str, category: str) -> bool:
+        """Gibt True zurück wenn mindestens ein TF den Filter erfüllt."""
+        tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
+        return any(check_filter_on_tf(t, filter_str, category) for t in tfs)
+
+    def check_on_tf_or_all(tf_name: str, filter_str: str, category: str) -> bool:
+        """Standard-Check auf bestimmtem TF oder allen TFs."""
+        if tf_name == "Alle TFs":
+            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
+            return all(check_filter_on_tf(t, filter_str, category) for t in tfs)
+        else:
+            return check_filter_on_tf(get_tf(tf_name), filter_str, category)
+
+    # ── SCORE-Modus: Mindest-Konvergenz-Score ─────────────────────────────────
+    if params.filter_mode == "SCORE":
+        if params.min_convergence_score > 0:
+            # Strategie aus Alignment-Direction ableiten
+            strategy = "call" if result.alignment_direction == "bearish" else "put"
+            conv = calc_convergence_score(result, strategy)
+            if conv.score < params.min_convergence_score:
+                return False
+        # Im SCORE-Modus zusätzlich: Einzelne Filter als optionale Einschränkungen
+        # (nur aktiv wenn explizit nicht "Alle")
+        active = [
+            (params.ema_filter,   params.ema_timeframe,   "ema"),
+            (params.rsi_filter,   params.rsi_timeframe,   "rsi"),
+            (params.stoch_filter, params.stoch_timeframe, "stoch"),
+            (params.macd_filter,  params.macd_timeframe,  "macd"),
+        ]
+        required = [(f, tf, cat) for f, tf, cat in active if f != "Alle"]
+        if required:
+            # Im SCORE-Modus: Filter als OR (mindestens einer muss passen)
+            if not any(check_on_tf_or_all(tf, f, cat) for f, tf, cat in required):
+                return False
+        # Multi-TF Alignment
+        if params.require_alignment:
+            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
+            if params.alignment_direction == "bullish":
+                aligned = sum(1 for t in tfs if t.direction == "bullish")
+            else:
+                aligned = sum(1 for t in tfs if t.direction == "bearish")
+            if aligned < params.min_aligned_tfs:
+                return False
+        return True
+
+    # ── OR-Modus: Mindestens ein Filter muss passen ────────────────────────────
+    if params.filter_mode == "OR":
+        active_filters = []
+        if params.ema_filter != "Alle":
+            active_filters.append(check_on_tf_or_all(params.ema_timeframe, params.ema_filter, "ema"))
+        if params.rsi_filter != "Alle":
+            active_filters.append(check_on_tf_or_all(params.rsi_timeframe, params.rsi_filter, "rsi"))
+        if params.stoch_filter != "Alle":
+            active_filters.append(check_on_tf_or_all(params.stoch_timeframe, params.stoch_filter, "stoch"))
+        if params.macd_filter != "Alle":
+            active_filters.append(check_on_tf_or_all(params.macd_timeframe, params.macd_filter, "macd"))
+
+        if active_filters and not any(active_filters):
+            return False
+
+        if params.require_alignment:
+            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
+            if params.alignment_direction == "bullish":
+                aligned = sum(1 for t in tfs if t.direction == "bullish")
+            else:
+                aligned = sum(1 for t in tfs if t.direction == "bearish")
+            if aligned < params.min_aligned_tfs:
+                return False
+        return True
+
+    # ── AND-Modus (Standard): Alle aktiven Filter müssen passen ───────────────
     if params.ema_filter != "Alle":
-        if params.ema_timeframe == "Alle TFs":
-            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
-            if not all(check_filter_on_tf(t, params.ema_filter, "ema") for t in tfs):
-                return False
-        else:
-            tf = get_tf(params.ema_timeframe)
-            if not check_filter_on_tf(tf, params.ema_filter, "ema"):
-                return False
+        if not check_on_tf_or_all(params.ema_timeframe, params.ema_filter, "ema"):
+            return False
 
-    # RSI Filter
     if params.rsi_filter != "Alle":
-        if params.rsi_timeframe == "Alle TFs":
-            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
-            if not all(check_filter_on_tf(t, params.rsi_filter, "rsi") for t in tfs):
-                return False
-        else:
-            tf = get_tf(params.rsi_timeframe)
-            if not check_filter_on_tf(tf, params.rsi_filter, "rsi"):
-                return False
+        if not check_on_tf_or_all(params.rsi_timeframe, params.rsi_filter, "rsi"):
+            return False
 
-    # Stochastik Filter
     if params.stoch_filter != "Alle":
-        if params.stoch_timeframe == "Alle TFs":
-            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
-            if not all(check_filter_on_tf(t, params.stoch_filter, "stoch") for t in tfs):
-                return False
-        else:
-            tf = get_tf(params.stoch_timeframe)
-            if not check_filter_on_tf(tf, params.stoch_filter, "stoch"):
-                return False
+        if not check_on_tf_or_all(params.stoch_timeframe, params.stoch_filter, "stoch"):
+            return False
 
-    # MACD Filter
     if params.macd_filter != "Alle":
-        if params.macd_timeframe == "Alle TFs":
-            tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
-            if not all(check_filter_on_tf(t, params.macd_filter, "macd") for t in tfs):
-                return False
-        else:
-            tf = get_tf(params.macd_timeframe)
-            if not check_filter_on_tf(tf, params.macd_filter, "macd"):
-                return False
+        if not check_on_tf_or_all(params.macd_timeframe, params.macd_filter, "macd"):
+            return False
 
-    # Multi-TF Alignment
     if params.require_alignment:
         tfs = [r for r in [result.tf_4h, result.tf_1d, result.tf_1w] if r]
         if params.alignment_direction == "bullish":

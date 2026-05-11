@@ -269,6 +269,16 @@ with tab_opts:
                                           step=0.05, format="%.2f", key="o_pm")
             oi_min_o   = st.number_input("Mind. OI", 0, 5000, 5, key="o_oi")
 
+        # ── Earnings-Filter ──────────────────────────────────────────────────
+        _ef1, _ef2 = st.columns([3, 7])
+        with _ef1:
+            exclude_earnings_o = st.checkbox(
+                "📅 Earnings in Laufzeit ausschließen",
+                value=False,
+                key="o_excl_earn",
+                help="Filtert Optionen heraus, bei denen ein Earnings-Termin innerhalb der Laufzeit liegt.",
+            )
+
         params = ScreeningParams(
             strategy=strategy,
             delta_min=d_min, delta_max=d_max,
@@ -281,6 +291,12 @@ with tab_opts:
 
         with st.spinner("Berechne Greeks & CRV..."):
             screened = screen_options(puts_df, calls_df, current_price, params, tech_signal)
+
+        # ── Earnings-Filter anwenden ──────────────────────────────────────────
+        if exclude_earnings_o and not screened.empty and "⚠️ Earnings" in screened.columns:
+            screened = screened[screened["⚠️ Earnings"] == ""].reset_index(drop=True)
+        elif exclude_earnings_o and not screened.empty and "Earnings" in screened.columns:
+            screened = screened[screened["Earnings"].isna() | (screened["Earnings"] == "")].reset_index(drop=True)
 
         if screened.empty:
             st.info("Keine Optionen mit diesen Filtern — OTM min, IV min oder Prämie senken.")

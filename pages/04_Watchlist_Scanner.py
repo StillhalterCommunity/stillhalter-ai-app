@@ -30,6 +30,7 @@ from analysis.multi_timeframe import (
     TechFilterParams, tf_summary_row, calc_convergence_score
 )
 from ui.charts import render_option_mini_chart, render_payoff_diagram
+from data.preset_manager import load_presets, save_preset, delete_preset, get_preset
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -67,6 +68,71 @@ if not market_open:
         "Prämien können leicht von den nächsten Live-Kursen abweichen.",
         icon="⚠️"
     )
+
+# ── Benutzerdefinierte Presets (gespeichert in data/user_presets.json) ─────────
+_user_presets = load_presets()
+if _user_presets:
+    _preset_names = list(_user_presets.keys())
+    _up1, _up2, _up3 = st.columns([3, 1, 8])
+    with _up1:
+        _selected_user_preset = st.selectbox(
+            "💾 Gespeicherte Konfiguration laden",
+            ["— Auswählen —"] + _preset_names,
+            key="load_user_preset",
+        )
+    with _up2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if _selected_user_preset != "— Auswählen —":
+            if st.button("📂 Laden", use_container_width=True, key="btn_load_preset"):
+                _cfg = get_preset(_selected_user_preset)
+                if _cfg:
+                    for _k, _v in _cfg.items():
+                        st.session_state[_k] = _v
+                    st.success(f"✅ Konfiguration **{_selected_user_preset}** geladen!")
+                    st.rerun()
+            if st.button("🗑️ Löschen", use_container_width=True, key="btn_del_preset"):
+                delete_preset(_selected_user_preset)
+                st.success(f"✅ **{_selected_user_preset}** gelöscht.")
+                st.rerun()
+
+st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
+
+# ── Neue Konfiguration speichern ──────────────────────────────────────────────
+with st.expander("💾 **KONFIGURATION SPEICHERN** — Filter-Presets für Kunden/Strategien", expanded=False):
+    sp1, sp2 = st.columns([3, 1])
+    with sp1:
+        _preset_save_name = st.text_input(
+            "Name der Konfiguration",
+            placeholder="z.B. Stefan – Konservativ, Kundin Maria, High IV Aggressiv…",
+            key="preset_save_name",
+        )
+    with sp2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("💾 Jetzt speichern", use_container_width=True, key="btn_save_preset", type="primary"):
+            if _preset_save_name and _preset_save_name.strip():
+                # Aktuelle Einstellungen aus Session State sammeln
+                _save_cfg = {}
+                _save_keys = [
+                    "scan_universe", "ema_f", "ema_tf", "rsi_f", "rsi_tf",
+                    "stoch_f", "stoch_tf", "macd_f", "macd_tf",
+                    "filter_mode", "min_conv_score", "trend_mode_scan",
+                ]
+                for _sk in _save_keys:
+                    if _sk in st.session_state:
+                        _save_cfg[_sk] = st.session_state[_sk]
+                # Option-Parameter aus aktuellen Widget-Werten
+                _save_cfg["_note"] = f"Gespeichert am {__import__('datetime').datetime.now().strftime('%d.%m.%Y %H:%M')}"
+                if save_preset(_preset_save_name.strip(), _save_cfg):
+                    st.success(f"✅ Konfiguration **{_preset_save_name.strip()}** gespeichert!")
+                    st.rerun()
+            else:
+                st.warning("Bitte einen Namen eingeben.")
+    st.markdown("""
+    <div style='color:#666;font-size:0.8rem'>
+    💡 Es werden gespeichert: Universum, alle technischen Filter (Modus, Indikatoren, Timeframes, Score).
+    Option-Parameter (DTE, Delta, IV, Prämie) werden mit dem Preset geladen, wenn sie beim Speichern aktiv waren.
+    </div>
+    """, unsafe_allow_html=True)
 
 # ── Preset-Defaults ───────────────────────────────────────────────────────────
 PRESETS = {
@@ -307,17 +373,64 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
             )
 
 # ── Technische Filter ─────────────────────────────────────────────────────────
-with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stillhalter Dual Stochastik · Stillhalter MACD Pro · Stillhalter Trend Model · Multi-Timeframe", expanded=False):
-
-    st.markdown("""
-    <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
-    Filtert Aktien nach technischen Signalen auf 4H · 1D · 1W Ebene.
-    Aktivierte Filter werden mit AND verknüpft — die Aktie muss <b>alle</b> Bedingungen erfüllen.
-    Crossover-Signale werden innerhalb der letzten 3 Kerzen erkannt.
-    </div>
-    """, unsafe_allow_html=True)
+with st.expander("📊 **TECHNISCHE FILTER** — RSI · Dual Stochastik · MACD Pro · Trend Model · Score-basiert", expanded=False):
 
     TF_OPTIONS = ["4H", "1D", "1W", "Alle TFs"]
+
+    # ── Filter-Modus ──────────────────────────────────────────────────────────
+    fm1, fm2, fm3 = st.columns([3, 3, 6])
+    with fm1:
+        filter_mode = st.selectbox(
+            "🎛️ Filter-Modus",
+            ["AND — alle müssen passen", "OR — mindestens einer", "SCORE — Score-basiert ★"],
+            index=2,
+            key="filter_mode",
+            help=(
+                "AND: Alle aktivierten Filter müssen gleichzeitig erfüllt sein (streng, oft 0 Ergebnisse)\n"
+                "OR: Mindestens einer der aktivierten Filter muss passen (flexibler)\n"
+                "SCORE ★: Nutzt den Konvergenz-Score (0-100) — berücksichtigt zeitliche Nähe zum Signal automatisch"
+            ),
+        )
+    _fmode = "AND" if filter_mode.startswith("AND") else ("OR" if filter_mode.startswith("OR") else "SCORE")
+
+    with fm2:
+        if _fmode == "SCORE":
+            min_conv_score = st.slider(
+                "Min. Konvergenz-Score",
+                0, 100, 0, 5,
+                key="min_conv_score",
+                help=(
+                    "0 = kein Mindest-Score (alle Ticker)\n"
+                    "40+ = Indikatoren nähern sich dem Signal an\n"
+                    "60+ = Sehr nah am idealen Einstieg\n"
+                    "78+ = Perfekte Konvergenz (selten)"
+                ),
+            )
+        else:
+            min_conv_score = 0.0
+
+    if _fmode == "SCORE":
+        st.markdown("""
+        <div style='color:#888;font-size:0.82rem;margin-bottom:12px;background:rgba(212,168,67,0.06);
+                    padding:8px 12px;border-radius:6px;border-left:3px solid rgba(212,168,67,0.4)'>
+        ★ <b>Score-Modus aktiv</b> — MACD-Kreuzung von vor 2–3 Tagen, RSI nah an 30, Stochastik nah an 20
+        werden alle berücksichtigt und in einen Gesamt-Score (0–100) umgerechnet.<br>
+        Einzelne Filter unten sind im Score-Modus <b>optional</b> (fungieren als OR-Zusatzbedingung, nicht als harter Filter).
+        </div>
+        """, unsafe_allow_html=True)
+    elif _fmode == "AND":
+        st.markdown("""
+        <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
+        AND-Modus: Alle aktivierten Filter müssen gleichzeitig erfüllt sein. Bei vielen kombinierten Signalen
+        können Ergebnisse auf 0 sinken — dann Score-Modus empfohlen.
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
+        OR-Modus: Mindestens einer der aktivierten Filter muss erfüllt sein. Flexibler als AND.
+        </div>
+        """, unsafe_allow_html=True)
 
     tc1, tc2, tc3, tc4 = st.columns(4)
 
@@ -401,12 +514,14 @@ with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stillhalter Dual Stochas
         macd_filter=macd_filter, macd_timeframe=macd_tf,
         require_alignment=require_align,
         alignment_direction=align_dir,
+        filter_mode=_fmode,
+        min_convergence_score=float(min_conv_score),
     )
 
     use_tech_filter = any([
         ema_filter != "Alle", rsi_filter != "Alle",
         stoch_filter != "Alle", macd_filter != "Alle",
-        require_align
+        require_align, min_conv_score > 0,
     ])
 
 # ── Ticker Liste ──────────────────────────────────────────────────────────────
