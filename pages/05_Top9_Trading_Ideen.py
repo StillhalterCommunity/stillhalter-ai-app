@@ -361,7 +361,7 @@ def _build_share_text(row: dict, tech: dict, strategy: str) -> str:
 # QUICK SCAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_quick_scan(strategy="Cash Covered Put"):
+def _run_quick_scan(strategy="Cash Covered Put", exclude_earnings=False):
     """Scannt die komplette Watchlist und speichert Ergebnisse im Cache."""
     from analysis.batch_screener import scan_watchlist
     from data.watchlist import ALL_TICKERS
@@ -390,6 +390,7 @@ def _run_quick_scan(strategy="Cash Covered Put"):
         dte_min=14,      dte_max=60,
         iv_min=0.15,     premium_min=0.05,
         min_oi=5,        otm_min=3.0,   otm_max=50.0,
+        exclude_earnings=exclude_earnings,
         progress_callback=on_progress,
         result_callback=on_result,
     )
@@ -436,7 +437,7 @@ _qs_label = (
 _qs_expanded = (cached_results is None or cache_stale)
 
 with st.expander(_qs_label, expanded=_qs_expanded):
-    sq1, sq2 = st.columns([3, 2])
+    sq1, sq2, sq3 = st.columns([3, 2, 2])
     with sq1:
         if ts_str_g:
             st.markdown(
@@ -456,16 +457,24 @@ with st.expander(_qs_label, expanded=_qs_expanded):
             "Strategie", ["Cash Covered Put", "Covered Call"],
             key="qs_strategy", label_visibility="collapsed"
         )
+    with sq3:
+        st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+        qs_excl_earn = st.checkbox(
+            "📅 Earnings ausschließen",
+            value=False,
+            key="qs_excl_earn",
+            help="Optionen mit Earnings-Termin innerhalb der Laufzeit nicht anzeigen",
+        )
     if st.button("🚀 Watchlist-Scan starten", type="primary", use_container_width=True,
                  key="btn_quickscan"):
-        _run_quick_scan(qs_strat)
+        _run_quick_scan(qs_strat, exclude_earnings=qs_excl_earn)
 
 if cached_results is not None and not cached_results.empty:
     ts_str = cached_ts.strftime("%d.%m.%Y %H:%M") if cached_ts else "unbekannt"
     age_hours = age_hours_global
     freshness_color = freshness_color_g
 
-    info_c1, info_c2 = st.columns([6, 2])
+    info_c1, info_c2, info_c3 = st.columns([5, 2, 2])
     with info_c1:
         st.html(
             f"<div style='font-size:0.8rem;color:#444;font-family:RedRose,sans-serif;margin-bottom:12px'>"
@@ -476,8 +485,18 @@ if cached_results is not None and not cached_results.empty:
         )
     with info_c2:
         st.page_link("pages/04_Watchlist_Scanner.py", label="→ Scanner starten", icon="🔍")
+    with info_c3:
+        top9_excl_earn = st.checkbox(
+            "📅 Earnings ausblenden",
+            value=False,
+            key="top9_excl_earn",
+            help="Ideen mit Earnings-Termin in der Laufzeit aus der Anzeige ausblenden",
+        )
 
     df = cached_results.copy()
+    # Earnings-Filter auf gecachte Ergebnisse anwenden
+    if top9_excl_earn and "⚠️ Earnings" in df.columns:
+        df = df[df["⚠️ Earnings"] == ""].reset_index(drop=True)
     if "IV %" in df.columns:
         df["_risk_class"] = df["IV %"].apply(lambda x: get_risk_class(x, iv_thresh_low, iv_thresh_mid))
     else:

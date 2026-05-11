@@ -59,6 +59,7 @@ def start_scan(
     otm_max: float = 30.0,
     max_spread_pct: float = 40.0,
     require_valid_market: bool = True,
+    exclude_earnings: bool = False,  # Optionen mit Earnings in Laufzeit ausschließen
 ) -> bool:
     """
     Startet den Hintergrund-Scan in einem Daemon-Thread.
@@ -96,6 +97,7 @@ def start_scan(
             "otm_max": otm_max,
             "max_spread_pct": max_spread_pct,
             "require_valid_market": require_valid_market,
+            "exclude_earnings": exclude_earnings,
         },
         daemon=True,   # Daemon = wird beendet wenn Streamlit-Prozess endet
         name="StillhalterBackgroundScan",
@@ -113,7 +115,7 @@ def stop_scan() -> None:
 
 def _scan_worker(tickers, strategy, delta_min, delta_max, dte_min, dte_max,
                  iv_min, premium_min, min_oi, otm_min, otm_max,
-                 max_spread_pct, require_valid_market):
+                 max_spread_pct, require_valid_market, exclude_earnings=False):
     """
     Läuft im Hintergrund-Thread — nutzt scan_watchlist() mit 8 parallelen Workern,
     identisch zum normalen Scan. Aktualisiert _state laufend via Callbacks.
@@ -157,6 +159,7 @@ def _scan_worker(tickers, strategy, delta_min, delta_max, dte_min, dte_max,
             otm_max=otm_max,
             require_valid_market=require_valid_market,
             max_spread_pct=max_spread_pct,
+            exclude_earnings=exclude_earnings,
             progress_callback=on_progress,
             result_callback=on_result,
         )

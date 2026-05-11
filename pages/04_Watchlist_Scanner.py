@@ -286,6 +286,26 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
              "Rendite %/Tag", "OTM %", "Prämie/Tag", "DTE", "|Delta|"],
         )
 
+    # ── Earnings-Filter ───────────────────────────────────────────────────────
+    earn_row = st.columns([3, 9])
+    with earn_row[0]:
+        exclude_earnings = st.checkbox(
+            "📅 Earnings in Laufzeit ausschließen",
+            value=False,
+            help=(
+                "Filtert Optionen heraus, bei denen ein Earnings-Termin "
+                "innerhalb der Laufzeit liegt. Earnings erhöhen die IV und "
+                "können die Prämie stark beeinflussen."
+            ),
+        )
+    with earn_row[1]:
+        if exclude_earnings:
+            st.info(
+                "🚫 **Earnings-Filter aktiv** — Optionen mit Earnings-Termin "
+                "innerhalb der Laufzeit werden ausgeschlossen.",
+                icon="📅",
+            )
+
 # ── Technische Filter ─────────────────────────────────────────────────────────
 with st.expander("📊 **TECHNISCHE FILTER** — RSI · Stillhalter Dual Stochastik · Stillhalter MACD Pro · Stillhalter Trend Model · Multi-Timeframe", expanded=False):
 
@@ -474,6 +494,7 @@ if start_scan_bg:
         otm_min=float(otm_min), otm_max=float(otm_max),
         max_spread_pct=float(max_spread_pct),
         require_valid_market=not off_hours_bg,
+        exclude_earnings=exclude_earnings,
     )
     if started:
         st.success("✅ Hintergrund-Scan gestartet — du kannst jetzt die Seite wechseln!")
@@ -587,6 +608,7 @@ if start_scan:
             max_results_per_ticker=int(max_per_ticker),
             require_valid_market=require_valid_mkt,
             max_spread_pct=float(max_spread_pct),
+            exclude_earnings=exclude_earnings,
             progress_callback=on_progress,
             result_callback=on_result,
         )

@@ -31,6 +31,7 @@ render_sidebar()
 from data.universes import get_universe_tickers, UNIVERSE_OPTIONS
 from data.watchlist import ALL_TICKERS
 from analysis.multi_timeframe import analyze_multi_timeframe, calc_convergence_score
+from data.fetcher import fetch_earnings_date, calculate_dte as _calc_dte
 
 SIGNAL_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "trend_signal_cache.pkl")
 
@@ -929,6 +930,17 @@ def get_option_rec(ticker: str, direction: str, leading_tf: str, price: float) -
                 f"{_TF_LABELS.get(leading_tf,'')} intakt. Exit bei STI-Cross in Gegenrichtung."
             )
 
+        # Earnings-Termin prüfen
+        try:
+            earn_date = fetch_earnings_date(ticker)
+            if earn_date:
+                earn_dte = _calc_dte(earn_date)
+                if 0 <= earn_dte <= base.get("dte", actual_dte):
+                    base["earnings"] = earn_date
+                    base["earnings_warning"] = True
+        except Exception:
+            pass
+
         return base
     except Exception:
         return base
@@ -1497,7 +1509,7 @@ st.html(
 )
 
 # ── Steuerung ─────────────────────────────────────────────────────────────────
-c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 2])
 with c1:
     universe_choice = st.selectbox(
         "Universum",
@@ -1522,6 +1534,13 @@ with c3:
 with c4:
     show_bt = st.checkbox("Backtest anzeigen", value=True, key="ts_backtest",
                           help="Historische Win-Rate aus vergleichbaren STI-Setups")
+with c5:
+    exclude_earnings_f = st.checkbox(
+        "📅 Earnings ausschließen",
+        value=False,
+        key="ts_excl_earn",
+        help="Signale ausblenden, bei denen ein Earnings-Termin innerhalb der Options-Laufzeit liegt",
+    )
 
 # ── STI & Score Erklärung ──────────────────────────────────────────────────────
 with st.expander("❓  Was ist der STI-Score? · Wie funktioniert das System?", expanded=False):
@@ -1689,7 +1708,7 @@ if run_btn:
     cached_now   = now_signals
     cached_ready = approaching
 
-# ── Richtungs- & Score-Filter ─────────────────────────────────────────────────
+# ── Richtungs-, Score- & Earnings-Filter ─────────────────────────────────────
 def _apply_filters(signals: List[Dict]) -> List[Dict]:
     result = signals
     # Richtungsfilter
@@ -1699,6 +1718,9 @@ def _apply_filters(signals: List[Dict]) -> List[Dict]:
         result = [s for s in result if s["signal_dir"] == "bearish"]
     # Score-Filter
     result = [s for s in result if abs(s.get("score", 0)) >= score_min]
+    # Earnings-Filter: Signale ausblenden wenn Earnings in der Options-Laufzeit liegen
+    if exclude_earnings_f:
+        result = [s for s in result if not s.get("option_rec", {}).get("earnings_warning")]
     return result
 
 now_display   = _apply_filters(cached_now)

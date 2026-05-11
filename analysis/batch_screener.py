@@ -92,6 +92,7 @@ def scan_strangle(
     otm_min: float = 10.0,
     otm_max: float = 50.0,
     max_spread_pct: float = 60.0,    # max. Bid/Ask-Spread in % des Midpreises
+    exclude_earnings: bool = False,  # Optionen mit Earnings in Laufzeit ausschließen
 ) -> pd.DataFrame:
     """
     Scannt Short-Strangle-Kombinationen: SHORT PUT + SHORT CALL auf gleichem Verfallstag.
@@ -286,7 +287,10 @@ def scan_strangle(
 
         if not results:
             return pd.DataFrame()
-        return pd.DataFrame(results).sort_values("CRV Score", ascending=False)
+        df_out = pd.DataFrame(results).sort_values("CRV Score", ascending=False)
+        if exclude_earnings:
+            df_out = df_out[df_out["⚠️ Earnings"] == ""].reset_index(drop=True)
+        return df_out
 
     except Exception:
         return pd.DataFrame()
@@ -308,6 +312,7 @@ def scan_ticker(
     otm_max: float = 25.0,
     require_valid_market: bool = True,
     max_spread_pct: float = 999.0,
+    exclude_earnings: bool = False,  # Optionen mit Earnings in Laufzeit ausschließen
 ) -> pd.DataFrame:
     """
     Scannt einen einzelnen Ticker und gibt gefilterte Optionen mit CRV zurück.
@@ -320,6 +325,7 @@ def scan_ticker(
             iv_min=iv_min, premium_min=premium_min,
             min_oi=min_oi, otm_min=otm_min, otm_max=otm_max,
             max_spread_pct=max_spread_pct,
+            exclude_earnings=exclude_earnings,
         )
 
     try:
@@ -559,7 +565,10 @@ def scan_ticker(
             "⚠️ Earnings": df["dte"].apply(_earn_warn),
         })
 
-        return result.sort_values("CRV Score", ascending=False)
+        result = result.sort_values("CRV Score", ascending=False)
+        if exclude_earnings:
+            result = result[result["⚠️ Earnings"] == ""].reset_index(drop=True)
+        return result
 
     except Exception as e:
         return pd.DataFrame()
@@ -596,6 +605,7 @@ def scan_watchlist(
     max_results_per_ticker: int = 3,
     require_valid_market: bool = True,
     max_spread_pct: float = 999.0,
+    exclude_earnings: bool = False,  # Optionen mit Earnings in Laufzeit ausschließen
     progress_callback: Optional[Callable] = None,
     result_callback: Optional[Callable] = None,
 ) -> pd.DataFrame:
@@ -618,6 +628,7 @@ def scan_watchlist(
         otm_min=otm_min, otm_max=otm_max,
         require_valid_market=require_valid_market,
         max_spread_pct=max_spread_pct,
+        exclude_earnings=exclude_earnings,
     )
 
     with ThreadPoolExecutor(max_workers=_PARALLEL_WORKERS) as executor:
