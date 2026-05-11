@@ -4,6 +4,7 @@ Chris Camillo Social Arbitrage: Virale Trends automatisch entdecken →
 Produkte identifizieren → Aktien mappen → Einpreisung bewerten.
 
 Quellen: Reddit (hot/rising/new) · Google Trends · StockTwits · Product Hunt · Hacker News
+Fokus: Frauen · Teens · Kinder — von Wall Street systematisch übersehene Zielgruppen
 """
 
 from __future__ import annotations
@@ -25,7 +26,8 @@ st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 render_sidebar()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BRAND → TICKER DATENBANK (erweitert)
+# BRAND → TICKER DATENBANK
+# Demografisches Tagging: W=Frauen, T=Teens, K=Kinder, M=Männer, A=Alle
 # ══════════════════════════════════════════════════════════════════════════════
 BRAND_TICKER: dict[str, str | None] = {
     # ── Consumer Tech ─────────────────────────────────────────────────────────
@@ -37,13 +39,14 @@ BRAND_TICKER: dict[str, str | None] = {
     "amd":          "AMD",   "ryzen":        "AMD",   "radeon":     "AMD",
     "intel":        "INTC",
     "meta":         "META",  "instagram":    "META",  "quest":      "META",
-    "threads":      "META",  "ray-ban meta": "META",
+    "threads":      "META",  "ray-ban meta": "META",  "reels":      "META",
     "google":       "GOOGL", "pixel":        "GOOGL", "gemini":     "GOOGL",
     "waymo":        "GOOGL", "google maps":  "GOOGL",
     "microsoft":    "MSFT",  "xbox":         "MSFT",  "copilot":    "MSFT",
     "azure":        "MSFT",  "github":       "MSFT",  "surface":    "MSFT",
+    "minecraft":    "MSFT",
     "sony":         "SONY",  "playstation":  "SONY",  "ps5":        "SONY",
-    "nintendo":     "NTDOY", "switch":       "NTDOY",
+    "nintendo":     "NTDOY", "switch":       "NTDOY", "pokemon":    "NTDOY",
     "amazon":       "AMZN",  "prime video":  "AMZN",  "kindle":     "AMZN",
     "aws":          "AMZN",  "alexa":        "AMZN",  "ring":       "AMZN",
     "netflix":      "NFLX",
@@ -52,61 +55,106 @@ BRAND_TICKER: dict[str, str | None] = {
     "palantir":     "PLTR",
     "openai":       None,    "chatgpt":      "MSFT",  "gpt-4":      "MSFT",
     "claude":       None,    "anthropic":    None,
-    "perplexity":   None,
-    "cursor":       None,
     "snowflake":    "SNOW",
     "salesforce":   "CRM",
     "servicenow":   "NOW",
     "datadog":      "DDOG",
     "crowdstrike":  "CRWD",
     "palo alto":    "PANW",
-    "fortinet":     "FTNT",
-    # ── Elektromobilität ──────────────────────────────────────────────────────
-    "tesla":        "TSLA",  "model y":      "TSLA",  "model 3":    "TSLA",
-    "cybertruck":   "TSLA",  "powerwall":    "TSLA",
-    "rivian":       "RIVN",
-    "lucid":        "LCID",
-    "nio":          "NIO",
-    "xpeng":        "XPEV",
-    "byd":          "BYDDY",
-    "ford":         "F",     "ford lightning":"F",    "mustang mach-e": "F",
-    "gm":           "GM",    "chevy":        "GM",    "ultium":     "GM",
-    # ── Getränke ──────────────────────────────────────────────────────────────
-    "celsius":      "CELH",  "celsius energy":"CELH",
-    "monster energy":"MNST", "monster":      "MNST",
-    "dutch bros":   "BROS",
-    "starbucks":    "SBUX",
-    "coca-cola":    "KO",    "coke":         "KO",    "fairlife":   "KO",
-    "pepsi":        "PEP",   "gatorade":     "PEP",   "lipton":     "PEP",
-    "redbull":      None,
-    "liquid death": None,
-    "ag1":          None,    "athletic greens": None,
-    # ── Food ──────────────────────────────────────────────────────────────────
-    "chipotle":     "CMG",
-    "mcdonald":     "MCD",   "mcdonalds":    "MCD",
-    "domino":       "DPZ",   "dominos":      "DPZ",
-    "shake shack":  "SHAK",
-    "wingstop":     "WING",
-    "yum brands":   "YUM",   "taco bell":    "YUM",   "kfc":        "YUM",
-    "sweetgreen":   "SG",
-    "cava":         "CAVA",
-    "toast":        "TOST",  # Restaurant POS
-    "instacart":    "CART",
-    "doordash":     "DASH",
-    "uber eats":    "UBER",
-    # ── Gesundheit / GLP-1 / Fitness ─────────────────────────────────────────
+
+    # ── 👩 BEAUTY / SKINCARE (Wall Street übersieht das!) ─────────────────────
+    "e.l.f":        "ELF",   "elf beauty":   "ELF",   "elf cosmetics": "ELF",
+    "ulta":         "ULTA",  "ulta beauty":  "ULTA",
+    "olaplex":      "OLPX",
+    "estee lauder": "EL",    "clinique":     "EL",    "mac cosmetics": "EL",
+    "bobbi brown":  "EL",    "la mer":       "EL",    "origins":    "EL",
+    "loreal":       "LRLCY", "l'oreal":      "LRLCY", "cerave":     "LRLCY",
+    "la roche posay":"LRLCY","maybelline":   "LRLCY", "garnier":    "LRLCY",
+    "kiehls":       "LRLCY", "lancome":      "LRLCY", "urban decay":"LRLCY",
+    "neutrogena":   "JNJ",   "aveeno":       "JNJ",   "clean & clear": "JNJ",
+    "olay":         "PG",    "sk-ii":        "PG",    "pantene":    "PG",
+    "herbal essences":"PG",  "old spice":    "PG",    "secret":     "PG",
+    "dove":         "UL",    "vaseline":     "UL",    "tresemme":   "UL",
+    "simple skincare":"UL",  "st ives":      "UL",    "pond's":     "UL",
+    "tatcha":       "UL",
+    "drunk elephant":"SSDOY","nars":         "SSDOY", "shiseido":   "SSDOY",
+    "bare minerals":"SSDOY",
+    "honest beauty":"HNST",  "honest company":"HNST",
+    "fenty beauty": "LVMHY", "sephora":      "LVMHY",
+    "rare beauty":  None,    "charlotte tilbury": None,
+    "glossier":     None,    "tower 28":     None,
+    "laneige":      None,    "cosrx":        None,    "anua":       None,
+    "skin1004":     None,    "beauty of joseon": None,
+    "innisfree":    None,    "glow recipe":  None,
+    "the ordinary": "EL",    "deciem":       "EL",
+    "paula's choice": None,  "inkey list":   None,
+    "revolution beauty": None,
+    "dyson airwrap":None,    "dyson supersonic": None,
+
+    # ── 👗 WOMEN'S FASHION / RETAIL ────────────────────────────────────────────
+    "abercrombie":  "ANF",   "a&f":          "ANF",   "hollister":  "ANF",
+    "american eagle":"AEO",  "aerie":        "AEO",
+    "urban outfitters":"URBN","anthropologie":"URBN",  "free people":"URBN",
+    "revolve":      "RVLV",
+    "nordstrom":    "JWN",   "nordstrom rack":"JWN",
+    "gap":          "GPS",   "old navy":     "GPS",   "banana republic":"GPS",
+    "express":      None,
+    "h&m":          "HNNMY",
+    "zara":         "IDEXY",
+    "skims":        None,    "spanx":        None,
+    "alo yoga":     None,    "alo":          None,
+    "vuori":        None,
+    "fabletics":    None,
+    "girlfriend collective": None,
+    "quay":         None,
+
+    # ── 👧 TEENS / GEN Z (massive Kaufkraft, oft übersehen) ──────────────────
+    "hydroflask":   "HELE",  "hydro flask":  "HELE",
+    "owala":        None,
+    "stanley quencher": "SWK",
+    "ugg mini":     "DECK",  "ugg ultra mini": "DECK",
+    "birkenstock":  "BIRK",
+    "crocs":        "CROX",
+    "golden goose": None,
+    "new balance 550": None,
+    "adidas samba": "ADDYY", "adidas gazelle": "ADDYY",
+    "poppi soda":   "PEP",   # Pepsi hat Poppi übernommen
+    "prime":        None,    "prime hydration": None,
+    "body doubling": None,
+    "bereal":       None,
+    "tiktok shop":  None,
+
+    # ── 🧒 KINDER / FAMILIE ────────────────────────────────────────────────────
+    "carters":      "CRI",   "carter's":     "CRI",   "oshkosh":    "CRI",
+    "hasbro":       "HAS",   "my little pony":"HAS",  "peppa pig":  "HAS",
+    "play-doh":     "HAS",   "nerf":         "HAS",   "transformers":"HAS",
+    "monopoly":     "HAS",
+    "mattel":       "MAT",   "barbie":       "MAT",   "hot wheels":  "MAT",
+    "american girl":"MAT",   "monster high": "MAT",   "uno":        "MAT",
+    "leapfrog":     None,
+    "lovevery":     None,
+    "graco":        "NWL",   "newell brands":"NWL",
+    "pampers":      "PG",    "luvs":         "PG",    "huggies":    "KMB",
+    "kimberly clark":"KMB",
+    "gerber":       "NESN",
+    "roblox":       "RBLX",
+    "fortnite":     None,
+
+    # ── 💊 WOMEN'S HEALTH / WELLNESS ─────────────────────────────────────────
     "ozempic":      "NVO",   "wegovy":       "NVO",   "semaglutide":"NVO",
     "mounjaro":     "LLY",   "tirzepatide":  "LLY",   "zepbound":   "LLY",
-    "hims":         "HIMS",  "hims & hers":  "HIMS",
-    "ro pharmacy":  None,
+    "hims":         "HIMS",  "hers":         "HIMS",  "hims & hers":"HIMS",
     "dexcom":       "DXCM",
     "insulet":      "PODD",  "omnipod":      "PODD",
     "garmin":       "GRMN",
-    "whoop":        None,
     "oura":         None,    "oura ring":    None,
-    "eight sleep":  None,
+    "whoop":        None,
+    "peloton":      "PTON",
     "theragun":     "AFTR",  "therabody":    "AFTR",
-    # ── Mode / Sport / Outdoor ────────────────────────────────────────────────
+    "eight sleep":  None,
+    "ritual":       None,    "olly vitamins":"KO",    "vitafusion": "CHD",
+
+    # ── 🏃 SPORT / OUTDOOR ────────────────────────────────────────────────────
     "nike":         "NKE",   "air max":      "NKE",   "jordan":     "NKE",
     "adidas":       "ADDYY",
     "lululemon":    "LULU",  "lulu":         "LULU",  "align":      "LULU",
@@ -114,131 +162,285 @@ BRAND_TICKER: dict[str, str | None] = {
     "hoka":         "DECK",  "ugg":          "DECK",  "teva":       "DECK",
     "skechers":     "SKX",
     "under armour": "UAA",
-    "arcteryx":     "ADDYY",
-    "patagonia":    None,
     "columbia":     "COLM",
     "brooks":       "BRKS",
-    "new balance":  None,
-    # ── Home / Lifestyle ──────────────────────────────────────────────────────
+    "patagonia":    None,    "arcteryx":     "ADDYY",
+
+    # ── 🚗 ELEKTROMOBILITÄT ────────────────────────────────────────────────────
+    "tesla":        "TSLA",  "model y":      "TSLA",  "model 3":    "TSLA",
+    "cybertruck":   "TSLA",  "powerwall":    "TSLA",
+    "rivian":       "RIVN",
+    "lucid":        "LCID",
+    "nio":          "NIO",
+    "byd":          "BYDDY",
+
+    # ── 🥤 GETRÄNKE ────────────────────────────────────────────────────────────
+    "celsius":      "CELH",  "celsius energy":"CELH",
+    "monster energy":"MNST", "monster":      "MNST",
+    "dutch bros":   "BROS",
+    "starbucks":    "SBUX",
+    "coca-cola":    "KO",    "coke":         "KO",    "fairlife":   "KO",
+    "pepsi":        "PEP",   "gatorade":     "PEP",   "liquid iv":  "PEP",
+    "liquid death": None,
+    "ag1":          None,    "athletic greens": None,
+
+    # ── 🍔 FOOD / RESTAURANT ──────────────────────────────────────────────────
+    "chipotle":     "CMG",
+    "mcdonald":     "MCD",   "mcdonalds":    "MCD",
+    "shake shack":  "SHAK",
+    "wingstop":     "WING",
+    "sweetgreen":   "SG",
+    "cava":         "CAVA",
+    "doordash":     "DASH",
+    "instacart":    "CART",
+    "uber eats":    "UBER",
+
+    # ── 🏠 HOME / LIFESTYLE ────────────────────────────────────────────────────
     "stanley":      "SWK",   "stanley cup":  "SWK",   "stanley tumbler": "SWK",
     "yeti":         "YETI",
-    "peloton":      "PTON",
     "traeger":      "COOK",
-    "dyson":        None,
     "roomba":       "IRB",
-    "instant pot":  None,
-    "nespresso":    None,
-    "vitamix":      None,
-    # ── Einzelhandel ──────────────────────────────────────────────────────────
+    "wayfair":      "W",
+    "ikea":         None,
+    "crate and barrel": None,
+
+    # ── 🛍️ EINZELHANDEL ────────────────────────────────────────────────────────
     "costco":       "COST",
     "target":       "TGT",
     "walmart":      "WMT",
-    "home depot":   "HD",
-    "lowes":        "LOW",
-    "tjmaxx":       "TJX",   "marshalls":    "TJX",
+    "tjmaxx":       "TJX",   "marshalls":    "TJX",   "homegoods":  "TJX",
     "ross":         "ROST",
-    "dollar general":"DG",
     "five below":   "FIVE",
     "shein":        None,
-    "temu":         "PDD",   "pinduoduo":    "PDD",
+    "temu":         "PDD",
     "shopify":      "SHOP",
-    # ── Reise / Mobility ──────────────────────────────────────────────────────
+
+    # ── ✈️ REISE ───────────────────────────────────────────────────────────────
     "airbnb":       "ABNB",
     "uber":         "UBER",
-    "lyft":         "LYFT",
     "booking":      "BKNG",
     "expedia":      "EXPE",
-    "delta":        "DAL",
-    "united":       "UAL",
     "royal caribbean":"RCL",
     "carnival":     "CCL",
-    # ── Fintech / Crypto ──────────────────────────────────────────────────────
+
+    # ── 💳 FINTECH ─────────────────────────────────────────────────────────────
     "coinbase":     "COIN",
     "robinhood":    "HOOD",
     "affirm":       "AFRM",
     "klarna":       None,
-    "stripe":       None,
     "bitcoin":      "MSTR",  "btc":          "MSTR",
-    "ethereum":     "COIN",  "eth":          "COIN",
-    "blackrock bitcoin":"IBIT",
-    # ── Entertainment / Media ─────────────────────────────────────────────────
-    "disney":       "DIS",   "disney+":      "DIS",
+
+    # ── 🎬 ENTERTAINMENT ───────────────────────────────────────────────────────
+    "disney":       "DIS",   "disney+":      "DIS",   "pixar":      "DIS",
+    "marvel":       "DIS",   "frozen":       "DIS",   "moana":      "DIS",
     "warner":       "WBD",
-    "roblox":       "RBLX",
     "unity":        "U",
-    "epic games":   None,
     "take-two":     "TTWO",  "gta":          "TTWO",  "gta 6":      "TTWO",
-    "activision":   "MSFT",  "call of duty": "MSFT",
-    "ea":           "EA",    "ea sports":    "EA",
-    # ── AI / Infrastructure ────────────────────────────────────────────────────
+    "ea":           "EA",    "sims":         "EA",
+
+    # ── 🤖 AI / INFRA ──────────────────────────────────────────────────────────
     "supermicro":   "SMCI",
-    "marvell":      "MRVL",
     "broadcom":     "AVGO",
     "tsmc":         "TSM",
     "asml":         "ASML",
-    "applied materials": "AMAT",
-    "lam research": "LRCX",
 }
+
+# ── Demografisches Tagging: Welche Zielgruppe? ────────────────────────────────
+# W=Frauen, T=Teens (13-25), K=Kinder (<13), A=Alle, M=Männer (dominant)
+BRAND_DEMO: dict[str, list[str]] = {
+    # Beauty / Skincare → klassisch von Wall Street übersehen
+    "e.l.f": ["W","T"],    "elf beauty": ["W","T"],  "elf cosmetics": ["W","T"],
+    "ulta": ["W","T"],     "ulta beauty": ["W","T"],
+    "olaplex": ["W"],      "estee lauder": ["W"],    "clinique": ["W"],
+    "mac cosmetics": ["W"],"loreal": ["W","T"],      "l'oreal": ["W","T"],
+    "cerave": ["W","T"],   "la roche posay": ["W"],  "neutrogena": ["W","T"],
+    "olay": ["W"],         "sk-ii": ["W"],           "dove": ["W"],
+    "drunk elephant": ["W","T"], "nars": ["W"],      "tatcha": ["W"],
+    "honest beauty": ["W","K"],  "fenty beauty": ["W","T"],
+    "rare beauty": ["W","T"],    "glossier": ["W","T"],
+    "laneige": ["W","T"],  "cosrx": ["W","T"],       "anua": ["W","T"],
+    "glow recipe": ["W","T"],    "the ordinary": ["W","T"],
+    # Fashion
+    "abercrombie": ["T","W"],    "aerie": ["T","W"],
+    "american eagle": ["T","W"],"urban outfitters": ["T","W"],
+    "anthropologie": ["W"],      "free people": ["W"],
+    "revolve": ["W","T"],        "nordstrom": ["W"],
+    "gap": ["W","K"],            "old navy": ["W","K"],
+    "h&m": ["W","T","K"],        "zara": ["W","T"],
+    "skims": ["W"],              "spanx": ["W"],
+    "alo yoga": ["W","T"],       "fabletics": ["W"],
+    # Teens spezifisch
+    "hydroflask": ["T"],         "hydro flask": ["T"],
+    "owala": ["T","W"],          "stanley quencher": ["T","W"],
+    "crocs": ["T","K"],          "birkenstock": ["T","W"],
+    "adidas samba": ["T"],       "adidas gazelle": ["T"],
+    "golden goose": ["T","W"],   "poppi soda": ["T"],
+    "prime": ["T","K"],          "prime hydration": ["T","K"],
+    "ugg mini": ["T","W"],       "ugg ultra mini": ["T","W"],
+    # Kinder
+    "carters": ["K","W"],        "carter's": ["K","W"],
+    "hasbro": ["K"],             "my little pony": ["K"],
+    "peppa pig": ["K"],          "barbie": ["K","T","W"],
+    "american girl": ["K","T"],  "monster high": ["K","T"],
+    "mattel": ["K"],             "hot wheels": ["K"],
+    "roblox": ["K","T"],         "minecraft": ["K","T"],
+    "lovevery": ["K","W"],       "graco": ["K","W"],
+    "pampers": ["K","W"],        "huggies": ["K","W"],
+    "gerber": ["K","W"],         "disney": ["K","T","W"],
+    "pixar": ["K"],              "frozen": ["K"],       "moana": ["K"],
+    "marvel": ["K","T"],         "nintendo": ["K","T"], "pokemon": ["K","T"],
+    "fortnite": ["K","T"],
+    # Women's Health
+    "ozempic": ["W"],            "wegovy": ["W"],       "hers": ["W"],
+    "hims & hers": ["W"],        "ritual": ["W"],
+    # Lifestyle / Home (Frauen entscheiden 80% der Haushaltskäufe)
+    "wayfair": ["W"],            "stanley": ["W","T"],
+    "stanley cup": ["W","T"],    "stanley tumbler": ["W","T"],
+    "target": ["W"],             "tjmaxx": ["W"],       "marshalls": ["W"],
+    "homegoods": ["W"],          "ross": ["W"],         "five below": ["W","K","T"],
+    # Sport / Wellness (zunehmend Frauen-dominiert)
+    "lululemon": ["W","T"],      "alo": ["W","T"],      "vuori": ["W"],
+    "peloton": ["W"],            "on running": ["W","T"],
+    "hoka": ["W","T"],
+}
+
+def _demo_label(brand: str) -> str:
+    """Gibt Emoji-Label für demografische Zugehörigkeit zurück."""
+    demos = BRAND_DEMO.get(brand.lower(), [])
+    parts = []
+    if "W" in demos: parts.append("👩")
+    if "T" in demos: parts.append("👧")
+    if "K" in demos: parts.append("🧒")
+    return " ".join(parts) if parts else ""
+
+def _demo_score_bonus(brand: str) -> float:
+    """Bonus für Marken in von Wall Street übersehenen Demografien."""
+    demos = BRAND_DEMO.get(brand.lower(), [])
+    bonus = 0.0
+    if "W" in demos: bonus += 15.0   # Frauen: Wall Street unterschätzt sie systematisch
+    if "T" in demos: bonus += 12.0   # Teens: Trendsetter, aber keine Anleger
+    if "K" in demos: bonus += 10.0   # Kinder: Eltern kaufen, Analysten messen es nicht
+    return bonus
 
 # ── Bullish Demand-Signale ─────────────────────────────────────────────────────
 BULLISH_KEYWORDS = [
+    # Allgemein
     "sold out", "selling out", "obsessed", "addicted", "can't stop", "cant stop",
     "can't find", "cant find", "impossible to find", "viral", "trending",
     "everywhere", "amazing", "incredible", "game changer", "must have",
     "need this", "love this", "waiting list", "backorder", "pre-order",
     "blew up", "blowing up", "everyone has", "best purchase", "changed my life",
     "buying more", "shortage", "overwhelming", "selling fast", "hooked",
-    "restocking", "10/10", "absolutely love", "can't believe how good",
-    "just got mine", "finally arrived", "worth every penny", "underrated",
+    "restocking", "10/10", "absolutely love", "worth every penny", "underrated",
     "hidden gem", "life changing", "highly recommend", "best ever", "goat",
-    "tier list", "top tier", "slept on", "criminally underrated",
+    "top tier", "slept on", "criminally underrated",
+    # Gen Z / Teen Slang
     "fire", "hits different", "bussin", "no cap", "slay", "chef's kiss",
+    "it girl", "girl dinner", "that girl", "main character", "vibe check",
+    "era", "roman empire", "understood the assignment", "not like other girls",
+    "clean girl", "quiet luxury", "old money aesthetic", "dark feminine",
+    "cottagecore", "mob wife", "brat", "demure", "mindful",
+    "mother", "ate", "ate and left no crumbs",
+    # Beauty-spezifisch (Frauen / Teens)
+    "holy grail", "dupe", "skin cycling", "slugging", "glass skin",
+    "skin barrier", "dewy skin", "no makeup makeup", "blush draping",
+    "cloud skin", "strawberry skin", "skincare routine",
+    "tiktok made me buy", "tiktok viral", "as seen on tiktok",
+    "pinterest worthy", "instagram worthy", "influencer",
+    # Kinder / Eltern
+    "my kids love", "kids are obsessed", "best toy", "educational",
+    "screen free", "montessori", "developmental", "sold at target",
+    "christmas gift", "birthday gift", "stocking stuffer",
 ]
 BEARISH_KEYWORDS = [
     "returning", "returned", "disappointed", "terrible", "broken", "defective",
     "recall", "recalled", "lawsuit", "avoid", "stay away", "worst ever",
     "waste of money", "overpriced", "switching away", "stopped using",
     "don't buy", "regret", "refund", "dangerous", "overrated", "scam",
-    "garbage", "trash", "horrible", "fake", "knockoff",
+    "garbage", "trash", "horrible", "fake", "knockoff", "greenwashing",
+    "microplastics", "toxic", "contaminated",
 ]
 
-# ── Subreddits (Early-Trend-Fokus) ────────────────────────────────────────────
-SUBREDDITS_EARLY = [
-    # Frühe Trend-Erkennung
-    "all", "popular",
-    "BuyItForLife", "Frugal", "Deals", "Flipping",
-    "TikTokCringe", "tiktoktrends",
-    "mildlyinteresting", "nottheonion",
-    # Shopping / Consumer
-    "amazonreviews", "ProductReviews", "onebag", "minimalism",
-    "BeFrugal", "ShoppingDeals",
-    # Sport / Fitness / Health
-    "fitness", "running", "Wellbeing", "bodybuilding", "xxfitness",
-    "loseit", "keto", "intermittentfasting", "veganfitness",
-    "ultrarunning", "cycling", "swimming",
-    # Fashion / Lifestyle
-    "femalefashionadvice", "malefashionadvice", "streetwear", "sneakers",
-    "frugalmalefashion", "rawdenim", "weddingplanning",
+# ── Subreddits aufgeteilt nach Zielgruppe ─────────────────────────────────────
+SUBREDDITS_WOMEN = [
+    # Beauty / Skincare — von Wall Street ignoriert, RIESIGE Kaufkraft
+    "SkincareAddiction", "AsianBeauty", "MakeupAddiction", "beauty",
+    "BeautyGuruChatter", "Influenster", "HairDye", "femalehairadvice",
+    "ABraThatFits", "30PlusSkinCare", "SkincareAddicts",
+    # Fashion
+    "femalefashionadvice", "ThriftStoreHauls", "weddingplanning",
+    "SAHP", "workingmoms", "beyondthebump", "BabyBumps", "Mommit",
+    # Lifestyle / Wellness
+    "xxfitness", "loseit", "xxketo", "xxfasting",
+    "xxrunning", "yoga", "pilates",
+    # Home / Decor
+    "HomeDecorating", "malelivingspace", "femalelivingspace",
+    "houseplants", "gardening", "crochet", "knitting", "sewing",
+    # Shopping
+    "Frugal", "BuyItForLife", "frugalfemalefashion",
+]
+
+SUBREDDITS_TEENS = [
+    # Direkt Teen-Fokus
+    "teenagers", "GenZ", "college", "highschool",
+    # Fashion / Trends
+    "streetwear", "sneakers", "VSCO", "cottagecore",
+    "malefashionadvice",
+    # Beauty
+    "MakeupAddiction", "SkincareAddiction", "AsianBeauty",
+    # Social / Entertainment
+    "TikTokCringe", "BeautyGuruChatter",
+    "popheads", "popculturechat", "Coachella",
+    # Gaming / Tech
+    "gaming", "Roblox", "Minecraft", "FortNiteBR",
     # Food / Drink
-    "EatCheapAndHealthy", "MealPrepSunday", "veganrecipes", "cocktails",
-    "Coffee", "tea", "boba",
-    # Tech / Gaming
-    "gaming", "pcmasterrace", "hardware", "techsupport",
-    "nvidia", "amd", "apple", "android",
-    # Finance / Investing
-    "personalfinance", "investing", "wallstreetbets", "stocks",
-    # Home
-    "homeimprovement", "DIY", "IKEA", "malelivingspace",
+    "boba", "starbucks", "fastfood",
+]
+
+SUBREDDITS_KIDS = [
+    # Eltern-Sicht (Kaufentscheidung treffen Eltern)
+    "Parenting", "beyondthebump", "Mommit", "toddlers",
+    "predaddit", "NewParents", "SAHP",
+    # Spielzeug / Bildung
+    "Lego", "boardgames", "KidsAreFuckingStupid",
+    "Montessori", "homeschool",
+    # Entertainment
+    "Disney", "Pixar", "Nintendo",
+]
+
+SUBREDDITS_EARLY = [
+    # Alle Zielgruppen kombiniert
+    "all", "popular",
+    "BuyItForLife", "Frugal", "Deals",
+    "TikTokCringe",
+    # 👩 Frauen
+    "SkincareAddiction", "AsianBeauty", "MakeupAddiction", "beauty",
+    "femalefashionadvice", "ThriftStoreHauls", "Mommit", "beyondthebump",
+    "xxfitness", "loseit", "HomeDecorating", "houseplants",
+    # 👧 Teens
+    "teenagers", "GenZ", "streetwear", "sneakers",
+    "BeautyGuruChatter", "popheads", "popculturechat",
+    # 🧒 Kinder / Eltern
+    "Parenting", "toddlers", "Lego", "Disney",
+    # Sport / Fitness
+    "fitness", "running", "yoga", "pilates",
+    # Food / Drink
+    "EatCheapAndHealthy", "MealPrepSunday", "starbucks", "boba",
+    # Gaming / Tech (Männer)
+    "gaming", "pcmasterrace", "hardware",
+    # Finance
+    "personalfinance", "investing", "wallstreetbets",
 ]
 
 SUBREDDITS_CLASSIC = [
-    "all", "BuyItForLife", "Frugal", "Deals",
-    "fitness", "running", "bodybuilding",
-    "femalefashionadvice", "malefashionadvice", "streetwear", "sneakers",
-    "EatCheapAndHealthy", "loseit", "keto",
-    "gaming", "pcmasterrace", "hardware",
+    "all", "popular",
+    "SkincareAddiction", "femalefashionadvice", "MakeupAddiction",
+    "BuyItForLife", "Frugal", "Deals",
+    "fitness", "running", "xxfitness", "loseit",
+    "streetwear", "sneakers", "teenagers", "GenZ",
+    "Parenting", "Mommit", "beyondthebump",
+    "gaming", "pcmasterrace",
     "personalfinance", "investing",
-    "homeimprovement", "DIY",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -551,6 +753,7 @@ def _aggregate_brands(
             continue
         total_sig = bd["bull"] + bd["bear"]
         net_sentiment = (bd["bull"] - bd["bear"]) / max(total_sig, 1) * 100 if total_sig > 0 else 0
+        demo_bonus = _demo_score_bonus(brand)
         trend_score = (
             n_posts * 10
             + bd["reddit_score_sum"] / 500
@@ -559,7 +762,9 @@ def _aggregate_brands(
             + (20 if bd["google"] else 0)
             + (15 if bd["hn"] else 0)
             + (10 if bd["ph"] else 0)
+            + demo_bonus                         # 👩👧🧒 Wall-Street-Blind-Spot-Bonus
         )
+        demo_lbl = _demo_label(brand)
         results.append({
             "brand":         brand,
             "ticker":        ticker,
@@ -573,6 +778,8 @@ def _aggregate_brands(
             "ph":            bd["ph"],
             "rising":        bd["reddit_rising"],
             "trend_score":   round(trend_score, 1),
+            "demo":          BRAND_DEMO.get(brand.lower(), []),
+            "demo_label":    demo_lbl,
             "top_posts":     sorted(bd["posts"], key=lambda x: x["score"], reverse=True)[:5],
         })
     return sorted(results, key=lambda x: x["trend_score"], reverse=True)
@@ -589,7 +796,10 @@ with h2:
         '<div class="sc-page-title">Sentiment Analyse</div>'
         '<div class="sc-page-subtitle">'
         'Chris Camillo Social Arbitrage · Virale Trends automatisch entdecken · '
-        'Reddit · Google Trends · StockTwits · Product Hunt · Hacker News</div>',
+        'Reddit · Google Trends · StockTwits · Product Hunt · Hacker News · '
+        '<span style="color:#f0a0c0">👩 Frauen</span> · '
+        '<span style="color:#c0a0f0">👧 Teens</span> · '
+        '<span style="color:#a0c0f0">🧒 Kinder</span> — von Wall Street übersehen</div>',
         unsafe_allow_html=True,
     )
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
@@ -599,6 +809,19 @@ with st.expander("💡 **Wie funktioniert die Sentiment Analyse? · Alle Datenqu
     st.markdown("""
     **Chris Camillo** investiert nach der **„Social Arbitrage"** Methode:
     Erkenne Produkt-Trends auf Social Media, **bevor** die Wall Street davon weiß.
+
+    ### 👩👧🧒 Der entscheidende Blind Spot von Wall Street
+    > *"Die meisten Analysten sind Männer mittleren Alters. Sie sehen nicht was ihre Töchter,
+    Frauen und Mütter kaufen — aber genau dort entstehen die besten Trends."*
+
+    | Zielgruppe | Kaufkraft | Wall Street Aufmerksamkeit | Opportunity |
+    |------------|-----------|--------------------------|-------------|
+    | **👩 Frauen 25-45** | 80% aller Haushaltskäufe | Sehr gering | ⭐⭐⭐⭐⭐ |
+    | **👧 Teens (Gen Z)** | $360 Mrd./Jahr USA | Gering | ⭐⭐⭐⭐ |
+    | **🧒 Kinder (via Eltern)** | $1 Billion Familienausgaben | Sehr gering | ⭐⭐⭐⭐ |
+
+    **Beispiele:** e.l.f. Beauty (ELF) +800% · Abercrombie (ANF) +500% · Celsius (CELH) +2000% ·
+    On Running (ONON) +300% — alle durch Frauen/Teens getrieben, alle von Analysten zu spät erkannt.
 
     ### Datenquellen im Überblick
 
@@ -655,24 +878,38 @@ with tab_auto:
             )
             if "Klassisch" in scan_mode:
                 sort_modes = ("hot",)
-                sub_list   = SUBREDDITS_CLASSIC
             elif "Early" in scan_mode:
                 sort_modes = ("hot", "rising")
-                sub_list   = SUBREDDITS_EARLY
             else:
                 sort_modes = ("hot", "rising", "new")
-                sub_list   = SUBREDDITS_EARLY
+
+            st.markdown("**Zielgruppen-Fokus**")
+            demo_women = st.checkbox("👩 Frauen (Beauty, Fashion, Family)", value=True)
+            demo_teens = st.checkbox("👧 Teens / Gen Z (Trends, Style)", value=True)
+            demo_kids  = st.checkbox("🧒 Kinder / Eltern (Spielzeug, Baby)", value=True)
+            demo_all   = st.checkbox("👔 Allgemein / Tech / Männer", value=True)
+
+            # Subreddits dynamisch zusammenstellen
+            sub_pool: list[str] = ["all", "popular", "Frugal", "Deals"]
+            if demo_women: sub_pool += SUBREDDITS_WOMEN
+            if demo_teens: sub_pool += SUBREDDITS_TEENS
+            if demo_kids:  sub_pool += SUBREDDITS_KIDS
+            if demo_all:   sub_pool += ["gaming", "pcmasterrace", "hardware", "personalfinance", "investing", "wallstreetbets", "fitness", "running"]
+            sub_pool = list(dict.fromkeys(sub_pool))  # Deduplizieren
 
         with sc2:
+            all_subs = list(dict.fromkeys(
+                SUBREDDITS_EARLY + SUBREDDITS_WOMEN + SUBREDDITS_TEENS + SUBREDDITS_KIDS
+            ))
             selected_subs = st.multiselect(
-                "Subreddits",
-                SUBREDDITS_EARLY,
-                default=list(sub_list[:12]),
-                help="Welche Subreddits sollen gescannt werden?",
+                "Subreddits (manuell anpassen)",
+                all_subs,
+                default=sub_pool[:20],
+                help="Wird automatisch aus Zielgruppen-Auswahl befüllt — kann überschrieben werden",
             )
             min_score = st.number_input(
-                "Min. Reddit Upvotes (Hot)", 5, 5000, 50, step=25,
-                help="Nur Hot-Posts mit mindestens X Upvotes. Für Rising/New wird automatisch 1/20 angewendet.",
+                "Min. Reddit Upvotes (Hot)", 5, 5000, 25, step=10,
+                help="Nur Hot-Posts mit mind. X Upvotes. Für Rising/New wird 1/20 angewendet. Niedrig = mehr frühe Signale.",
             )
 
         with sc3:
@@ -683,6 +920,17 @@ with tab_auto:
             )
             use_hn  = st.checkbox("🔶 Hacker News einbeziehen", value=True)
             use_ph  = st.checkbox("🔸 Product Hunt einbeziehen", value=True)
+
+            if any([demo_women, demo_teens, demo_kids]):
+                active_demos = []
+                if demo_women: active_demos.append("👩 Frauen")
+                if demo_teens: active_demos.append("👧 Teens")
+                if demo_kids:  active_demos.append("🧒 Kinder")
+                st.info(
+                    f"**Wall-Street-Blind-Spot aktiv:** {' · '.join(active_demos)}\n\n"
+                    f"Diese Zielgruppen erhalten Score-Bonus da Analysten sie systematisch unterschätzen.",
+                    icon="💡",
+                )
 
     # ── Scan-Button ─────────────────────────────────────────────────────────────
     scan_col, info_col = st.columns([2, 5])
@@ -773,7 +1021,7 @@ with tab_auto:
                         gt_cols[i % 5].markdown(f"· {term}{badge}")
 
             # ── Filter ────────────────────────────────────────────────────────
-            f1, f2, f3 = st.columns([2, 2, 4])
+            f1, f2, f3, f4 = st.columns([2, 2, 2, 2])
             with f1:
                 show_only_ticker = st.checkbox(
                     "Nur mit Aktien-Ticker",
@@ -784,13 +1032,20 @@ with tab_auto:
                 show_only_bullish = st.checkbox(
                     "Nur Bullish-Signale",
                     value=False,
-                    help="Nur Produkte mit positiver Stimmung (mehr Bull als Bear Keywords)",
                 )
             with f3:
                 show_only_not_priced = st.checkbox(
-                    "Nur 'Kaum/Nicht eingepreist'",
+                    "Nur kaum eingepreist",
                     value=False,
-                    help="Nur Aktien anzeigen die noch nicht stark gestiegen sind (beste Einstiegs-Chance)",
+                    help="Aktie noch nicht stark gestiegen — beste Einstiegs-Chance",
+                )
+            with f4:
+                demo_filter = st.multiselect(
+                    "👩👧🧒 Zielgruppe",
+                    ["👩 Frauen", "👧 Teens", "🧒 Kinder"],
+                    default=[],
+                    help="Nur Trends dieser demografischen Gruppe zeigen",
+                    placeholder="Alle Gruppen",
                 )
 
             filtered = results
@@ -798,6 +1053,10 @@ with tab_auto:
                 filtered = [r for r in filtered if r["ticker"]]
             if show_only_bullish:
                 filtered = [r for r in filtered if r["bull"] > r["bear"]]
+            if demo_filter:
+                demo_map = {"👩 Frauen": "W", "👧 Teens": "T", "🧒 Kinder": "K"}
+                wanted = {demo_map[d] for d in demo_filter}
+                filtered = [r for r in filtered if wanted & set(r.get("demo", []))]
 
             # Einpreisung laden wenn benötigt
             if show_only_not_priced:
@@ -860,17 +1119,33 @@ with tab_auto:
                         f'</span>'
                     )
 
+                demo_lbl   = item.get("demo_label", "")
                 expander_icon = "🔥" if score > 60 else ("⚡" if rising > 0 else "📦")
                 src_str = " · ".join(source_badges) if source_badges else ""
 
                 with st.expander(
-                    f"{expander_icon} {brand}  {ticker or ''}  "
+                    f"{expander_icon} {demo_lbl}  {brand}  {ticker or ''}  "
                     f"{src_str}  · Score {score:.0f} · {item['n_posts']} Quellen",
                     expanded=False,
                 ):
+                    # Demo-Badge prominent
+                    demo_html = ""
+                    for code, emoji, label, color in [
+                        ("W","👩","Frauen","#f0a0c0"),
+                        ("T","👧","Teens","#c0a0f0"),
+                        ("K","🧒","Kinder","#a0c0f0"),
+                    ]:
+                        if code in item.get("demo", []):
+                            demo_html += (
+                                f'<span style="background:#1a0e1a;border:1px solid {color}44;'
+                                f'color:{color};font-size:0.72rem;padding:2px 8px;'
+                                f'border-radius:10px;margin-right:4px">'
+                                f'{emoji} {label} — Wall-Street-Blind-Spot</span>'
+                            )
+
                     st.markdown(
                         f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;'
-                        f'margin-bottom:8px">'
+                        f'margin-bottom:6px">'
                         f'<span style="font-size:1.05rem;font-weight:700;color:#f0f0f0">{brand}</span>'
                         f'{ticker_badge}{price_badge}'
                         + "".join(
@@ -878,9 +1153,47 @@ with tab_auto:
                             f'padding:1px 7px;border-radius:10px;margin-left:4px">{b}</span>'
                             for b in source_badges
                         )
-                        + f'</div>',
+                        + f'</div>'
+                        + (f'<div style="margin-bottom:8px">{demo_html}</div>' if demo_html else ""),
                         unsafe_allow_html=True,
                     )
+
+                    # ── TREND-BESCHREIBUNG (Hauptfokus — WAS ist der Trend?) ──
+                    # Aus den Top-Posts automatisch einen Trend-Satz ableiten
+                    top_titles = [p["title"] for p in item["top_posts"][:3]]
+                    bull_kws_found = [kw for kw in BULLISH_KEYWORDS
+                                      if any(kw in t.lower() for t in top_titles)][:4]
+
+                    trend_summary_parts = []
+                    if bull_kws_found:
+                        trend_summary_parts.append(
+                            f"Menschen beschreiben es als: "
+                            + ", ".join(f'<b style="color:#22c55e">"{kw}"</b>' for kw in bull_kws_found)
+                        )
+                    if rising > 0:
+                        trend_summary_parts.append(f"📈 {rising} Posts gerade am Aufsteigen (Rising)")
+                    if item.get("google"):
+                        trend_summary_parts.append("🔍 Aktuell in Google Trending Searches")
+                    subreddit_context = ", ".join(
+                        f"r/{s}" for s in item["subreddits"][:4] if s != "HackerNews"
+                    )
+                    if subreddit_context:
+                        trend_summary_parts.append(f"Diskutiert in: {subreddit_context}")
+
+                    if trend_summary_parts:
+                        st.markdown(
+                            f'<div style="background:#0a0e0a;border:1px solid #1a3a1a;'
+                            f'border-left:3px solid #22c55e;border-radius:8px;'
+                            f'padding:10px 14px;margin-bottom:10px">'
+                            f'<div style="font-size:0.72rem;color:#555;text-transform:uppercase;'
+                            f'letter-spacing:0.08em;margin-bottom:5px">🔍 Was ist der Trend?</div>'
+                            + "".join(
+                                f'<div style="font-size:0.82rem;color:#ccc;margin-top:3px">· {p}</div>'
+                                for p in trend_summary_parts
+                            )
+                            + f'</div>',
+                            unsafe_allow_html=True,
+                        )
 
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Quellen/Posts",    item["n_posts"])
