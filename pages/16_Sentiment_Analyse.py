@@ -363,83 +363,183 @@ BEARISH_KEYWORDS = [
 
 # ── Subreddits aufgeteilt nach Zielgruppe ─────────────────────────────────────
 SUBREDDITS_WOMEN = [
-    # Beauty / Skincare — von Wall Street ignoriert, RIESIGE Kaufkraft
+    # ── Beauty / Skincare (Megatrend, Wall Street ignoriert das komplett) ──
     "SkincareAddiction", "AsianBeauty", "MakeupAddiction", "beauty",
     "BeautyGuruChatter", "Influenster", "HairDye", "femalehairadvice",
     "ABraThatFits", "30PlusSkinCare", "SkincareAddicts",
-    # Fashion
+    "tretinoin", "acne", "Rosacea", "DermatologyQuestions",
+    "HaircareScience", "NaturalHair", "curlyhair", "Haircare",
+    "fragrance", "Nails", "RedditLaqueristas", "NailArt",
+    "EyelashExtensions", "BeautyBoxes",
+    # ── Fashion / Shopping ──
     "femalefashionadvice", "ThriftStoreHauls", "weddingplanning",
+    "PetiteFashionAdvice", "capsulewardrobe", "frugalfemalefashion",
+    "ThriftFlip", "Depop", "OOAK", "vintage", "VintageFashion",
+    "Poshmark", "TheRealReal", "luxuryrepfashion",
+    "LushCosmetics", "EltaMD", "CeraVe",
+    # ── Lifestyle / Mama ──
     "SAHP", "workingmoms", "beyondthebump", "BabyBumps", "Mommit",
-    # Lifestyle / Wellness
+    "breastfeeding", "SingleMoms", "breakingmom", "daddit",
+    "TwoXChromosomes", "TheGirlSurvivalGuide", "AskWomen",
+    # ── Gesundheit / Wellness ──
+    "WomensHealth", "PCOS", "Perimenopause", "Menopause",
+    "TTC", "infertility", "EatingDisorders",
     "xxfitness", "loseit", "xxketo", "xxfasting",
-    "xxrunning", "yoga", "pilates",
-    # Home / Decor
-    "HomeDecorating", "malelivingspace", "femalelivingspace",
-    "houseplants", "gardening", "crochet", "knitting", "sewing",
-    # Shopping
-    "Frugal", "BuyItForLife", "frugalfemalefashion",
+    "xxrunning", "yoga", "pilates", "Peloton",
+    "bodyweightfitness", "orangetheory", "barre",
+    "supplements", "Nootropics", "Meditation", "Mindfulness",
+    # ── Home / Decor / Crafts ──
+    "HomeDecorating", "femalelivingspace", "malelivingspace",
+    "InteriorDesign", "mildlyinteresting", "IKEA", "Etsy",
+    "houseplants", "gardening", "UrbanGardening", "succulents",
+    "crochet", "knitting", "sewing", "quilting", "Embroidery",
+    "DIY", "upcycling", "zerowaste", "ZeroWasteHome",
+    "ProjectPan", "sustainability",
+    # ── Reisen / Finance ──
+    "solotravel", "TravelHacks", "digitalnomad",
+    "Frugal", "BuyItForLife", "povertyfinance",
+    "FIREyFemmes", "personalfinance", "WomenInTech",
+    # ── Gaming / Cozy Games (unterschätzte Zielgruppe!) ──
+    "AnimalCrossing", "StardewValley", "Sims4", "PokemonGO",
+    "Cozy_Games", "CozyGamers", "GirlGamers", "WomenWhoGames",
+    "CasualGaming", "SteamDeck",
+    # ── Spiritualität / Community ──
+    "witchcraft", "WitchesVsPatriarchy", "astrology",
+    "spirituality", "crystals", "tarot",
+    # ── Food / Drink Trends ──
+    "AirFryer", "Sourdough", "MealPrepSunday", "PlantBasedDiet",
+    "vegan", "veganrecipes", "glutenfree", "Coffee", "tea",
+    "kombucha", "fermentation", "boba", "starbucks",
 ]
 
 SUBREDDITS_TEENS = [
-    # Direkt Teen-Fokus
+    # ── Direkt Teen-Fokus ──
     "teenagers", "GenZ", "college", "highschool",
-    # Fashion / Trends
+    "AskTeenGirls", "AskTeenBoys", "Millennials",
+    # ── Musik (RIESIG für Gen-Z Kaufentscheidungen) ──
+    "taylorswift", "kpop", "bangtan", "BLACKPINK", "twice",
+    "kpopthoughts", "kpopfinancials", "kpopmerch",
+    "popheads", "popculturechat", "Coachella", "rave",
+    "HipHopHeads", "Rap", "indieheads",
+    # ── Fashion / Aesthetics ──
     "streetwear", "sneakers", "VSCO", "cottagecore",
-    "malefashionadvice",
-    # Beauty
+    "y2kaesthetic", "softgirl", "fairycore", "DarkAcademia",
+    "LightAcademia", "goblincore", "coquette", "balletcore",
+    "vintage", "ThriftStoreHauls", "thrifting", "Depop",
+    "outfits", "OOTD", "malefashionadvice",
+    # ── Beauty ──
     "MakeupAddiction", "SkincareAddiction", "AsianBeauty",
-    # Social / Entertainment
-    "TikTokCringe", "BeautyGuruChatter",
-    "popheads", "popculturechat", "Coachella",
-    # Gaming / Tech
+    "BeautyGuruChatter", "TikTokBeauty", "Influenster",
+    # ── Social Media / Entertainment ──
+    "TikTokCringe", "youtubers", "Twitch", "Streamers",
+    "WatchItForThePlot", "TeenMomOGandTeenMom2",
+    "ChelseaClinton", "MovieSuggestions",
+    # ── Anime / Manga (Gen-Z Mainstream!) ──
+    "anime", "manga", "OnePiece", "attackontitan",
+    "JujutsuKaisen", "DemonSlayer", "MyHeroAcademia",
+    # ── Gaming ──
     "gaming", "Roblox", "Minecraft", "FortNiteBR",
-    # Food / Drink
-    "boba", "starbucks", "fastfood",
+    "PokemonGO", "Pokemon", "LeagueOfLegends",
+    "Valorant", "ApexLegends", "NintendoSwitch",
+    # ── Food / Drink Trends ──
+    "boba", "starbucks", "fastfood", "MukBang", "foodtiktok",
+    "energydrinks", "MilkTea",
+    # ── Mental Health / Lifestyle ──
+    "mentalhealth", "selfimprovement", "Journaling",
+    "studyblr", "studytok", "college",
+    # ── Finanzen / Nebenjob ──
+    "personalfinance", "povertyfinance", "SideHustle",
 ]
 
 SUBREDDITS_KIDS = [
-    # Eltern-Sicht (Kaufentscheidung treffen Eltern)
+    # ── Eltern-Sicht (Kaufentscheidungen treffen Eltern!) ──
     "Parenting", "beyondthebump", "Mommit", "toddlers",
-    "predaddit", "NewParents", "SAHP",
-    # Spielzeug / Bildung
-    "Lego", "boardgames", "KidsAreFuckingStupid",
-    "Montessori", "homeschool",
-    # Entertainment
-    "Disney", "Pixar", "Nintendo",
+    "predaddit", "daddit", "NewParents", "SAHP",
+    "infants", "SpecialNeedsParenting", "gifted",
+    "Autism", "Aspergers",
+    # ── Spielzeug / Bildung ──
+    "Lego", "LegoSets", "boardgames", "Toys",
+    "Montessori", "homeschool", "unschooling",
+    "KidsCrafts", "ArtEducation",
+    # ── Kinder-Entertainment ──
+    "Disney", "DisneyPlus", "Pixar", "DreamWorks",
+    "Nintendo", "NintendoSwitch", "PokemonGO", "Pokemon",
+    "Marvel", "StarWars", "HarryPotter",
+    "AnimatedFilms", "CartoonNetwork",
+    # ── Spielzeug-Brands ──
+    "Dolls", "ActionFigures", "LEGO", "HotWheels",
+    "Barbie", "PlanetToys",
+    # ── Sicherheit / Ernährung ──
+    "BabyLedWeaning", "NutritionForKids",
+    "ChildSafety", "CarSafety",
 ]
 
 SUBREDDITS_EARLY = [
-    # Alle Zielgruppen kombiniert
-    "all", "popular",
-    "BuyItForLife", "Frugal", "Deals",
+    # ── Maximale Reichweite für frühe Signale ──
+    "all", "popular", "TrendingOnReddit",
+    "BuyItForLife", "Frugal", "Deals", "BlackFriday",
     "TikTokCringe",
-    # 👩 Frauen
+    # ── 👩 Frauen ──
     "SkincareAddiction", "AsianBeauty", "MakeupAddiction", "beauty",
     "femalefashionadvice", "ThriftStoreHauls", "Mommit", "beyondthebump",
     "xxfitness", "loseit", "HomeDecorating", "houseplants",
-    # 👧 Teens
+    "fragrance", "Nails", "crochet", "knitting",
+    "AnimalCrossing", "StardewValley", "GirlGamers",
+    "WomensHealth", "PCOS", "Perimenopause", "Peloton",
+    "zerowaste", "Etsy", "solotravel",
+    # ── 👧 Teens ──
     "teenagers", "GenZ", "streetwear", "sneakers",
     "BeautyGuruChatter", "popheads", "popculturechat",
-    # 🧒 Kinder / Eltern
-    "Parenting", "toddlers", "Lego", "Disney",
-    # Sport / Fitness
+    "taylorswift", "kpop", "bangtan",
+    "y2kaesthetic", "cottagecore", "DarkAcademia",
+    "anime", "Roblox", "PokemonGO",
+    "boba", "energydrinks", "MilkTea",
+    # ── 🧒 Kinder / Eltern ──
+    "Parenting", "toddlers", "daddit",
+    "Lego", "Disney", "Pokemon", "Marvel",
+    # ── Sport / Fitness ──
     "fitness", "running", "yoga", "pilates",
-    # Food / Drink
-    "EatCheapAndHealthy", "MealPrepSunday", "starbucks", "boba",
-    # Gaming / Tech (Männer)
-    "gaming", "pcmasterrace", "hardware",
-    # Finance
+    "bodyweightfitness", "crossfit", "orangetheory",
+    # ── Food / Drink Trends ──
+    "EatCheapAndHealthy", "MealPrepSunday",
+    "AirFryer", "Sourdough", "PlantBasedDiet", "vegan",
+    "Coffee", "kombucha", "starbucks", "boba",
+    # ── Home / Interior ──
+    "InteriorDesign", "IKEA", "femalelivingspace",
+    "gardening", "succulents",
+    # ── Gaming / Tech (alle Gruppen) ──
+    "gaming", "NintendoSwitch", "Cozy_Games",
+    "pcmasterrace", "hardware",
+    # ── Finance ──
     "personalfinance", "investing", "wallstreetbets",
+    "SideHustle", "povertyfinance",
+    # ── Nischen mit hohem Signal ──
+    "Etsy", "ProductReviews", "Wishlist",
+    "camping", "hiking", "outdoors",
 ]
 
 SUBREDDITS_CLASSIC = [
     "all", "popular",
+    # Beauty / Fashion
     "SkincareAddiction", "femalefashionadvice", "MakeupAddiction",
-    "BuyItForLife", "Frugal", "Deals",
+    "AsianBeauty", "fragrance", "streetwear", "sneakers",
+    # Shopping / Deals
+    "BuyItForLife", "Frugal", "Deals", "Etsy",
+    # Fitness / Health
     "fitness", "running", "xxfitness", "loseit",
-    "streetwear", "sneakers", "teenagers", "GenZ",
-    "Parenting", "Mommit", "beyondthebump",
-    "gaming", "pcmasterrace",
+    "yoga", "Peloton", "bodyweightfitness",
+    # Teens / Gen-Z
+    "teenagers", "GenZ", "kpop", "taylorswift", "anime",
+    # Familie
+    "Parenting", "Mommit", "beyondthebump", "toddlers",
+    # Gaming
+    "gaming", "NintendoSwitch", "Cozy_Games",
+    "AnimalCrossing", "StardewValley", "GirlGamers",
+    # Food Trends
+    "AirFryer", "Sourdough", "Coffee", "boba", "vegan",
+    # Home
+    "HomeDecorating", "InteriorDesign", "houseplants", "IKEA",
+    # Finance
     "personalfinance", "investing",
 ]
 
