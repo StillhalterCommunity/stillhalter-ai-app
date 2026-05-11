@@ -548,9 +548,33 @@ SUBREDDITS_CLASSIC = [
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _find_brands(text: str) -> list[str]:
-    """Findet Marken-Erwähnungen in einem Text."""
+    """
+    Findet Marken-Erwähnungen im Text.
+    Verwendet Wortgrenzen für Einzelwort-Brands (verhindert false positives wie
+    'era' → 'camera', 'ring' → 'earring', 'elf' → 'shelf').
+    Multi-Wort-Brands (z.B. 'apple watch', 'la roche posay') nutzen Substring-Matching.
+    """
     text_lower = text.lower()
-    return [brand for brand in BRAND_TICKER if brand in text_lower]
+    found = []
+    for brand in BRAND_TICKER:
+        if " " in brand:
+            # Multi-Wort Brand: Substring reicht (false positives unwahrscheinlich)
+            if brand in text_lower:
+                found.append(brand)
+        else:
+            # Einzelwort: Wortgrenze erforderlich — verhindert 'era'∈'camera', 'elf'∈'shelf'
+            if re.search(r"\b" + re.escape(brand) + r"\b", text_lower):
+                found.append(brand)
+    return found
+
+
+def _kw_in(kw: str, text: str) -> bool:
+    """Prüft ob Keyword im Text vorkommt — mit Wortgrenzen für kurze Wörter."""
+    if len(kw) <= 4:
+        # Kurze Keywords: Wortgrenzen, z.B. 'era' nicht in 'camera'
+        return bool(re.search(r"\b" + re.escape(kw) + r"\b", text, re.IGNORECASE))
+    # Längere Keywords: Substring reicht (Geschwindigkeit)
+    return kw in text.lower()
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -602,8 +626,8 @@ def _reddit_scan(
                     brands = _find_brands(combined)
                     if not brands:
                         continue
-                    bull = sum(1 for kw in BULLISH_KEYWORDS if kw in combined.lower())
-                    bear = sum(1 for kw in BEARISH_KEYWORDS if kw in combined.lower())
+                    bull = sum(1 for kw in BULLISH_KEYWORDS if _kw_in(kw, combined))
+                    bear = sum(1 for kw in BEARISH_KEYWORDS if _kw_in(kw, combined))
                     posts.append({
                         "id":        pid,
                         "title":     title,
@@ -673,7 +697,7 @@ def _product_hunt_feed() -> list[dict]:
             link  = (item.findtext("link") or "").strip()
             combined = title + " " + desc
             brands = _find_brands(combined)
-            bull   = sum(1 for kw in BULLISH_KEYWORDS if kw in combined.lower())
+            bull   = sum(1 for kw in BULLISH_KEYWORDS if _kw_in(kw, combined))
             items.append({
                 "title":  title,
                 "desc":   desc,
@@ -711,7 +735,7 @@ def _hackernews_trending() -> list[dict]:
                 url   = s.get("url", f"https://news.ycombinator.com/item?id={sid}")
                 score = s.get("score", 0)
                 brands = _find_brands(title)
-                bull   = sum(1 for kw in BULLISH_KEYWORDS if kw in title.lower())
+                bull   = sum(1 for kw in BULLISH_KEYWORDS if _kw_in(kw, title))
                 stories.append({
                     "title":  title,
                     "url":    url,
@@ -1033,21 +1057,40 @@ with tab_auto:
                 )
 
     # ── Scan-Button ─────────────────────────────────────────────────────────────
-    scan_col, info_col = st.columns([2, 5])
+    scan_col, rescan_col, info_col = st.columns([2, 2, 5])
     with scan_col:
         scan_btn = st.button(
             "🔍 Alle Quellen scannen",
             type="primary",
             use_container_width=True,
         )
+    with rescan_col:
+        # Neuscan-Button: löscht Cache und erzwingt frische Daten
+        force_rescan = st.button(
+            "🔄 Neu scannen (Cache leeren)",
+            use_container_width=True,
+            help="Löscht gecachte Daten und holt frische Ergebnisse von allen Quellen.",
+            disabled="sentiment_results" not in st.session_state,
+        )
     with info_col:
         st.markdown(
             "<div style='padding-top:8px;font-size:0.78rem;color:#555'>"
             "Reddit · Google Trends · StockTwits · Product Hunt · Hacker News "
-            "· Kein API-Key · Ergebnisse 15 Min. gecacht"
+            "· Ergebnisse 15 Min. gecacht · Neu Scannen = Cache leeren"
             "</div>",
             unsafe_allow_html=True,
         )
+
+    # Cache leeren wenn Force-Rescan geklickt
+    if force_rescan:
+        _reddit_scan.clear()
+        _google_trending.clear()
+        _hackernews_trending.clear()
+        _product_hunt_feed.clear()
+        for k in list(st.session_state.keys()):
+            if k.startswith("sentiment_"):
+                del st.session_state[k]
+        st.rerun()
 
     if not scan_btn and "sentiment_results" not in st.session_state:
         st.info(
@@ -1222,10 +1265,13 @@ with tab_auto:
                 demo_lbl   = item.get("demo_label", "")
                 expander_icon = "🔥" if score > 60 else ("⚡" if rising > 0 else "📦")
                 src_str = " · ".join(source_badges) if source_badges else ""
+                ticker_str = f"  [Aktie: {ticker}]" if ticker else "  [kein Ticker]"
+                demo_str = f"  {demo_lbl}" if demo_lbl else ""
 
                 with st.expander(
-                    f"{expander_icon} {demo_lbl}  {brand}  {ticker or ''}  "
-                    f"{src_str}  · Score {score:.0f} · {item['n_posts']} Quellen",
+                    f"{expander_icon}{demo_str}  Produkt: {brand}{ticker_str}"
+                    f"  ·  Score {score:.0f}  ·  {item['n_posts']} Posts"
+                    + (f"  ·  {src_str}" if src_str else ""),
                     expanded=False,
                 ):
                     # Demo-Badge prominent
@@ -1262,7 +1308,7 @@ with tab_auto:
                     # Aus den Top-Posts automatisch einen Trend-Satz ableiten
                     top_titles = [p["title"] for p in item["top_posts"][:3]]
                     bull_kws_found = [kw for kw in BULLISH_KEYWORDS
-                                      if any(kw in t.lower() for t in top_titles)][:4]
+                                      if any(_kw_in(kw, t) for t in top_titles)][:4]
 
                     trend_summary_parts = []
                     if bull_kws_found:
@@ -1335,9 +1381,10 @@ with tab_auto:
                         for p in top_posts[:4]:
                             title_hl = p["title"]
                             for kw in BULLISH_KEYWORDS:
-                                if kw in title_hl.lower():
+                                if _kw_in(kw, title_hl):
+                                    # Wortgrenze beachten beim Hervorheben
                                     title_hl = re.sub(
-                                        re.escape(kw),
+                                        r"\b" + re.escape(kw) + r"\b",
                                         f'<b style="color:#22c55e">{kw}</b>',
                                         title_hl, flags=re.IGNORECASE
                                     )
@@ -1575,11 +1622,42 @@ with tab_stocktwits:
         unsafe_allow_html=True,
     )
 
-    if st.button("📊 StockTwits Trending laden", type="primary"):
+    sw1, sw2 = st.columns([2, 6])
+    with sw1:
+        sw_btn = st.button("📊 StockTwits Trending laden", type="primary",
+                           use_container_width=True)
+        sw_rescan = st.button("🔄 Neu laden", use_container_width=True,
+                              help="Cache leeren und frische Daten holen",
+                              disabled="stocktwits_data" not in st.session_state)
+    with sw2:
+        st.markdown(
+            "<div style='padding-top:8px;font-size:0.78rem;color:#555'>"
+            "Zeigt die von der Trading-Community meistdiskutierten Aktien in Echtzeit. "
+            "Kostenlose API · Kein Key benötigt · 10 Min. gecacht"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    if sw_rescan:
+        _stocktwits_trending.clear()
+        if "stocktwits_data" in st.session_state:
+            del st.session_state["stocktwits_data"]
+        st.rerun()
+
+    if sw_btn:
         with st.spinner("Lade StockTwits Trending Tickers …"):
             st_tickers = _stocktwits_trending()
-        st.session_state["stocktwits_data"] = st_tickers
-        st.session_state["stocktwits_time"] = datetime.now().strftime("%H:%M")
+        if st_tickers:
+            st.session_state["stocktwits_data"] = st_tickers
+            st.session_state["stocktwits_time"] = datetime.now().strftime("%H:%M")
+            st.rerun()
+        else:
+            st.warning(
+                "⚠️ **StockTwits API hat keine Daten zurückgegeben.** "
+                "Mögliche Ursachen: API-Rate-Limit, temporäre Wartung oder Netzwerkfehler. "
+                "Bitte in 1–2 Minuten erneut versuchen.",
+                icon="📊",
+            )
 
     st_tickers = st.session_state.get("stocktwits_data", [])
     st_time    = st.session_state.get("stocktwits_time", "–")
