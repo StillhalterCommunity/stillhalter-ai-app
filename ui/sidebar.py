@@ -38,6 +38,8 @@ def render_sidebar():
         st.page_link("pages/14_Order_Planung.py",            label="14 · Order-Planung",       icon="📋")
         st.page_link("pages/15_Datenquellen.py",             label="15 · Datenquellen",        icon="📡")
         st.page_link("pages/16_Sentiment_Analyse.py",        label="16 · Sentiment Analyse",   icon="🧭")
+        st.page_link("pages/17_Trade_Cards.py",              label="17 · Trade Cards",          icon="📤")
+        st.page_link("pages/18_Markt_Newsletter.py",         label="18 · Markt Newsletter",     icon="📰")
         st.html("<div style='border-top:1px solid #1e1e1e;margin:10px 0 4px 0'></div>")
         # Markt-Status Badge
         if market_open:
