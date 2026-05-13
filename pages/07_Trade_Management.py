@@ -58,6 +58,10 @@ _IBKR_GET_URLS = {
 }
 
 
+_RATE_LIMIT_CODES = {"1018"}   # Too many requests — stop all retries
+_TRANSIENT_CODES  = {"1001"}   # Statement not ready — wait, then next endpoint
+
+
 def _ibkr_flex_fetch(token: str, query_id: str, timeout: int = 30):
     """
     Ruft IBKR Flex Query per Web Service ab. Probiert alle bekannten Endpoints.
@@ -66,8 +70,11 @@ def _ibkr_flex_fetch(token: str, query_id: str, timeout: int = 30):
     debug = []
     conn_errors = []
 
-    for send_url in _IBKR_SEND_URLS:
+    for i, send_url in enumerate(_IBKR_SEND_URLS):
         host = send_url.split("/")[2]
+        # Brief pause between endpoint attempts to avoid rate-limiting
+        if i > 0:
+            time.sleep(5)
         debug.append(f"\n── Versuche {host} ──")
         try:
             url1 = f"{send_url}?t={token}&q={query_id}&v=3"
@@ -80,16 +87,30 @@ def _ibkr_flex_fetch(token: str, query_id: str, timeout: int = 30):
                 debug.append(f"XML-Fehler: {e} | Rohdaten: {r1.text[:200]}")
                 continue
 
-            stat1 = root1.findtext("Status") or ""
-            ref   = root1.findtext("ReferenceCode") or ""
-            url2  = root1.findtext("Url") or _IBKR_GET_URLS.get(host, _IBKR_GET_URLS["www.interactivebrokers.com"])
-            err1  = root1.findtext("ErrorMessage") or root1.findtext("Message") or ""
+            stat1    = root1.findtext("Status") or ""
+            ref      = root1.findtext("ReferenceCode") or ""
+            url2     = root1.findtext("Url") or _IBKR_GET_URLS.get(host, _IBKR_GET_URLS["www.interactivebrokers.com"])
+            err1     = root1.findtext("ErrorMessage") or root1.findtext("Message") or ""
+            err_code = root1.findtext("ErrorCode") or ""
             debug.append(f"Status={stat1!r}  ref={ref!r}  err={err1!r}")
 
             if not ref:
                 debug.append(f"Kein ReferenceCode → nächsten Endpoint versuchen")
                 debug.append(f"Rohdaten: {r1.text[:400]}")
                 conn_errors.append(f"{host}: Status='{stat1}', Fehler='{err1}'")
+
+                # Rate limit hit — pointless to try other endpoints (same token)
+                if err_code in _RATE_LIMIT_CODES:
+                    return None, (
+                        f"⏱️ IBKR Rate Limit (Code {err_code}): Zu viele Anfragen mit diesem Token.\n"
+                        "Bitte **5–10 Minuten warten** und dann erneut versuchen."
+                    ), "\n".join(debug)
+
+                # Transient server error — wait a bit longer before next endpoint
+                if err_code in _TRANSIENT_CODES:
+                    debug.append("Transient error — warte 10 Sek. vor nächstem Versuch")
+                    time.sleep(10)
+
                 continue
 
             # ── Step 2: Pollen ────────────────────────────────────────────────
@@ -1170,7 +1191,7 @@ with tab_ibkr:
     if "ibkr_fetch_debug" not in st.session_state: st.session_state["ibkr_fetch_debug"] = None
 
     if tm_fetch_btn:
-        with st.spinner("Verbinde mit IBKR… (US → EU → CDN, bis zu 30 Sek.)"):
+        with st.spinner("Verbinde mit IBKR… (bis zu 45 Sek., Endpoints werden nacheinander geprüft)"):
             xml_str, err_detail, debug_info = _ibkr_flex_fetch(
                 tm_token.strip(), tm_qid.strip()
             )
@@ -1218,7 +1239,10 @@ with tab_ibkr:
         st.warning("Verbindung OK, aber keine offenen Optionspositionen gefunden. "
                    "Prüfe ob die Query 'Open Positions' enthält und Optionen offen sind.")
     elif fetch_err:
-        st.error(f"❌ {fetch_err}")
+        if "Rate Limit" in str(fetch_err) or "1018" in str(fetch_err):
+            st.warning(f"⏱️ {fetch_err}", icon="⚠️")
+        else:
+            st.error(f"❌ {fetch_err}")
         if fetch_dbg:
             with st.expander("🔍 Diagnose-Log"):
                 st.code(fetch_dbg, language="text")
