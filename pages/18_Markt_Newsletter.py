@@ -7,6 +7,8 @@ TA:      Stillhalter Trend Model (1M · 1W · 1D) · Dual Stochastik · MACD Pro
 """
 
 from __future__ import annotations
+import os
+import pickle
 import streamlit as st
 import pandas as pd
 import requests
@@ -551,6 +553,19 @@ def _render_stock_card(data: dict, strategy: str, show_options: bool) -> None:
                     st.markdown("_Keine Quartalsoption_")
 
 
+_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl"
+)
+
+
+def _load_scan_cache() -> dict | None:
+    try:
+        with open(_CACHE_PATH, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -562,204 +577,451 @@ with h2:
     st.markdown(
         f'<div class="sc-page-title">📰 Markt Newsletter</div>'
         f'<div class="sc-page-subtitle">'
-        f'11 Sektoren · Fundamentals · TA (1M · 1W · 1D) · Optionsempfehlung · '
-        f'{now_str}</div>',
+        f'Morning Crunch · Stillhalter Edition · {now_str}</div>',
         unsafe_allow_html=True,
     )
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ── Einstellungen ──────────────────────────────────────────────────────────────
-with st.expander("⚙️ **Einstellungen**", expanded=False):
+with st.expander("⚙️ Einstellungen", expanded=False):
     cfg1, cfg2, cfg3 = st.columns(3)
     with cfg1:
         nl_strategy = st.selectbox(
             "Optionsstrategie",
             ["Cash Covered Put", "Covered Call", "Short Strangle"],
-            help="Welche Strategie soll für die Optionsempfehlungen genutzt werden?",
         )
     with cfg2:
-        show_options_toggle = st.checkbox(
-            "Optionsempfehlungen laden",
-            value=True,
-            help="Deaktivieren für schnelleres Laden (ohne Optionsdaten)",
+        show_options_qcu = st.checkbox(
+            "Optionen in Quick Catch-Up laden",
+            value=False,
+            help="Deaktivieren für schnelleres Laden",
         )
     with cfg3:
-        n_stocks = st.slider("Aktien pro Sektor", 1, 3, 2)
-    st.markdown(
-        f"> ℹ️ {TWITTER_RSS_NOTE}",
-        unsafe_allow_html=True,
-    )
+        n_stocks_deep = st.slider("Aktien im Deep Dive", 1, 3, 2)
+    st.info(TWITTER_RSS_NOTE, icon="ℹ️")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MARKTÜBERBLICK
+# SECTION 1 — WAS GEHT HEUTE AB? (auto-load)
 # ══════════════════════════════════════════════════════════════════════════════
-with st.spinner("Lade Marktdaten..."):
-    mkt   = _market_overview()
-    fg    = _fear_greed()
+with st.spinner("Lade Marktdaten…"):
+    mkt = _market_overview()
+    fg  = _fear_greed()
 
-st.markdown("### 🌍 Marktüberblick")
+st.markdown("### 🌍 Was geht heute ab?")
 
-# Indices
 idx_names = ["S&P 500", "NASDAQ", "DOW", "VIX"]
-idx_cols  = st.columns(len(idx_names) + 3)
+all_cols  = st.columns(len(idx_names) + 3)
 for i, name in enumerate(idx_names):
     d = mkt.get(name, {})
     p = d.get("price")
     c = d.get("chg")
-    cc = _chg_color(c)
     delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    idx_cols[i].metric(name, _fmt(p, 2 if name != "VIX" else 1), delta_str)
-
-# Rohstoffe
+    all_cols[i].metric(name, _fmt(p, 2 if name != "VIX" else 1), delta_str)
 for j, name in enumerate(["Gold", "Silber", "Bonds"]):
     d = mkt.get(name, {})
     p = d.get("price")
     c = d.get("chg")
     delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    idx_cols[len(idx_names) + j].metric(name, _fmt(p, 2), delta_str)
+    all_cols[len(idx_names) + j].metric(name, _fmt(p, 2), delta_str)
 
-# Fear & Greed
 fg_score  = fg.get("score")
 fg_rating = fg.get("rating", "–")
+vix_val   = mkt.get("VIX", {}).get("price")
+
+badge_parts = []
 if fg_score is not None:
-    fg_color = (
-        "#22c55e" if fg_score >= 60 else
-        "#ef4444" if fg_score <= 30 else "#f59e0b"
+    fc = "#22c55e" if fg_score >= 60 else "#ef4444" if fg_score <= 30 else "#f59e0b"
+    badge_parts.append(
+        f"<span style='padding:3px 12px;border-radius:12px;border:1px solid {fc};"
+        f"color:{fc};font-weight:700;font-size:0.82rem'>"
+        f"😨 Fear &amp; Greed: {fg_score:.0f} — {fg_rating}</span>"
     )
+if vix_val:
+    if vix_val < 15:   vn, vc = "VIX niedrig — Prämienumgebung schwach", "#22c55e"
+    elif vix_val < 20: vn, vc = "VIX normal — gute Prämienumgebung", "#f59e0b"
+    elif vix_val < 30: vn, vc = "VIX erhöht — hohe Prämien, aber mehr Risiko", "#f97316"
+    else:              vn, vc = "VIX sehr hoch — Vorsicht bei Stillhalter-Trades!", "#ef4444"
+    badge_parts.append(
+        f"<span style='padding:3px 12px;border-radius:12px;border:1px solid {vc};"
+        f"color:{vc};font-size:0.82rem'>{vn}</span>"
+    )
+if badge_parts:
     st.markdown(
-        f"<div style='display:inline-block;padding:4px 14px;background:rgba(255,255,255,0.05);"
-        f"border-radius:20px;border:1px solid {fg_color};font-size:0.85rem;margin-top:4px'>"
-        f"😨 <b>Fear &amp; Greed:</b> "
-        f"<span style='color:{fg_color};font-weight:700'>{fg_score:.0f} — {fg_rating}</span></div>",
+        f"<div style='margin:8px 0;display:flex;gap:10px;flex-wrap:wrap'>"
+        + "".join(badge_parts) + "</div>",
         unsafe_allow_html=True,
     )
-else:
-    st.caption("Fear & Greed: nicht verfügbar")
-
-# VIX Einschätzung
-vix_val = mkt.get("VIX", {}).get("price")
-if vix_val:
-    if vix_val < 15:
-        vix_note = "🟢 VIX niedrig — Optionsprämien gering, Markt entspannt"
-    elif vix_val < 20:
-        vix_note = "🟡 VIX normal — gute Prämienumgebung"
-    elif vix_val < 30:
-        vix_note = "🟠 VIX erhöht — höhere Prämien, aber höheres Risiko"
-    else:
-        vix_note = "🔴 VIX hoch — Prämien sehr attraktiv, aber erhöhte Marktvolatilität!"
-    st.caption(vix_note)
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 11 SEKTOREN ALS TABS
+# SECTION 2 — SEKTOR-ÜBERBLICK (auto-load, compact table)
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown("### 📊 Sektoren — Analyse & Optionsempfehlungen")
+st.markdown("### 📊 Sektor-Überblick")
 
-sector_names = list(SECTORS.keys())
-tabs = st.tabs(sector_names)
+with st.spinner("Lade Sektor-ETFs…"):
+    sector_rows = []
+    for sname, sector in SECTORS.items():
+        p = _sector_etf_perf(sector["etf"])
+        d1 = p.get("1d")
+        d7 = p.get("1w")
+        icon = "🟢" if d1 and d1 >= 0.5 else ("🔴" if d1 and d1 <= -0.5 else "🟡")
+        sector_rows.append({
+            "": icon,
+            "Sektor": sname,
+            "ETF": sector["etf"],
+            "Heute": f"{d1:+.2f}%" if d1 is not None else "–",
+            "1 Woche": f"{d7:+.2f}%" if d7 is not None else "–",
+            "Fokus": sector["description"][:65] + "…",
+        })
 
-for tab, sector_name in zip(tabs, sector_names):
-    sector = SECTORS[sector_name]
-    etf    = sector["etf"]
-    color  = sector["color"]
-    stocks = sector["stocks"][:int(n_stocks)]
+st.dataframe(
+    pd.DataFrame(sector_rows),
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "": st.column_config.TextColumn(width=40),
+        "ETF": st.column_config.TextColumn(width=70),
+        "Heute": st.column_config.TextColumn(width=90),
+        "1 Woche": st.column_config.TextColumn(width=90),
+    },
+)
 
-    with tab:
-        # ── Sektor-Header ────────────────────────────────────────────────────
-        etf_perf = _sector_etf_perf(etf)
-        perf_1d  = etf_perf.get("1d")
-        perf_1w  = etf_perf.get("1w")
-        etf_price = etf_perf.get("price")
-
-        hc1, hc2 = st.columns([5, 2])
-        with hc1:
-            st.markdown(
-                f"<div style='padding:8px 14px;background:rgba(255,255,255,0.04);"
-                f"border-radius:8px;border-left:4px solid {color};margin-bottom:12px'>"
-                f"<b style='color:{color}'>{etf}</b> · "
-                f"{sector['description']}</div>",
-                unsafe_allow_html=True,
-            )
-        with hc2:
-            mc1, mc2, mc3 = st.columns(3)
-            mc1.metric(f"{etf}", _fmt(etf_price,2,"$") if etf_price else "–")
-            mc2.metric("Heute", f"{_fmt(perf_1d,2)}%" if perf_1d is not None else "–",
-                       delta=f"{perf_1d:+.2f}%" if perf_1d is not None else None)
-            mc3.metric("1 Woche", f"{_fmt(perf_1w,2)}%" if perf_1w is not None else "–",
-                       delta=f"{perf_1w:+.2f}%" if perf_1w is not None else None)
-
-        # ── Sektor-News (RSS) ────────────────────────────────────────────────
-        rss_news = _rss_news(sector["rss"], max_items=4)
-        if rss_news:
-            with st.expander(f"📡 Sektor-News ({etf})", expanded=False):
-                for item in rss_news:
-                    title = item["title"]
-                    link  = item.get("link", "")
-                    if link:
-                        st.markdown(f"→ [{title}]({link})")
-                    else:
-                        st.markdown(f"→ {title}")
-
-        # ── Aktien-Karten ────────────────────────────────────────────────────
-        for ticker in stocks:
-            with st.spinner(f"Analysiere {ticker}..."):
-                data = _stock_analysis(ticker)
-            _render_stock_card(data, nl_strategy, show_options_toggle)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# NEWSLETTER EXPORT
-# ══════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-with st.expander("📤 **Newsletter Export** — Komplett-Zusammenfassung für WhatsApp/Email", expanded=False):
-    st.markdown(
-        "Der Export generiert eine Text-Zusammenfassung des Marktüberblicks "
-        "und aller Sektoren — bereit zum Kopieren in WhatsApp oder Email-Newsletter."
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — QUICK CATCH-UP (Morning Crunch style cards)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("### ⚡ Quick Catch-Up")
+st.caption(
+    "Aktien auswählen → App zeigt Kurs, TA-Signal, Top-News und Stillhalter-Take. "
+    "Optionen optional (langsamer)."
+)
+
+all_qcu_stocks = []
+sector_for_stock: dict[str, str] = {}
+for sname, sector in SECTORS.items():
+    for t in sector["stocks"]:
+        if t not in all_qcu_stocks:
+            all_qcu_stocks.append(t)
+        sector_for_stock[t] = sname
+
+# Default: 1 Aktie je Sektor (11 Stück)
+default_qcu = [list(SECTORS.values())[i]["stocks"][0] for i in range(len(SECTORS))]
+
+qc1, qc2 = st.columns([5, 1])
+with qc1:
+    selected_qcu = st.multiselect(
+        "Aktien für Quick Catch-Up",
+        options=all_qcu_stocks,
+        default=default_qcu[:8],
+        key="nl_qcu_stocks",
+    )
+with qc2:
+    qcu_btn = st.button(
+        "🔄 Generieren", type="primary", key="nl_qcu_btn", use_container_width=True
     )
 
-    if st.button("📋 Zusammenfassung generieren", type="primary"):
-        lines = [
-            f"📰 STILLHALTER MARKT NEWSLETTER — {datetime.now().strftime('%d.%m.%Y')}",
+if qcu_btn:
+    st.session_state["nl_qcu_generated"] = True
+    st.session_state["nl_qcu_cards"] = []
+
+if st.session_state.get("nl_qcu_generated") and selected_qcu:
+    qcu_cards: list[dict] = []
+
+    for ticker in selected_qcu:
+        with st.spinner(f"Analysiere {ticker}…"):
+            data = _stock_analysis(ticker)
+
+        price   = data["price"]
+        name    = data["name"]
+        prev    = data["info"].get("prev_close")
+        chg_pct = ((price / prev) - 1) * 100 if price and prev else None
+        ta_dir  = data.get("ta_dir", "") or ""
+        news    = data.get("news", [])
+
+        icon = "🟢" if "bullish" in ta_dir else ("🔴" if "bearish" in ta_dir else "🟡")
+        cc   = _chg_color(chg_pct)
+        if chg_pct is not None:
+            chg_s = f"+{_fmt(abs(chg_pct),1)}%" if chg_pct >= 0 else f"-{_fmt(abs(chg_pct),1)}%"
+        else:
+            chg_s = "–"
+
+        headline = news[0]["title"] if news else "Keine aktuellen News verfügbar."
+        price_s  = f"${_fmt(price)}" if price else "–"
+        sec_tag  = sector_for_stock.get(ticker, "")
+        ta_line  = f"{data['ta_daily']} (1T) · {data['ta_weekly']} (1W) · {data['ta_monthly']} (1M)"
+
+        opt_text = ""
+        if show_options_qcu:
+            opt = _best_option(ticker, 20, 45, nl_strategy)
+            if opt:
+                try:
+                    exp_d = pd.to_datetime(opt["expiry"]).strftime("%d.%m.")
+                except Exception:
+                    exp_d = str(opt["expiry"])
+                opt_text = (
+                    f"Short PUT {exp_d} @${opt['strike']:.0f} · "
+                    f"Prämie ${_fmt(opt['premium'])} ({round(opt['premium']*100)} USD) · "
+                    f"Rendite {_fmt(opt['rendite'])} %"
+                )
+            else:
+                opt_text = "Keine passende Option gefunden."
+
+        opt_line = (
+            f"<div style='font-size:0.82rem;color:#a8c5ff;margin-top:5px'>"
+            f"👉 <b>Stillhalter-Take:</b> {opt_text}</div>"
+            if opt_text else ""
+        )
+
+        st.markdown(
+            f"<div style='border:1px solid rgba(255,255,255,0.1);border-radius:10px;"
+            f"padding:12px 16px;margin:6px 0;background:rgba(255,255,255,0.03)'>"
+            f"<div style='font-size:0.95rem;font-weight:700;margin-bottom:4px'>"
+            f"{icon} <span style='color:#e2c97e'>{ticker}</span> {name} &nbsp;"
+            f"<span style='color:{cc}'>{chg_s}</span> &nbsp;"
+            f"<span style='font-size:0.75rem;color:#888;font-weight:400'>"
+            f"{price_s} · {sec_tag}</span></div>"
+            f"<div style='font-size:0.78rem;color:#999;margin-bottom:4px'>{ta_line}</div>"
+            f"<div style='font-size:0.84rem;color:#ccc'>→ {headline[:130]}"
+            f"{'…' if len(headline)>130 else ''}</div>"
+            f"{opt_line}</div>",
+            unsafe_allow_html=True,
+        )
+
+        qcu_cards.append({
+            "ticker": ticker, "name": name, "chg": chg_s, "icon": icon,
+            "headline": headline, "opt_text": opt_text, "ta": ta_line,
+        })
+
+    st.session_state["nl_qcu_cards"] = qcu_cards
+
+elif not st.session_state.get("nl_qcu_generated"):
+    st.info("👆 Aktien auswählen und **Generieren** drücken.")
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 4 — DEEP DIVE (ein Sektor in voller Tiefe)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("### 🔍 Deep Dive — Sektor im Fokus")
+
+dd1, dd2, dd3 = st.columns([3, 2, 1])
+with dd1:
+    dd_sector = st.selectbox("Sektor auswählen", list(SECTORS.keys()), key="nl_dd_sector")
+with dd2:
+    dd_strategy = st.selectbox(
+        "Strategie", ["Cash Covered Put", "Covered Call", "Short Strangle"], key="nl_dd_strat"
+    )
+with dd3:
+    dd_btn = st.button(
+        "🔍 Laden", type="primary", key="nl_dd_btn", use_container_width=True
+    )
+
+if dd_btn:
+    sector  = SECTORS[dd_sector]
+    etf     = sector["etf"]
+    color   = sector["color"]
+    etf_p   = _sector_etf_perf(etf)
+    d1, d7  = etf_p.get("1d"), etf_p.get("1w")
+
+    st.markdown(
+        f"<div style='padding:10px 16px;background:rgba(255,255,255,0.04);"
+        f"border-radius:8px;border-left:4px solid {color};margin-bottom:12px'>"
+        f"<b style='color:{color};font-size:1rem'>{dd_sector}</b> &nbsp;·&nbsp; "
+        f"<b style='color:{color}'>{etf}</b> &nbsp;"
+        f"{'<b>' + f'{d1:+.2f}%' + '</b> heute &nbsp;|&nbsp; <b>' + f'{d7:+.2f}%' + '</b> 1W' if d1 is not None else ''}"
+        f"<br><span style='font-size:0.83rem;color:#aaa'>{sector['description']}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+    rss_items = _rss_news(sector["rss"], max_items=5)
+    if rss_items:
+        st.markdown("**📡 Aktuelle Sektor-News**")
+        for item in rss_items:
+            link  = item.get("link", "")
+            title = item["title"]
+            st.markdown(f"→ [{title}]({link})" if link else f"→ {title}")
+        st.markdown("---")
+
+    for ticker in sector["stocks"][:int(n_stocks_deep)]:
+        with st.spinner(f"Analysiere {ticker}…"):
+            data = _stock_analysis(ticker)
+        _render_stock_card(data, dd_strategy, show_options=True)
+
+else:
+    st.info("👆 Sektor auswählen und **Laden** drücken.")
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 5 — STILLHALTER-TIPP DER WOCHE (aus letztem Scan-Cache)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("### 🎯 Stillhalter-Tipp der Woche")
+
+cached = _load_scan_cache()
+if cached and not cached.get("results", pd.DataFrame()).empty:
+    df_tip     = cached["results"].copy()
+    scan_ts    = cached.get("timestamp")
+    scan_strat = cached.get("strategy", "–")
+    age_str    = ""
+    if scan_ts:
+        age_min = int((datetime.now() - scan_ts).total_seconds() / 60)
+        age_str = (
+            f" · Scan vor {age_min} Min." if age_min < 60
+            else f" · Scan {scan_ts.strftime('%d.%m. %H:%M')}"
+        )
+
+    sort_col = next(
+        (c for c in ["CRV Score", "Konvergenz", "Rendite % Laufzeit"] if c in df_tip.columns),
+        None,
+    )
+    top3 = (
+        df_tip.sort_values(sort_col, ascending=False)
+        .drop_duplicates(subset=["Ticker"])
+        .head(3)
+        if sort_col else df_tip.head(3)
+    )
+
+    st.caption(f"Aus letztem Scan — Strategie: **{scan_strat}**{age_str}")
+
+    for _, row in top3.iterrows():
+        ticker  = row.get("Ticker", "")
+        strike  = float(row.get("Strike", 0))
+        expiry  = row.get("Verfall", "")
+        premium = float(row.get("Prämie", 0))
+        rendite = float(row.get("Rendite % Laufzeit", 0))
+        otm     = float(row.get("OTM %", 0))
+        crv     = float(row.get("CRV Score", 0)) if "CRV Score" in row else 0.0
+        strat_r = str(row.get("Strategie", "Short PUT"))
+        try:
+            exp_d = pd.to_datetime(expiry).strftime("%d.%m.%Y")
+        except Exception:
+            exp_d = str(expiry)
+
+        st.markdown(
+            f"<div style='border:1px solid rgba(226,201,126,0.3);border-radius:8px;"
+            f"padding:10px 14px;margin:6px 0;background:rgba(226,201,126,0.04)'>"
+            f"<b style='color:#e2c97e'>🎯 {ticker}</b> — {strat_r} · "
+            f"Strike ${strike:.0f} · Verfall {exp_d}<br>"
+            f"<span style='color:#aaa;font-size:0.84rem'>"
+            f"Prämie <b>${_fmt(premium)}</b> ({round(premium*100)} USD) · "
+            f"Rendite <b>{_fmt(rendite)} %</b> · OTM {_fmt(otm,1)}% · CRV {crv:.0f}"
+            f"</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    if st.button("➜ Zu Trade Cards öffnen", type="secondary"):
+        st.switch_page("pages/17_Trade_Cards.py")
+else:
+    st.info(
+        "Kein Scan-Ergebnis vorhanden — bitte zuerst im **Watchlist Scanner** einen Scan "
+        "durchführen. Der beste Trade wird dann hier als Tipp der Woche angezeigt.",
+        icon="ℹ️",
+    )
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 6 — NEWSLETTER EXPORT (Morning Crunch Textformat)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("### 📤 Newsletter Export")
+st.caption("Kompletter Newsletter im Morning-Crunch-Format — direkt für WhatsApp, Email oder Blog.")
+
+if st.button("📋 Newsletter generieren", type="primary", key="nl_export_btn"):
+    today = datetime.now().strftime("%d.%m.%Y")
+    L = [
+        f"📰 STILLHALTER MARKT-NEWSLETTER — {today}",
+        "Morning Crunch · Stillhalter Edition",
+        "",
+        "═══════════════════════════════════",
+        "🌍 WAS GEHT HEUTE AB?",
+        "═══════════════════════════════════",
+    ]
+    for nm in ["S&P 500", "NASDAQ", "DOW", "VIX", "Gold", "Silber"]:
+        d = mkt.get(nm, {})
+        p = d.get("price")
+        c = d.get("chg")
+        if p:
+            cs = f" ({'+' if c and c>=0 else ''}{c:.2f}%)" if c is not None else ""
+            L.append(f"  {nm}: {p:.2f}{cs}")
+    if fg_score:
+        L.append(f"  Fear & Greed: {fg_score:.0f} — {fg_rating}")
+    if vix_val:
+        L.append(f"  {vn}")
+    L.append("")
+
+    L += [
+        "═══════════════════════════════════",
+        "📊 SEKTOR-ÜBERBLICK",
+        "═══════════════════════════════════",
+    ]
+    for sname, sector in SECTORS.items():
+        p  = _sector_etf_perf(sector["etf"])
+        d1 = p.get("1d")
+        d7 = p.get("1w")
+        ic = "🟢" if d1 and d1 >= 0.5 else ("🔴" if d1 and d1 <= -0.5 else "🟡")
+        L.append(
+            f"  {ic} {sname} ({sector['etf']}): {d1:+.2f}% heute | {d7:+.2f}% Woche"
+            if d1 is not None else f"  {sname}: –"
+        )
+    L.append("")
+
+    qcu_cards = st.session_state.get("nl_qcu_cards", [])
+    if qcu_cards:
+        L += [
+            "═══════════════════════════════════",
+            "⚡ QUICK CATCH-UP",
+            "═══════════════════════════════════",
             "",
-            "═══ MARKTÜBERBLICK ═══",
         ]
-        for name in ["S&P 500", "NASDAQ", "DOW", "VIX", "Gold", "Silber"]:
-            d = mkt.get(name, {})
-            p = d.get("price")
-            c = d.get("chg")
-            if p:
-                chg_s = f" ({'+' if c and c>=0 else ''}{c:.2f}%)" if c is not None else ""
-                lines.append(f"  {name}: {p:.2f}{chg_s}")
-        if fg_score:
-            lines.append(f"  Fear & Greed: {fg_score:.0f} — {fg_rating}")
-        lines.append("")
+        for c in qcu_cards:
+            L.append(f"{c['icon']} {c['ticker']} {c['name']} ({c['chg']})")
+            L.append(f"→ {c['headline'][:110]}")
+            if c.get("opt_text"):
+                L.append(f"👉 Stillhalter-Take: {c['opt_text']}")
+            L.append("")
 
-        for sector_name, sector in SECTORS.items():
-            lines.append(f"═══ {sector_name.upper()} ═══")
-            etf_p = _sector_etf_perf(sector["etf"])
-            if etf_p.get("1d") is not None:
-                lines.append(f"  {sector['etf']}: {etf_p.get('1d',0):+.2f}% heute")
-            for ticker in sector["stocks"][:2]:
-                data = _stock_analysis(ticker)
-                p    = data.get("price")
-                name = data.get("name", ticker)
-                lines.append(f"\n  📌 {ticker} — {name}")
-                if p:
-                    prev  = data["info"].get("prev_close")
-                    chg_  = ((p/prev)-1)*100 if prev and p else None
-                    lines.append(f"     Kurs: ${p:.2f}" + (f" ({chg_:+.1f}%)" if chg_ else ""))
-                lines.append(f"     TA: {data['ta_daily']} (1D) · {data['ta_weekly']} (1W)")
-                lines.append(f"     Bewertung: {data['val_label']}")
-                if data["news"]:
-                    lines.append(f"     News: {data['news'][0]['title'][:80]}")
-                opt = _best_option(ticker, 20, 45, nl_strategy)
-                if opt:
-                    lines.append(
-                        f"     Option (Monat): Strike ${opt['strike']:.0f} · "
-                        f"Prämie ${opt['premium']:.2f} · {opt['rendite']:.1f}% Rendite"
-                    )
-            lines.append("")
+    if cached and not cached.get("results", pd.DataFrame()).empty:
+        L += [
+            "═══════════════════════════════════",
+            "🎯 STILLHALTER-TIPP DER WOCHE",
+            "═══════════════════════════════════",
+        ]
+        sort_c = next(
+            (c for c in ["CRV Score", "Rendite % Laufzeit"] if c in df_tip.columns), None
+        )
+        tip = (
+            df_tip.sort_values(sort_c, ascending=False)
+            .drop_duplicates(subset=["Ticker"])
+            .head(1)
+            if sort_c else df_tip.head(1)
+        )
+        for _, row in tip.iterrows():
+            try:
+                exp_d = pd.to_datetime(row.get("Verfall", "")).strftime("%d.%m.%Y")
+            except Exception:
+                exp_d = str(row.get("Verfall", ""))
+            L.append(
+                f"  {row.get('Ticker','')} · {row.get('Strategie','Short PUT')} · "
+                f"Strike ${float(row.get('Strike',0)):.0f} · Verfall {exp_d}"
+            )
+            L.append(
+                f"  Prämie: ${_fmt(float(row.get('Prämie',0)))} · "
+                f"Rendite: {_fmt(float(row.get('Rendite % Laufzeit',0)))} %"
+            )
+        L.append("")
 
-        newsletter_text = "\n".join(lines)
-        st.code(newsletter_text, language="text")
-        st.caption("💡 Tipp: Oben rechts im Code-Block auf das Kopier-Symbol klicken → direkt in WhatsApp einfügen.")
+    L += [
+        "─────────────────────────────────────",
+        "⚠️ DISCLAIMER",
+        "─────────────────────────────────────",
+        "Diese Informationen dienen nur zu Bildungs- und Informationszwecken.",
+        "Keine Anlageberatung — Optionshandel birgt erhebliche Risiken.",
+        "Immer an Take Profit und Absicherung denken!",
+        "",
+        f"Erstellt mit Stillhalter AI App · {today}",
+    ]
+
+    st.code("\n".join(L), language="text")
+    st.caption("💡 Tipp: Kopier-Symbol oben rechts im Code-Block → direkt in WhatsApp einfügen.")
