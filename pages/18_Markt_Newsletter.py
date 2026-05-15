@@ -128,27 +128,26 @@ TWITTER_ACCOUNTS = (
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _market_overview() -> dict:
-    """S&P500, NASDAQ, DOW, VIX, Gold, Silber, Anleihen + Futures + Bitcoin."""
+    """S&P500, NASDAQ, VIX, Gold, Silber, 10J-Rendite, Futures, Krypto + Öl."""
     import yfinance as yf
     symbols = {
         # Indizes
-        "S&P 500":  "^GSPC",
-        "NASDAQ":   "^IXIC",
-        "DOW":      "^DJI",
-        "VIX":      "^VIX",
-        # Futures (24h handelbar)
-        "ES Futures":  "ES=F",
-        "NQ Futures":  "NQ=F",
-        "YM Futures":  "YM=F",
-        "RTY Futures": "RTY=F",
-        # Rohstoffe & Anleihen
-        "Gold":     "GLD",
-        "Silber":   "SLV",
-        "Öl (WTI)": "CL=F",
-        "Bonds":    "TLT",
+        "S&P 500":   "^GSPC",
+        "NASDAQ":    "^IXIC",
+        "VIX":       "^VIX",
+        # Zinsen & Rohstoffe
+        "10J. Zins": "^TNX",   # US 10-Jahres-Rendite in %
+        "Gold":      "GLD",
+        "Silber":    "SLV",
+        # Futures (24h handelbar, kein DOW/Russell)
+        "ES Futures": "ES=F",
+        "NQ Futures": "NQ=F",
         # Krypto
-        "Bitcoin":  "BTC-USD",
-        "Ethereum": "ETH-USD",
+        "Bitcoin":   "BTC-USD",
+        "Ethereum":  "ETH-USD",
+        "Solana":    "SOL-USD",
+        # Rohstoff
+        "Öl (WTI)":  "CL=F",
     }
     result = {}
     for name, sym in symbols.items():
@@ -514,6 +513,59 @@ def _detect_tickers_in_text(text: str, candidates: list[str]) -> list[str]:
     return found
 
 
+def _news_emoji(title: str) -> str:
+    """Wählt ein thematisch passendes Emoji für eine Schlagzeile."""
+    t = title.lower()
+    if any(w in t for w in ["ipo", "börsengang", "listing", "going public"]):
+        return "🚀"
+    if any(w in t for w in ["merger", "acqui", "deal", "übernahme", "buys", "takeover"]):
+        return "🤝"
+    if any(w in t for w in ["earnings", "profit", "revenue", "quarterly", "gewinn", "umsatz"]):
+        return "💰"
+    if any(w in t for w in ["fed", "federal reserve", "rate", "inflation", "fomc", "zins"]):
+        return "🏛️"
+    if any(w in t for w in ["ai ", "artificial intelligence", "chip", "semiconductor", "gpu", "nvidia"]):
+        return "🤖"
+    if any(w in t for w in ["crypto", "bitcoin", "ethereum", "krypto", "solana", "blockchain"]):
+        return "₿"
+    if any(w in t for w in ["oil", "öl", "energy", "opec", "crude"]):
+        return "⚡"
+    if any(w in t for w in ["bank", "financial", "lending", "credit", "mortgage"]):
+        return "🏦"
+    if any(w in t for w in ["tech", "software", "cloud", "saas", "platform", "app"]):
+        return "💻"
+    if any(w in t for w in ["health", "pharma", "drug", "fda", "biotech", "medical"]):
+        return "🏥"
+    if any(w in t for w in ["tariff", "trade", "zoll", "china", "export", "geopolit"]):
+        return "🌐"
+    return "📊"
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _translate_de(text: str) -> str:
+    """Übersetzt englischen Text auf Deutsch via Google Translate (kostenlos, gecacht 1h)."""
+    if not text or len(text) < 10:
+        return text
+    try:
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "en", "tl": "de", "dt": "t", "q": text[:500]},
+            timeout=6,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            translated = "".join(
+                part[0]
+                for part in data[0]
+                if isinstance(part, list) and part and part[0]
+            )
+            return translated.strip() if translated.strip() else text
+    except Exception:
+        pass
+    return text
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # UI KOMPONENTEN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -813,50 +865,47 @@ with st.spinner("Lade Marktdaten…"):
     fg  = _fear_greed()
 
 st.markdown("### 🌍 Marktüberblick")
-st.caption("Indizes · Index-Futures · Krypto · Rohstoffe — automatisch aktualisiert alle 15 Min.")
 
-# ── Zeile 1: Indizes + Rohstoffe/Anleihen ────────────────────────────────────
-idx_names = ["S&P 500", "NASDAQ", "DOW", "VIX"]
-all_cols  = st.columns(len(idx_names) + 3)
-for i, name in enumerate(idx_names):
-    d = mkt.get(name, {})
-    p, c = d.get("price"), d.get("chg")
-    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    all_cols[i].metric(name, _fmt(p, 2 if name != "VIX" else 1), delta_str)
-for j, name in enumerate(["Gold", "Silber", "Bonds"]):
-    d = mkt.get(name, {})
-    p, c = d.get("price"), d.get("chg")
-    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    all_cols[len(idx_names) + j].metric(name, _fmt(p, 2), delta_str)
-
-# ── Zeile 2: Index-Futures ────────────────────────────────────────────────────
-st.caption("📊 Index-Futures — Pre-/After-Market-Richtung (24h handelbar)")
-fut_map = {
-    "ES Futures":  "S&P 500 Fut.",
-    "NQ Futures":  "NASDAQ Fut.",
-    "YM Futures":  "DOW Fut.",
-    "RTY Futures": "Russell Fut.",
-}
-fut_cols = st.columns(4)
-for i, (key, label) in enumerate(fut_map.items()):
+# ── Zeile 1: Indizes · Zinsen · Gold · Silber ────────────────────────────────
+r1_items = [
+    ("S&P 500",   lambda p: _fmt(p, 2),  "S&P 500 Index"),
+    ("NASDAQ",    lambda p: _fmt(p, 2),  "NASDAQ Composite"),
+    ("VIX",       lambda p: _fmt(p, 1),  "Volatilitätsindex — je höher, desto unsicherer der Markt"),
+    ("10J. Zins", lambda p: _fmt(p, 2) + " %", "US 10-Jahres-Staatsanleihe-Rendite in % — steigt = teureres Geld, fällt = lockere Geldpolitik. Unter 4% gilt als moderat, über 5% als restrictiv."),
+    ("Gold",      lambda p: _fmt(p, 2),  "Gold ETF (GLD)"),
+    ("Silber",    lambda p: _fmt(p, 2),  "Silber ETF (SLV)"),
+]
+r1_cols = st.columns(6)
+for ci, (key, fmt_fn, help_txt) in enumerate(r1_items):
     d = mkt.get(key, {})
     p, c = d.get("price"), d.get("chg")
-    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    fut_cols[i].metric(label, _fmt(p, 0), delta_str)
+    delta_str = f"{'+' if c and c >= 0 else ''}{_fmt(c, 2)}%" if c is not None else None
+    r1_cols[ci].metric(key, fmt_fn(p) if p else "–", delta_str, help=help_txt)
+
+# ── Zeile 2: Index-Futures ────────────────────────────────────────────────────
+st.caption("📊 Index-Futures — zeigen Pre-/After-Market-Richtung (24h handelbar)")
+fut_map = {"ES Futures": "S&P 500 Fut.", "NQ Futures": "NASDAQ Fut."}
+r2_cols = st.columns(4)
+for ci, (key, label) in enumerate(fut_map.items()):
+    d = mkt.get(key, {})
+    p, c = d.get("price"), d.get("chg")
+    delta_str = f"{'+' if c and c >= 0 else ''}{_fmt(c, 2)}%" if c is not None else None
+    r2_cols[ci].metric(label, _fmt(p, 0) if p else "–", delta_str)
 
 # ── Zeile 3: Krypto + Öl ─────────────────────────────────────────────────────
 st.caption("🪙 Krypto & Rohstoff")
 cry_map = {
     "Bitcoin":  ("Bitcoin (BTC)", 0),
     "Ethereum": ("Ethereum (ETH)", 2),
+    "Solana":   ("Solana (SOL)", 2),
     "Öl (WTI)": ("Öl WTI", 2),
 }
-cry_cols = st.columns(3)
-for i, (key, (label, dec)) in enumerate(cry_map.items()):
+r3_cols = st.columns(4)
+for ci, (key, (label, dec)) in enumerate(cry_map.items()):
     d = mkt.get(key, {})
     p, c = d.get("price"), d.get("chg")
-    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
-    cry_cols[i].metric(label, _fmt(p, dec), delta_str)
+    delta_str = f"{'+' if c and c >= 0 else ''}{_fmt(c, 2)}%" if c is not None else None
+    r3_cols[ci].metric(label, _fmt(p, dec) if p else "–", delta_str)
 
 fg_score  = fg.get("score")
 fg_rating = fg.get("rating", "–")
@@ -888,98 +937,133 @@ if badges:
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DATEN VORLADEN — Cache für alle Aktien aufwärmen (wie Watchlist Scanner)
-# ══════════════════════════════════════════════════════════════════════════════
-_ALL_TICKERS = [t for s in SECTORS.values() for t in s["stocks"]]  # 33 Aktien
-
-with st.expander("🔄 Daten vorladen — für schnelle Analyse", expanded=False):
-    st.markdown(
-        "Lädt Kurse, News, Fundamentals, TA **und Quartalszahlen** aller Aktien in den Cache.  \n"
-        "**Warum 33?** Der Newsletter deckt 11 GICS-Sektoren ab, "
-        "pro Sektor sind 3 Leitaktien definiert — macht 11 × 3 = **33 Aktien** insgesamt.  \n"
-        "Nach dem Vorladen reagieren **Quick Catch-Up** und **Deep Dive** sofort — "
-        "genau wie der Watchlist Scanner nach einem Scan."
-    )
-
-    col_pre1, col_pre2 = st.columns([3, 1])
-    with col_pre1:
-        preload_tickers = st.multiselect(
-            "Aktien auswählen (Standard: alle 33)",
-            options=_ALL_TICKERS,
-            default=_ALL_TICKERS,
-            key="nl_preload_tickers",
-        )
-    with col_pre2:
-        preload_btn = st.button(
-            "▶️ Jetzt laden", type="primary",
-            key="nl_preload_btn", use_container_width=True,
-        )
-
-    if preload_btn and preload_tickers:
-        prog_bar   = st.progress(0.0)
-        status_txt = st.empty()
-        n = len(preload_tickers)
-        errors = []
-        for i, ticker in enumerate(preload_tickers):
-            status_txt.markdown(
-                f"⏳ **{ticker}** wird geladen… ({i + 1}/{n}) — "
-                f"Kurs, News, Fundamentals, TA (1M · 1W · 1D)"
-            )
-            try:
-                _stock_analysis(ticker)       # Kurs, News, Fundamentals, TA
-                _quick_price(ticker)
-                _quarterly_financials(ticker)  # Quartalszahlen + Forward-KGV
-            except Exception as e:
-                errors.append(f"{ticker}: {e}")
-            prog_bar.progress((i + 1) / n)
-
-        prog_bar.empty()
-        if errors:
-            status_txt.warning(
-                f"✅ {n - len(errors)}/{n} geladen. "
-                f"Fehler bei: {', '.join(errors)}"
-            )
-        else:
-            status_txt.success(
-                f"✅ Alle {n} Aktien geladen — Kurse, News, TA & Quartalszahlen im Cache. "
-                "Quick Catch-Up und Deep Dive sind jetzt sofort verfügbar!"
-            )
+# 33 Aktien = 11 GICS-Sektoren × 3 Leitaktien
+_ALL_TICKERS = [t for s in SECTORS.values() for t in s["stocks"]]
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — TOP-NEWS (globale Quellen, auto-load)
+# SECTION 2 — TOP-NEWS (globale Quellen, Morning-Crunch-Format, auf Deutsch)
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("### 📰 Top-News")
-st.caption("Quellen: Yahoo Finance · MarketWatch — automatisch aktualisiert alle 10 Min.")
+st.caption(
+    "Quellen: Yahoo Finance · MarketWatch · automatisch aktualisiert alle 10 Min. · "
+    "Übersetzung: Google Translate · Top 10 Meldungen"
+)
 
 with st.spinner("Lade globale News…"):
     global_news = _global_news(max_per_source=4)
 
 if global_news:
-    for item in global_news[:10]:
+    top10 = global_news[:10]
+
+    # ── Vorab: Tickers in allen Top-10 erkennen & Optionen laden ─────────────
+    _top10_ticker_map: dict[int, str] = {}   # {news_idx: ticker}
+    for _ni, _item in enumerate(top10):
+        _found = _detect_tickers_in_text(
+            _item["title"] + " " + _item.get("description", ""),
+            _ALL_TICKERS,
+        )
+        if _found:
+            _top10_ticker_map[_ni] = _found[0]
+
+    _top10_prices: dict[str, dict] = {}
+    _top10_opts:   dict[str, dict | None] = {}
+    _unique_t10 = list(set(_top10_ticker_map.values()))
+    if _unique_t10:
+        with st.spinner("Lade Kurse & Optionen für erwähnte Aktien…"):
+            for _t in _unique_t10:
+                _top10_prices[_t] = _quick_price(_t)
+                _top10_opts[_t]   = _best_option(_t, 20, 45, nl_strategy)
+
+    # ── News-Karten rendern ───────────────────────────────────────────────────
+    for ni, item in enumerate(top10):
         title  = item["title"]
         link   = item.get("link", "")
-        source = item.get("source", "")
         desc   = item.get("description", "")
-        src_badge = (
-            "<span style='font-size:0.72rem;color:#666'> · " + source + "</span>"
-            if source else ""
-        )
+        source = item.get("source", "")
+        emoji  = _news_emoji(title)
+        t_key  = _top10_ticker_map.get(ni)
+
+        # Übersetzung (gecacht)
+        title_de = _translate_de(title)
+        desc_de  = _translate_de(desc) if desc else ""
+
+        # Ticker-Inline-Badge
+        ticker_badge_html = ""
+        if t_key:
+            pdata = _top10_prices.get(t_key, {})
+            chg   = pdata.get("chg")
+            if chg is not None:
+                t_color = "#22c55e" if chg >= 0 else "#ef4444"
+                t_icon  = "▲" if chg >= 0 else "▼"
+                ticker_badge_html = (
+                    " <span style='color:#e2c97e;font-weight:700'>$" + t_key + "</span>"
+                    + " <span style='color:" + t_color + ";font-size:0.82rem'>"
+                    + "( " + t_icon + " " + f"{abs(chg):.2f}%" + " )</span>"
+                )
+
+        # Stillhalter-Take
+        take_html = ""
+        if t_key:
+            opt = _top10_opts.get(t_key)
+            if opt:
+                try:
+                    exp_d = pd.to_datetime(opt["expiry"]).strftime("%d.%m.")
+                except Exception:
+                    exp_d = str(opt["expiry"])
+                take_html = (
+                    "<div style='font-size:0.82rem;color:#a8c5ff;"
+                    "margin-top:7px;padding-top:6px;"
+                    "border-top:1px solid rgba(255,255,255,0.06)'>"
+                    "👉 <b>Stillhalter-Take:</b> "
+                    + nl_strategy + " · Strike $" + f"{opt['strike']:.0f}"
+                    + " · Verfall " + exp_d
+                    + " · Prämie <b>$" + _fmt(opt["premium"]) + "</b>"
+                    + " (" + str(round(opt["premium"] * 100)) + " USD)"
+                    + " · Rendite <b>" + _fmt(opt["rendite"]) + "%</b>"
+                    + " · Δ " + f"{opt['delta']:.2f}"
+                    + "</div>"
+                )
+            else:
+                take_html = (
+                    "<div style='font-size:0.82rem;color:#a8c5ff;"
+                    "margin-top:7px;padding-top:6px;"
+                    "border-top:1px solid rgba(255,255,255,0.06)'>"
+                    "👉 <b>Stillhalter-Take:</b> Kein passendes " + nl_strategy
+                    + "-Setup für " + t_key + " aktuell gefunden."
+                    + "</div>"
+                )
+
+        # Title-Link
         if link:
-            st.markdown(
-                "→ **[" + title + "](" + link + ")**" + src_badge,
-                unsafe_allow_html=True,
+            title_html = (
+                "<a href='" + link + "' target='_blank' "
+                "style='font-weight:700;color:#e8dcc8;text-decoration:none'>"
+                + title_de + "</a>"
             )
         else:
-            st.markdown("→ **" + title + "**" + src_badge, unsafe_allow_html=True)
-        if desc:
-            st.markdown(
-                "<div style='font-size:0.79rem;color:#999;margin:-4px 0 10px 14px;"
-                "line-height:1.55'>" + desc[:420] + "</div>",
-                unsafe_allow_html=True,
+            title_html = "<strong style='color:#e8dcc8'>" + title_de + "</strong>"
+
+        src_html = (
+            " <span style='font-size:0.72rem;color:#444'>" + source + "</span>"
+            if source else ""
+        )
+
+        card_html = (
+            "<div style='padding:13px 0;border-bottom:1px solid rgba(255,255,255,0.06)'>"
+            "<div style='font-size:1rem;margin-bottom:5px'>"
+            + emoji + " " + title_html + ticker_badge_html + src_html
+            + "</div>"
+            + (
+                "<div style='font-size:0.83rem;color:#bbb;line-height:1.6;margin-bottom:4px'>"
+                + desc_de[:460] + "</div>"
+                if desc_de else ""
             )
+            + take_html
+            + "</div>"
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 else:
     st.caption("Keine globalen News verfügbar — RSS-Quellen temporär nicht erreichbar.")
 
@@ -1034,49 +1118,94 @@ for sname, sector in SECTORS.items():
     col_news, col_stocks = st.columns([3, 2])
 
     with col_news:
-        # ETF-RSS-News mit Zusammenfassung + Aktien-Erkennung
+        # ETF-RSS-News im Morning-Crunch-Stil, auf Deutsch, mit Optionen bei Ticker-Erwähnung
         sector_tickers = sector["stocks"]
         if rss_etf:
-            for item in rss_etf:
+            # Tickers vorab erkennen & Optionen laden
+            _sec_ticker_map: dict[int, str] = {}
+            for _si, _si_item in enumerate(rss_etf):
+                _sf = _detect_tickers_in_text(
+                    _si_item["title"] + " " + _si_item.get("description", ""),
+                    sector_tickers,
+                )
+                if _sf:
+                    _sec_ticker_map[_si] = _sf[0]
+
+            _sec_opts: dict[str, dict | None] = {}
+            _sec_prices: dict[str, dict] = {}
+            for _t in set(_sec_ticker_map.values()):
+                _sec_opts[_t]   = _best_option(_t, 20, 45, nl_strategy)
+                _sec_prices[_t] = _quick_price(_t)
+
+            for si, item in enumerate(rss_etf):
                 title = item["title"]
                 link  = item.get("link", "")
                 desc  = item.get("description", "")
+                emoji = _news_emoji(title)
+                s_t   = _sec_ticker_map.get(si)
 
-                # Titel als Link
+                title_de = _translate_de(title)
+                desc_de  = _translate_de(desc) if desc else ""
+
+                ticker_badge = ""
+                if s_t:
+                    pdata = _sec_prices.get(s_t, {})
+                    chg   = pdata.get("chg")
+                    if chg is not None:
+                        tc = "#22c55e" if chg >= 0 else "#ef4444"
+                        ti = "▲" if chg >= 0 else "▼"
+                        ticker_badge = (
+                            " <span style='color:#e2c97e;font-weight:700'>$" + s_t + "</span>"
+                            + " <span style='color:" + tc + ";font-size:0.8rem'>( "
+                            + ti + " " + f"{abs(chg):.2f}%" + " )</span>"
+                        )
+
                 if link:
-                    st.markdown("→ **[" + title + "](" + link + ")**")
-                else:
-                    st.markdown("→ **" + title + "**")
-
-                # Zusammenfassung (aus RSS-Description)
-                if desc:
-                    st.markdown(
-                        "<div style='font-size:0.79rem;color:#999;"
-                        "margin:-4px 0 5px 14px;line-height:1.55'>"
-                        + desc[:400] + "</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                # Erkennung ob eine Sektoraktie namentlich erwähnt wird
-                found = _detect_tickers_in_text(title + " " + desc, sector_tickers)
-                if found:
-                    ticker_badges = " · ".join(
-                        "<b>" + t + "</b>" for t in found
-                    )
-                    st.markdown(
-                        "<div style='font-size:0.76rem;color:#a8c5ff;"
-                        "margin:-2px 0 10px 14px;padding:3px 8px;"
-                        "background:rgba(100,150,255,0.09);border-radius:4px;"
-                        "border-left:2px solid #a8c5ff;display:inline-block'>"
-                        "💡 Aktie erwähnt: " + ticker_badges
-                        + " → Optionsempfehlung im Quick Catch-Up ↑ oder Deep Dive ↓</div>",
-                        unsafe_allow_html=True,
+                    title_lnk = (
+                        "<a href='" + link + "' target='_blank' "
+                        "style='font-weight:700;color:#e8dcc8;text-decoration:none'>"
+                        + title_de + "</a>"
                     )
                 else:
-                    st.markdown(
-                        "<div style='height:6px'></div>",
-                        unsafe_allow_html=True,
+                    title_lnk = "<strong style='color:#e8dcc8'>" + title_de + "</strong>"
+
+                take_part = ""
+                if s_t:
+                    opt = _sec_opts.get(s_t)
+                    if opt:
+                        try:
+                            exp_d2 = pd.to_datetime(opt["expiry"]).strftime("%d.%m.")
+                        except Exception:
+                            exp_d2 = str(opt["expiry"])
+                        take_part = (
+                            "<div style='font-size:0.78rem;color:#a8c5ff;margin-top:5px'>"
+                            "👉 <b>Stillhalter-Take:</b> "
+                            + nl_strategy + " Strike $" + f"{opt['strike']:.0f}"
+                            + " · " + exp_d2
+                            + " · Prämie $" + _fmt(opt["premium"])
+                            + " · Rendite <b>" + _fmt(opt["rendite"]) + "%</b>"
+                            + "</div>"
+                        )
+                    else:
+                        take_part = (
+                            "<div style='font-size:0.78rem;color:#666;margin-top:5px'>"
+                            "👉 Kein Setup für " + s_t + " gefunden."
+                            + "</div>"
+                        )
+
+                st.markdown(
+                    "<div style='padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05)'>"
+                    "<div style='font-size:0.93rem'>"
+                    + emoji + " " + title_lnk + ticker_badge + "</div>"
+                    + (
+                        "<div style='font-size:0.79rem;color:#bbb;line-height:1.55;"
+                        "margin:4px 0'>" + desc_de[:360] + "</div>"
+                        if desc_de else ""
                     )
+                    + take_part
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
         else:
             st.caption("Keine RSS-News verfügbar.")
 
