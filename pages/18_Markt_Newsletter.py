@@ -703,6 +703,62 @@ if badges:
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DATEN VORLADEN — Cache für alle Aktien aufwärmen (wie Watchlist Scanner)
+# ══════════════════════════════════════════════════════════════════════════════
+_ALL_TICKERS = [t for s in SECTORS.values() for t in s["stocks"]]  # 33 Aktien
+
+with st.expander("🔄 Daten vorladen — für schnelle Analyse", expanded=False):
+    st.markdown(
+        "Lädt Kurse, News, Fundamentals und TA aller 33 Aktien in den Cache. "
+        "Danach reagieren **Quick Catch-Up** und **Deep Dive** sofort — "
+        "genau wie der Watchlist Scanner nach einem Scan."
+    )
+
+    col_pre1, col_pre2 = st.columns([3, 1])
+    with col_pre1:
+        preload_tickers = st.multiselect(
+            "Aktien auswählen (Standard: alle 33)",
+            options=_ALL_TICKERS,
+            default=_ALL_TICKERS,
+            key="nl_preload_tickers",
+        )
+    with col_pre2:
+        preload_btn = st.button(
+            "▶️ Jetzt laden", type="primary",
+            key="nl_preload_btn", use_container_width=True,
+        )
+
+    if preload_btn and preload_tickers:
+        prog_bar   = st.progress(0.0)
+        status_txt = st.empty()
+        n = len(preload_tickers)
+        errors = []
+        for i, ticker in enumerate(preload_tickers):
+            status_txt.markdown(
+                f"⏳ **{ticker}** wird geladen… ({i + 1}/{n}) — "
+                f"Kurs, News, Fundamentals, TA (1M · 1W · 1D)"
+            )
+            try:
+                _stock_analysis(ticker)   # füllt @st.cache_data für alle Folge-Aufrufe
+                _quick_price(ticker)
+            except Exception as e:
+                errors.append(f"{ticker}: {e}")
+            prog_bar.progress((i + 1) / n)
+
+        prog_bar.empty()
+        if errors:
+            status_txt.warning(
+                f"✅ {n - len(errors)}/{n} geladen. "
+                f"Fehler bei: {', '.join(errors)}"
+            )
+        else:
+            status_txt.success(
+                f"✅ Alle {n} Aktien geladen — Quick Catch-Up und Deep Dive sind jetzt sofort verfügbar!"
+            )
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SECTION 2 — TOP-NEWS (globale Quellen, auto-load)
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("### 📰 Top-News")
