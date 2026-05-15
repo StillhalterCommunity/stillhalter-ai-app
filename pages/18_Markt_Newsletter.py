@@ -7,8 +7,10 @@ TA:      Stillhalter Trend Model (1M · 1W · 1D) · Dual Stochastik · MACD Pro
 """
 
 from __future__ import annotations
+import html as _html_lib
 import os
 import pickle
+import re
 import streamlit as st
 import pandas as pd
 import requests
@@ -126,16 +128,27 @@ TWITTER_ACCOUNTS = (
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _market_overview() -> dict:
-    """S&P500, NASDAQ, DOW, VIX, Gold, Silber, Anleihen."""
+    """S&P500, NASDAQ, DOW, VIX, Gold, Silber, Anleihen + Futures + Bitcoin."""
     import yfinance as yf
     symbols = {
+        # Indizes
         "S&P 500":  "^GSPC",
         "NASDAQ":   "^IXIC",
         "DOW":      "^DJI",
         "VIX":      "^VIX",
+        # Futures (24h handelbar)
+        "ES Futures":  "ES=F",
+        "NQ Futures":  "NQ=F",
+        "YM Futures":  "YM=F",
+        "RTY Futures": "RTY=F",
+        # Rohstoffe & Anleihen
         "Gold":     "GLD",
         "Silber":   "SLV",
+        "Öl (WTI)": "CL=F",
         "Bonds":    "TLT",
+        # Krypto
+        "Bitcoin":  "BTC-USD",
+        "Ethereum": "ETH-USD",
     }
     result = {}
     for name, sym in symbols.items():
@@ -151,6 +164,55 @@ def _market_overview() -> dict:
         except Exception:
             result[name] = {"price": None, "chg": 0.0, "symbol": sym}
     return result
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _quarterly_financials(ticker: str) -> dict:
+    """Quartalszahlen: Umsatz, Nettogewinn (letzte 8 Quartale) + Nutzer-Forward-KGV."""
+    import yfinance as yf
+    try:
+        stock = yf.Ticker(ticker)
+        qi    = stock.quarterly_income_stmt
+        if qi is None or qi.empty:
+            return {}
+
+        rev_row = next(
+            (qi.loc[k] for k in ["Total Revenue", "Revenue"] if k in qi.index), None
+        )
+        ni_row = next(
+            (qi.loc[k] for k in ["Net Income", "Net Income Common Stockholders"] if k in qi.index), None
+        )
+
+        quarters = []
+        cols = (rev_row if rev_row is not None else ni_row)
+        if cols is None:
+            return {}
+        for col in cols.index[:8]:
+            rev = float(rev_row[col]) if rev_row is not None and pd.notna(rev_row.get(col)) else None
+            ni  = float(ni_row[col])  if ni_row  is not None and pd.notna(ni_row.get(col))  else None
+            quarters.append({"date": str(col)[:7], "revenue": rev, "net_income": ni})
+
+        # Nutzer-Forward-KGV: Preis / (4 × letzter Quartalsgewinn / Aktien)
+        user_fwd_pe  = None
+        annualized_eps = None
+        if quarters and quarters[0].get("net_income"):
+            try:
+                shares = stock.info.get("sharesOutstanding") or 0
+                price  = stock.info.get("currentPrice") or stock.info.get("regularMarketPrice") or 0
+                if shares > 0 and price > 0:
+                    q_eps        = quarters[0]["net_income"] / shares
+                    annualized_eps = q_eps * 4
+                    user_fwd_pe  = price / annualized_eps if annualized_eps > 0 else None
+            except Exception:
+                pass
+
+        return {
+            "quarters": quarters,            # neuestes zuerst
+            "user_fwd_pe": user_fwd_pe,
+            "annualized_eps": annualized_eps,
+        }
+    except Exception:
+        return {}
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -191,7 +253,7 @@ def _sector_etf_perf(etf: str) -> dict:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _rss_news(url: str, max_items: int = 5) -> list[dict]:
-    """Parsed einen RSS-Feed und gibt die neuesten Artikel zurück."""
+    """Parsed einen RSS-Feed und gibt die neuesten Artikel zurück (inkl. Beschreibung)."""
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "StillhalterApp/3.0"})
         if r.status_code != 200:
@@ -199,11 +261,15 @@ def _rss_news(url: str, max_items: int = 5) -> list[dict]:
         root = ET.fromstring(r.content)
         items = []
         for item in root.findall(".//item")[:max_items]:
-            title   = (item.findtext("title") or "").strip()
-            link    = (item.findtext("link") or "").strip()
-            pubdate = (item.findtext("pubDate") or "").strip()
+            title    = (item.findtext("title") or "").strip()
+            link     = (item.findtext("link") or "").strip()
+            pubdate  = (item.findtext("pubDate") or "").strip()
+            desc_raw = (item.findtext("description") or "").strip()
+            # HTML-Tags und Entities bereinigen
+            desc = _html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_raw))
+            desc = re.sub(r'\s+', ' ', desc).strip()[:600]
             if title:
-                items.append({"title": title, "link": link, "date": pubdate})
+                items.append({"title": title, "link": link, "date": pubdate, "description": desc})
         return items
     except Exception:
         return []
@@ -211,7 +277,7 @@ def _rss_news(url: str, max_items: int = 5) -> list[dict]:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _global_news(max_per_source: int = 4) -> list[dict]:
-    """Holt Top-Finanznews aus mehreren RSS-Quellen."""
+    """Holt Top-Finanznews aus mehreren RSS-Quellen (inkl. Beschreibung)."""
     all_items: list[dict] = []
     seen: set[str] = set()
     for source_name, url in GLOBAL_RSS_SOURCES:
@@ -222,11 +288,17 @@ def _global_news(max_per_source: int = 4) -> list[dict]:
             root = ET.fromstring(r.content)
             count = 0
             for item in root.findall(".//item"):
-                title = (item.findtext("title") or "").strip()
-                link  = (item.findtext("link") or "").strip()
+                title    = (item.findtext("title") or "").strip()
+                link     = (item.findtext("link") or "").strip()
+                desc_raw = (item.findtext("description") or "").strip()
+                desc = _html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_raw))
+                desc = re.sub(r'\s+', ' ', desc).strip()[:600]
                 if title and title not in seen:
                     seen.add(title)
-                    all_items.append({"title": title, "link": link, "source": source_name})
+                    all_items.append({
+                        "title": title, "link": link,
+                        "source": source_name, "description": desc,
+                    })
                     count += 1
                     if count >= max_per_source:
                         break
@@ -406,6 +478,42 @@ def _chg_icon(chg: float | None) -> str:
     return "▲" if chg >= 0 else "▼"
 
 
+def _fmt_large(val) -> str:
+    """Formatiert Umsatz/Gewinn-Zahlen als M/B/T."""
+    if val is None:
+        return "–"
+    try:
+        v = float(val)
+        if abs(v) >= 1e12:
+            return f"${v / 1e12:.1f}T"
+        if abs(v) >= 1e9:
+            return f"${v / 1e9:.1f}B"
+        if abs(v) >= 1e6:
+            return f"${v / 1e6:.0f}M"
+        return f"${v:.0f}"
+    except Exception:
+        return "–"
+
+
+def _trend_arrow(curr, prev) -> str:
+    """↑ wenn >+1 %, ↓ wenn <-1 %, sonst →"""
+    if curr is None or prev is None or prev == 0:
+        return ""
+    chg = (curr - prev) / abs(prev)
+    return "↑" if chg > 0.01 else ("↓" if chg < -0.01 else "→")
+
+
+def _detect_tickers_in_text(text: str, candidates: list[str]) -> list[str]:
+    """Erkennt Ticker-Symbole als ganzes Wort im Text (Case-insensitive)."""
+    text_upper = text.upper()
+    found: list[str] = []
+    for ticker in candidates:
+        pattern = r"\b" + re.escape(ticker) + r"\b"
+        if re.search(pattern, text_upper) and ticker not in found:
+            found.append(ticker)
+    return found
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # UI KOMPONENTEN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -523,6 +631,53 @@ def _render_stock_card(data: dict, strategy: str, show_options: bool) -> None:
                 f"📊 {val_label}</div>",
                 unsafe_allow_html=True,
             )
+
+            # ── Quartalszahlen + Nutzer-Forward-KGV ───────────────────────────
+            qt = _quarterly_financials(ticker)
+            if qt:
+                user_pe    = qt.get("user_fwd_pe")
+                ann_eps    = qt.get("annualized_eps")
+                qt_quarters = qt.get("quarters", [])
+
+                if user_pe is not None:
+                    fwd_html = (
+                        "<div style='margin-top:8px;font-size:0.8rem;color:#e2c97e'>"
+                        "<b>📊 Erw. KGV (4× letztes Quartal):</b> "
+                        + _fmt(user_pe, 1) + "x"
+                        + (" &nbsp;·&nbsp; Ann. EPS: $" + _fmt(ann_eps, 2) if ann_eps else "")
+                        + "</div>"
+                    )
+                    st.markdown(fwd_html, unsafe_allow_html=True)
+
+                if qt_quarters:
+                    st.markdown(
+                        "<div style='font-size:0.8rem;font-weight:600;"
+                        "margin-top:8px;margin-bottom:2px'>📈 Quartalstrend</div>",
+                        unsafe_allow_html=True,
+                    )
+                    qt_rows = []
+                    for qi, q in enumerate(qt_quarters[:6]):
+                        prev_q = qt_quarters[qi + 1] if qi + 1 < len(qt_quarters) else None
+                        rev_a  = _trend_arrow(
+                            q.get("revenue"),
+                            prev_q.get("revenue") if prev_q else None,
+                        )
+                        ni_a   = _trend_arrow(
+                            q.get("net_income"),
+                            prev_q.get("net_income") if prev_q else None,
+                        )
+                        qt_rows.append({
+                            "Quartal": q["date"],
+                            "Umsatz":  _fmt_large(q.get("revenue")) + (" " + rev_a if rev_a else ""),
+                            "Gewinn":  _fmt_large(q.get("net_income")) + (" " + ni_a if ni_a else ""),
+                        })
+                    if qt_rows:
+                        st.dataframe(
+                            pd.DataFrame(qt_rows),
+                            hide_index=True,
+                            use_container_width=True,
+                            height=min(len(qt_rows) * 35 + 42, 260),
+                        )
 
         # ── Technische Analyse ─────────────────────────────────────────────────
         st.markdown("---")
@@ -658,7 +813,9 @@ with st.spinner("Lade Marktdaten…"):
     fg  = _fear_greed()
 
 st.markdown("### 🌍 Marktüberblick")
+st.caption("Indizes · Index-Futures · Krypto · Rohstoffe — automatisch aktualisiert alle 15 Min.")
 
+# ── Zeile 1: Indizes + Rohstoffe/Anleihen ────────────────────────────────────
 idx_names = ["S&P 500", "NASDAQ", "DOW", "VIX"]
 all_cols  = st.columns(len(idx_names) + 3)
 for i, name in enumerate(idx_names):
@@ -671,6 +828,35 @@ for j, name in enumerate(["Gold", "Silber", "Bonds"]):
     p, c = d.get("price"), d.get("chg")
     delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
     all_cols[len(idx_names) + j].metric(name, _fmt(p, 2), delta_str)
+
+# ── Zeile 2: Index-Futures ────────────────────────────────────────────────────
+st.caption("📊 Index-Futures — Pre-/After-Market-Richtung (24h handelbar)")
+fut_map = {
+    "ES Futures":  "S&P 500 Fut.",
+    "NQ Futures":  "NASDAQ Fut.",
+    "YM Futures":  "DOW Fut.",
+    "RTY Futures": "Russell Fut.",
+}
+fut_cols = st.columns(4)
+for i, (key, label) in enumerate(fut_map.items()):
+    d = mkt.get(key, {})
+    p, c = d.get("price"), d.get("chg")
+    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
+    fut_cols[i].metric(label, _fmt(p, 0), delta_str)
+
+# ── Zeile 3: Krypto + Öl ─────────────────────────────────────────────────────
+st.caption("🪙 Krypto & Rohstoff")
+cry_map = {
+    "Bitcoin":  ("Bitcoin (BTC)", 0),
+    "Ethereum": ("Ethereum (ETH)", 2),
+    "Öl (WTI)": ("Öl WTI", 2),
+}
+cry_cols = st.columns(3)
+for i, (key, (label, dec)) in enumerate(cry_map.items()):
+    d = mkt.get(key, {})
+    p, c = d.get("price"), d.get("chg")
+    delta_str = f"{'+' if c and c>=0 else ''}{_fmt(c,2)}%" if c is not None else None
+    cry_cols[i].metric(label, _fmt(p, dec), delta_str)
 
 fg_score  = fg.get("score")
 fg_rating = fg.get("rating", "–")
@@ -709,8 +895,10 @@ _ALL_TICKERS = [t for s in SECTORS.values() for t in s["stocks"]]  # 33 Aktien
 
 with st.expander("🔄 Daten vorladen — für schnelle Analyse", expanded=False):
     st.markdown(
-        "Lädt Kurse, News, Fundamentals und TA aller 33 Aktien in den Cache. "
-        "Danach reagieren **Quick Catch-Up** und **Deep Dive** sofort — "
+        "Lädt Kurse, News, Fundamentals, TA **und Quartalszahlen** aller Aktien in den Cache.  \n"
+        "**Warum 33?** Der Newsletter deckt 11 GICS-Sektoren ab, "
+        "pro Sektor sind 3 Leitaktien definiert — macht 11 × 3 = **33 Aktien** insgesamt.  \n"
+        "Nach dem Vorladen reagieren **Quick Catch-Up** und **Deep Dive** sofort — "
         "genau wie der Watchlist Scanner nach einem Scan."
     )
 
@@ -739,8 +927,9 @@ with st.expander("🔄 Daten vorladen — für schnelle Analyse", expanded=False
                 f"Kurs, News, Fundamentals, TA (1M · 1W · 1D)"
             )
             try:
-                _stock_analysis(ticker)   # füllt @st.cache_data für alle Folge-Aufrufe
+                _stock_analysis(ticker)       # Kurs, News, Fundamentals, TA
                 _quick_price(ticker)
+                _quarterly_financials(ticker)  # Quartalszahlen + Forward-KGV
             except Exception as e:
                 errors.append(f"{ticker}: {e}")
             prog_bar.progress((i + 1) / n)
@@ -753,7 +942,8 @@ with st.expander("🔄 Daten vorladen — für schnelle Analyse", expanded=False
             )
         else:
             status_txt.success(
-                f"✅ Alle {n} Aktien geladen — Quick Catch-Up und Deep Dive sind jetzt sofort verfügbar!"
+                f"✅ Alle {n} Aktien geladen — Kurse, News, TA & Quartalszahlen im Cache. "
+                "Quick Catch-Up und Deep Dive sind jetzt sofort verfügbar!"
             )
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
@@ -772,14 +962,24 @@ if global_news:
         title  = item["title"]
         link   = item.get("link", "")
         source = item.get("source", "")
-        src_badge = f" <span style='font-size:0.72rem;color:#666'>· {source}</span>" if source else ""
+        desc   = item.get("description", "")
+        src_badge = (
+            "<span style='font-size:0.72rem;color:#666'> · " + source + "</span>"
+            if source else ""
+        )
         if link:
             st.markdown(
-                f"→ [{title}]({link}){src_badge}",
+                "→ **[" + title + "](" + link + ")**" + src_badge,
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(f"→ {title}")
+            st.markdown("→ **" + title + "**" + src_badge, unsafe_allow_html=True)
+        if desc:
+            st.markdown(
+                "<div style='font-size:0.79rem;color:#999;margin:-4px 0 10px 14px;"
+                "line-height:1.55'>" + desc[:420] + "</div>",
+                unsafe_allow_html=True,
+            )
 else:
     st.caption("Keine globalen News verfügbar — RSS-Quellen temporär nicht erreichbar.")
 
@@ -801,9 +1001,9 @@ for sname, sector in SECTORS.items():
     with st.spinner(f"Lade {sname}…"):
         etf_p    = _sector_etf_perf(etf)
         rss_etf  = _rss_news(sector["rss"], max_items=int(n_news_items))
-        # Aktien-spezifische News (kurz, für die Top-2 Aktien)
+        # Alle 3 GICS-Leitaktien des Sektors
         stock_items: list[dict] = []
-        for t in sector["stocks"][:2]:
+        for t in sector["stocks"]:
             pdata = _quick_price(t)
             stock_items.append(pdata)
 
@@ -834,19 +1034,57 @@ for sname, sector in SECTORS.items():
     col_news, col_stocks = st.columns([3, 2])
 
     with col_news:
-        # ETF-RSS-News
+        # ETF-RSS-News mit Zusammenfassung + Aktien-Erkennung
+        sector_tickers = sector["stocks"]
         if rss_etf:
             for item in rss_etf:
                 title = item["title"]
                 link  = item.get("link", "")
+                desc  = item.get("description", "")
+
+                # Titel als Link
                 if link:
-                    st.markdown(f"→ [{title}]({link})")
+                    st.markdown("→ **[" + title + "](" + link + ")**")
                 else:
-                    st.markdown(f"→ {title}")
+                    st.markdown("→ **" + title + "**")
+
+                # Zusammenfassung (aus RSS-Description)
+                if desc:
+                    st.markdown(
+                        "<div style='font-size:0.79rem;color:#999;"
+                        "margin:-4px 0 5px 14px;line-height:1.55'>"
+                        + desc[:400] + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # Erkennung ob eine Sektoraktie namentlich erwähnt wird
+                found = _detect_tickers_in_text(title + " " + desc, sector_tickers)
+                if found:
+                    ticker_badges = " · ".join(
+                        "<b>" + t + "</b>" for t in found
+                    )
+                    st.markdown(
+                        "<div style='font-size:0.76rem;color:#a8c5ff;"
+                        "margin:-2px 0 10px 14px;padding:3px 8px;"
+                        "background:rgba(100,150,255,0.09);border-radius:4px;"
+                        "border-left:2px solid #a8c5ff;display:inline-block'>"
+                        "💡 Aktie erwähnt: " + ticker_badges
+                        + " → Optionsempfehlung im Quick Catch-Up ↑ oder Deep Dive ↓</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        "<div style='height:6px'></div>",
+                        unsafe_allow_html=True,
+                    )
         else:
             st.caption("Keine RSS-News verfügbar.")
 
     with col_stocks:
+        st.caption(
+            "📌 Leitaktien dieses Sektors — 3 repräsentative Titel "
+            "gemäß GICS-Klassifikation. Vollanalyse → Deep Dive ↓"
+        )
         for pdata in stock_items:
             t    = pdata["ticker"]
             nm   = pdata["name"]
