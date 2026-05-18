@@ -7,7 +7,11 @@ import streamlit as st
 import pandas as pd
 import pickle
 import os
-from datetime import datetime
+import re
+import requests
+import xml.etree.ElementTree as ET
+import email.utils as _eutils
+from datetime import datetime, timedelta, date
 
 st.set_page_config(
     page_title="Trade Cards · Stillhalter AI App",
@@ -48,18 +52,16 @@ def _load_scan_cache() -> dict | None:
         return None
 
 
-def _fmt_expiry_trade(expiry) -> tuple[str, str]:
-    """Gibt (trading_notation, german_date) zurück. z.B. ("Mar20 '26", "20.03.2026")"""
+def _fmt_expiry_trade(expiry) -> tuple[str, str, int]:
+    """Gibt (trading_notation, german_date, dte_days) zurück."""
     try:
-        d = pd.to_datetime(expiry)
-        month_abbr = d.strftime("%b")   # "Mar"
-        day = str(d.day)                 # "20" (kein führendes 0)
-        year = d.strftime("'%y")         # "'26"
-        trade_str  = f"{month_abbr}{day} {year}"
+        d        = pd.to_datetime(expiry)
+        trade_str  = d.strftime("%b") + str(d.day) + " " + d.strftime("'%y")
         german_str = d.strftime("%d.%m.%Y")
-        return trade_str, german_str
+        dte        = max(0, (d.date() - date.today()).days)
+        return trade_str, german_str, dte
     except Exception:
-        return str(expiry), str(expiry)
+        return str(expiry), str(expiry), 0
 
 
 def _ath_pct(ticker: str, strike: float) -> float | None:
@@ -93,24 +95,61 @@ def _get_strategy_type(row: pd.Series) -> tuple[str, str]:
         return "PUT", "Short PUT"
 
 
-def _build_trend_note(row: pd.Series, otm_pct: float) -> str:
-    """Generiert automatisch die Absicherungs-Zeile."""
-    otm_str = _fmt_num(abs(otm_pct), 1)
-    parts = []
+def _get_sr_level(ticker: str, option_type: str, strike: float) -> str:
+    """Berechnet Support (PUT) oder Widerstand (CALL) aus 1-Jahres-Preishistorie."""
+    try:
+        hist = fetch_price_history(ticker, period="1y")
+        if hist.empty:
+            return ""
+        price_now = float(hist["Close"].iloc[-1])
 
-    # Trend aus TA-Spalten wenn vorhanden
+        if "PUT" in option_type.upper():
+            # Support: höchster Wert aus 52-W-Tief und 3-Monats-Tief
+            low_52w   = float(hist["Low"].min())
+            low_3m    = float(hist.tail(63)["Low"].min())
+            support   = max(low_52w, low_3m)           # nächste Unterstützung (höher = näher)
+            if support >= strike:                       # Support über dem Strike wäre irrelevant
+                support = low_52w
+            pct_below = (price_now - support) / price_now * 100
+            return (
+                "Unterstützung bei $" + f"{support:.0f}"
+                + " (" + f"{pct_below:.1f}" + "% unter Kurs)"
+                + " schützt den Strike"
+            )
+        else:
+            # Resistance: 52-Wochen-Hoch
+            high_52w     = float(hist["High"].max())
+            pct_above    = (high_52w - price_now) / price_now * 100
+            return (
+                "Widerstand bei $" + f"{high_52w:.0f}"
+                + " (ATH/52W-Hoch, +" + f"{pct_above:.1f}" + "% über Kurs)"
+                + " begrenzt Aufwärtsrisiko"
+            )
+    except Exception:
+        return ""
+
+
+def _build_trend_note(row: pd.Series, otm_pct: float, sr_note: str = "") -> str:
+    """Generiert automatisch die Absicherungs-Zeile inkl. Support/Widerstand."""
+    otm_str  = _fmt_num(abs(otm_pct), 1)
+    parts    = []
+
+    # Support/Widerstand zuerst — das ist die wichtigste Information
+    if sr_note:
+        parts.append(sr_note)
+
+    # Trend aus TA-Spalten
     sc_trend = str(row.get("SC Trend(1D)", "")).lower()
     macd     = str(row.get("MACD(1D)", "")).lower()
-    rsi_val  = str(row.get("RSI(1D)", ""))
 
     if "bull" in sc_trend or "↑" in sc_trend:
-        parts.append("Aktie im Aufwärtstrend")
+        parts.append("Aufwärtstrend")
     elif "bear" in sc_trend or "↓" in sc_trend:
-        parts.append("Übergeordneter Abwärtstrend — erhöhte Vorsicht")
+        parts.append("⚠️ Abwärtstrend — erhöhte Vorsicht")
     else:
-        parts.append("Neutrale Marktlage")
+        parts.append("neutrale Marktlage")
 
-    parts.append(f"Strike mit {otm_str}% Abstand zum Aktienkurs")
+    parts.append(f"Strike {otm_str}% OTM")
 
     if "bull" in macd or "cross" in macd:
         parts.append("MACD bullish")
@@ -119,20 +158,59 @@ def _build_trend_note(row: pd.Series, otm_pct: float) -> str:
     if earnings:
         parts.append(f"⚠️ Earnings: {earnings}")
 
-    return ", ".join(parts)
+    return " · ".join(parts)
 
 
-def _extract_news_headlines(fundamentals: dict, n: int = 3) -> str:
-    """Extrahiert die Top-N News-Headlines als formatierten String."""
-    news_list = fundamentals.get("news", [])
-    if not news_list:
-        return "Keine aktuellen News verfügbar."
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_ticker_news_rss(ticker: str, n: int = 5, max_age_hours: int = 48) -> list[dict]:
+    """Holt aktuelle News via Yahoo Finance RSS (max. max_age_hours alt)."""
+    url    = f"https://finance.yahoo.com/rss/headline?s={ticker}"
+    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+    items  = []
+    try:
+        r = requests.get(url, timeout=8, headers={"User-Agent": "StillhalterApp/3.0"})
+        if r.status_code != 200:
+            return []
+        root = ET.fromstring(r.content)
+        for item in root.findall(".//item"):
+            title   = (item.findtext("title")   or "").strip()
+            link    = (item.findtext("link")    or "").strip()
+            pubdate = (item.findtext("pubDate") or "").strip()
+            if not title:
+                continue
+            pub_dt: datetime | None = None
+            if pubdate:
+                try:
+                    t = _eutils.parsedate(pubdate)
+                    if t:
+                        pub_dt = datetime(*t[:6])
+                except Exception:
+                    pass
+            if pub_dt and pub_dt < cutoff:
+                continue
+            age_str = ""
+            if pub_dt:
+                age_h = int((datetime.utcnow() - pub_dt).total_seconds() / 3600)
+                age_str = ("gerade" if age_h < 1
+                           else f"vor {age_h} Std." if age_h < 24
+                           else "gestern")
+            items.append({"title": title, "link": link,
+                          "pub_dt": pub_dt, "age": age_str})
+        items.sort(key=lambda x: x.get("pub_dt") or datetime.min, reverse=True)
+    except Exception:
+        pass
+    return items[:n]
+
+
+def _format_news_text(items: list[dict]) -> str:
+    """Formatiert RSS-News-Liste als Text für die Trade Card."""
+    if not items:
+        return "Keine aktuellen News in den letzten 48 Stunden."
     lines = []
-    for item in news_list[:n]:
-        title = item.get("title", "").strip()
-        if title:
-            lines.append(f"→ {title}")
-    return "\n".join(lines) if lines else "Keine aktuellen News verfügbar."
+    for it in items:
+        age = f" [{it['age']}]" if it.get("age") else ""
+        lines.append(f"→ {it['title']}{age}")
+    return "\n".join(lines)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -152,6 +230,7 @@ def _build_card_text(
     strategie: str,
     ath_dist: float | None,
     german_exp: str,
+    dte: int,
     trend_note: str,
     background: str,
     news_text: str,
@@ -159,7 +238,8 @@ def _build_card_text(
     """Generiert den kompletten WhatsApp-Text einer Trade Card."""
 
     premium_total = round(premium * 100)
-    ath_str = f" (-{_fmt_num(ath_dist, 0)}% unten ATH)" if ath_dist else ""
+    ath_str   = f" (-{_fmt_num(ath_dist, 0)}% unten ATH)" if ath_dist else ""
+    dte_str   = f" ({dte} Tage)" if dte else ""
 
     lines = [
         "Aus Sicht der Technischen Analyse finde ich folgende Optionen spannend:",
@@ -170,7 +250,7 @@ def _build_card_text(
         f"📈 Rendite: ~{_fmt_num(rendite_lz)} %",
         f"📉 Strategie: {strategie}",
         f"🎯 Strike: {strike:.0f} USD{ath_str}",
-        f"📅 Laufzeit: {german_exp}",
+        f"📅 Laufzeit: {german_exp}{dte_str}",
         f"🛡️ Absicherung: {trend_note}",
         "",
         f"🔍 Underlying Background {ticker}:",
@@ -262,25 +342,27 @@ for idx, row in top_df.iterrows():
     otm_pct  = float(row.get("OTM %", 0))
     crv      = float(row.get("CRV Score", 0)) if "CRV Score" in row else 0.0
 
-    option_type, strategie = _get_strategy_type(row)
-    trade_exp, german_exp  = _fmt_expiry_trade(expiry)
-    trend_note_auto        = _build_trend_note(row, otm_pct)
+    option_type, strategie       = _get_strategy_type(row)
+    trade_exp, german_exp, dte   = _fmt_expiry_trade(expiry)
+    sr_note                      = _get_sr_level(ticker, option_type, strike)
+    trend_note_auto              = _build_trend_note(row, otm_pct, sr_note)
 
     rank_icon = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][idx]
 
     with st.expander(
-        f"{rank_icon} **{ticker}** — {trade_exp} @{strike:.0f} {option_type} · Prämie {_fmt_num(premium)} USD · CRV {crv:.0f}",
+        f"{rank_icon} **{ticker}** — {trade_exp} @{strike:.0f} {option_type} · "
+        f"Prämie {_fmt_num(premium)} USD · {dte} Tage · CRV {crv:.0f}",
         expanded=(idx == 0),
     ):
-        # ── Stock-Daten laden ──────────────────────────────────────────────
-        with st.spinner(f"Lade Daten für {ticker}..."):
-            stock_data = _cached_stock_data(ticker)
-            info  = stock_data["info"]
-            fund  = stock_data["fund"]
+        # ── Stock-Daten + News laden ───────────────────────────────────────
+        with st.spinner(f"Lade Daten & News für {ticker}…"):
+            stock_data  = _cached_stock_data(ticker)
+            info        = stock_data["info"]
+            rss_items   = _fetch_ticker_news_rss(ticker, n=int(news_count))
 
         company_name = info.get("name", ticker)
         eng_desc     = (info.get("description") or "").strip()
-        news_auto    = _extract_news_headlines(fund, int(news_count))
+        news_auto    = _format_news_text(rss_items)
         ath_pct_val  = _ath_pct(ticker, strike)
 
         # ── Editierbare Felder ─────────────────────────────────────────────
@@ -337,7 +419,7 @@ for idx, row in top_df.iterrows():
 |---|---|
 | **Strategie** | {strategie} |
 | **Strike** | ${strike:.0f} |
-| **{option_type}-Verfall** | {german_exp} |
+| **{option_type}-Verfall** | {german_exp} ({dte} Tage) |
 | **Prämie** | {_fmt_num(premium)} USD |
 | **Gesamt (1x)** | {round(premium*100)} USD |
 | **Rendite LZ** | {_fmt_num(rendite)} % |
@@ -357,6 +439,7 @@ for idx, row in top_df.iterrows():
             strategie=strategie,
             ath_dist=ath_pct_val,
             german_exp=german_exp,
+            dte=dte,
             trend_note=trend_note,
             background=background,
             news_text=news_text,
