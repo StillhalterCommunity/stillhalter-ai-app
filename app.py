@@ -29,22 +29,32 @@ if "auth_user" not in st.session_state:
     st.session_state.auth_user = ""
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
+if "app_theme" not in st.session_state:
+    st.session_state.app_theme = "dark"
 
 if not st.session_state.authenticated:
     # Zentriertes Login-Fenster
     _, center, _ = st.columns([1, 2, 1])
     with center:
+        _lt = st.session_state.get("app_theme", "dark")
+        _login_bg     = "#ffffff"    if _lt == "green" else "#111"
+        _login_border = "#b7e4c7"    if _lt == "green" else "#1e1e1e"
+        _login_top    = "#2d6a4f"    if _lt == "green" else "#d4a843"
+        _login_title  = "#0d2318"    if _lt == "green" else "#f0f0f0"
+        _login_sub    = "#94a3b8"    if _lt == "green" else "#555"
+        _logo_v       = "black"      if _lt == "green" else "white"
         st.html(f"""
 <div style='text-align:center;margin:60px 0 32px 0'>
-    {get_logo_html("white", 56)}
+    {get_logo_html(_logo_v, 56)}
 </div>
-<div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
-            border-radius:14px;padding:32px 36px;'>
+<div style='background:{_login_bg};border:1px solid {_login_border};
+            border-top:3px solid {_login_top};border-radius:14px;padding:32px 36px;
+            box-shadow:0 8px 32px rgba(0,0,0,.12)'>
     <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.4rem;
-                color:#f0f0f0;letter-spacing:0.05em;margin-bottom:4px'>
+                color:{_login_title};letter-spacing:0.05em;margin-bottom:4px'>
         STILLHALTER AI APP
     </div>
-    <div style='font-family:RedRose,sans-serif;font-size:0.78rem;color:#555;
+    <div style='font-family:RedRose,sans-serif;font-size:0.78rem;color:{_login_sub};
                 letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px'>
         Beta-Zugang · Bitte Passwort eingeben
     </div>
@@ -154,6 +164,40 @@ st.html('<div class="gold-line"></div>')
 
 # ── System-Steuerung ───────────────────────────────────────────────────────────
 with st.expander("⚙️ System", expanded=False):
+
+    # ── Theme-Umschalter ──────────────────────────────────────────────────────
+    current_theme = st.session_state.get("app_theme", "dark")
+    th_label = "🌙 Dark · Schwarz/Gold" if current_theme == "dark" else "🌿 Hell · Grün/Weiß"
+    st.markdown(
+        f"<div style='font-size:0.75rem;color:#888;letter-spacing:0.08em;"
+        f"text-transform:uppercase;margin-bottom:6px'>Aktives Theme: <b>{th_label}</b></div>",
+        unsafe_allow_html=True,
+    )
+    t1, t2, _tpad = st.columns([2, 2, 8])
+    with t1:
+        dark_active = current_theme == "dark"
+        if st.button(
+            "🌙 Dark" + (" ✓" if dark_active else ""),
+            use_container_width=True,
+            type="primary" if dark_active else "secondary",
+            help="Schwarz + Gold — klassisches Stillhalter-Design",
+        ):
+            st.session_state.app_theme = "dark"
+            st.rerun()
+    with t2:
+        green_active = current_theme == "green"
+        if st.button(
+            "🌿 Grün" + (" ✓" if green_active else ""),
+            use_container_width=True,
+            type="primary" if green_active else "secondary",
+            help="Weiß + Grün — Landingpage-Palette",
+        ):
+            st.session_state.app_theme = "green"
+            st.rerun()
+
+    st.divider()
+
+    # ── App-Steuerung ─────────────────────────────────────────────────────────
     sc1, sc2, sc3, sc4, _ = st.columns([2, 2, 2, 2, 4])
     with sc1:
         if st.button("🔄 App neu starten", use_container_width=True,
