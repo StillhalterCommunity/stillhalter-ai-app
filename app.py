@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 st.set_page_config(
-    page_title="Stillhalter AI App Dashboard",
+    page_title="Stillhalter AI — Börsen Briefing & Optionsflow",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -169,7 +169,7 @@ with col_title:
     st.html(
         f"<div style='padding-top:6px'>"
         f"<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:2rem;"
-        f"color:{_title_color};letter-spacing:0.04em'>STILLHALTER AI APP</div>"
+        f"color:{_title_color};letter-spacing:0.04em'>Stillhalter AI — Börsen Briefing &amp; Optionsflow</div>"
         f"<div style='font-family:RedRose,sans-serif;font-weight:300;font-size:0.8rem;"
         f"color:{_sub_color};text-transform:uppercase;letter-spacing:0.15em;margin-top:2px'>"
         f"Options Trading Dashboard &nbsp;·&nbsp; <span class='{mkt_class}'>{market_status_text()}</span>"
