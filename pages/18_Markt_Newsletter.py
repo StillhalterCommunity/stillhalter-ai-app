@@ -455,6 +455,47 @@ def _best_option(ticker: str, dte_min: int, dte_max: int, strategy: str = "Cash 
         return None
 
 
+def _opt_confirmed(opt: dict | None, kind: str) -> bool:
+    """Prüft Indikatoren: zeige Option nur wenn Mindest-Kriterien erfüllt."""
+    if not opt:
+        return False
+    r   = opt.get("rendite", 0)
+    d   = abs(opt.get("delta", 0))
+    otm = opt.get("otm", 0)
+    dte = max(opt.get("dte", 1), 1)
+    if kind == "wk":
+        return r >= 0.3 and d >= 0.05          # Mindest-Rendite + echtes Delta
+    if kind == "mo":
+        return r >= 0.4 and otm >= 1.5          # Rendite + genug OTM-Puffer
+    # yr: annualisierte Rendite ≥ 4 % + deutlich OTM
+    return (r * 365 / dte) >= 4.0 and otm >= 5.0
+
+
+def _opt_row_html(label: str, opt: dict | None, confirmed: bool) -> str:
+    """Rendert eine Zeile für Woche/Monat/Jahr im Stillhalter-Take."""
+    if not confirmed:
+        return (
+            "<div style='font-size:0.76rem;color:#444;margin:2px 0'>"
+            "<span style='display:inline-block;width:96px;color:#4a4a4a'>" + label + "</span>"
+            "kein Setup bestätigt</div>"
+        )
+    try:
+        exp_d = pd.to_datetime(opt["expiry"]).strftime("%d.%m.%y")
+    except Exception:
+        exp_d = str(opt["expiry"])
+    return (
+        "<div style='font-size:0.76rem;margin:2px 0'>"
+        "<span style='display:inline-block;width:96px;color:#888'>" + label + "</span>"
+        "<span style='color:#22c55e'>✓ </span>"
+        "Strike <b style='color:#e2c97e'>$" + f"{opt['strike']:.0f}" + "</b>"
+        " · Verfall " + exp_d
+        + " · Prämie <b>$" + _fmt(opt["premium"]) + "</b>"
+        + " · Rendite <b style='color:#22c55e'>" + _fmt(opt["rendite"]) + "%</b>"
+        + " · Δ " + f"{opt['delta']:.2f}"
+        + "</div>"
+    )
+
+
 def _fmt(val, dec=2, suffix="") -> str:
     if val is None:
         return "–"
@@ -968,13 +1009,17 @@ if global_news:
             _top10_ticker_map[_ni] = _found[0]
 
     _top10_prices: dict[str, dict] = {}
-    _top10_opts:   dict[str, dict | None] = {}
+    _top10_opts:   dict[str, dict] = {}   # {ticker: {"wk":…, "mo":…, "yr":…}}
     _unique_t10 = list(set(_top10_ticker_map.values()))
     if _unique_t10:
-        with st.spinner("Lade Kurse & Optionen für erwähnte Aktien…"):
+        with st.spinner("Lade Kurse & Optionen (Woche/Monat/Jahr) für erwähnte Aktien…"):
             for _t in _unique_t10:
                 _top10_prices[_t] = _quick_price(_t)
-                _top10_opts[_t]   = _best_option(_t, 20, 45, nl_strategy)
+                _top10_opts[_t] = {
+                    "wk": _best_option(_t,  3,   9, nl_strategy),
+                    "mo": _best_option(_t, 20,  45, nl_strategy),
+                    "yr": _best_option(_t, 90, 365, nl_strategy),
+                }
 
     # ── News-Karten rendern ───────────────────────────────────────────────────
     for ni, item in enumerate(top10):
@@ -1003,37 +1048,31 @@ if global_news:
                     + "( " + t_icon + " " + f"{abs(chg):.2f}%" + " )</span>"
                 )
 
-        # Stillhalter-Take
+        # ── Stillhalter-Take (Woche / Monat / Jahr — indikatorgeprüft) ──────────
         take_html = ""
         if t_key:
-            opt = _top10_opts.get(t_key)
-            if opt:
-                try:
-                    exp_d = pd.to_datetime(opt["expiry"]).strftime("%d.%m.")
-                except Exception:
-                    exp_d = str(opt["expiry"])
-                take_html = (
-                    "<div style='font-size:0.82rem;color:#a8c5ff;"
-                    "margin-top:7px;padding-top:6px;"
-                    "border-top:1px solid rgba(255,255,255,0.06)'>"
-                    "👉 <b>Stillhalter-Take:</b> "
-                    + nl_strategy + " · Strike $" + f"{opt['strike']:.0f}"
-                    + " · Verfall " + exp_d
-                    + " · Prämie <b>$" + _fmt(opt["premium"]) + "</b>"
-                    + " (" + str(round(opt["premium"] * 100)) + " USD)"
-                    + " · Rendite <b>" + _fmt(opt["rendite"]) + "%</b>"
-                    + " · Δ " + f"{opt['delta']:.2f}"
-                    + "</div>"
-                )
-            else:
-                take_html = (
-                    "<div style='font-size:0.82rem;color:#a8c5ff;"
-                    "margin-top:7px;padding-top:6px;"
-                    "border-top:1px solid rgba(255,255,255,0.06)'>"
-                    "👉 <b>Stillhalter-Take:</b> Kein passendes " + nl_strategy
-                    + "-Setup für " + t_key + " aktuell gefunden."
-                    + "</div>"
-                )
+            _trio  = _top10_opts.get(t_key, {})
+            _o_wk  = _trio.get("wk")
+            _o_mo  = _trio.get("mo")
+            _o_yr  = _trio.get("yr")
+            _c_wk  = _opt_confirmed(_o_wk, "wk")
+            _c_mo  = _opt_confirmed(_o_mo, "mo")
+            _c_yr  = _opt_confirmed(_o_yr, "yr")
+            _rows  = (
+                _opt_row_html("📅 Woche (3-9d)",    _o_wk, _c_wk)
+                + _opt_row_html("📅 Monat (20-45d)", _o_mo, _c_mo)
+                + _opt_row_html("📅 Jahr (90-365d)", _o_yr, _c_yr)
+            )
+            take_html = (
+                "<div style='margin-top:9px;padding-top:7px;"
+                "border-top:1px solid rgba(255,255,255,0.07)'>"
+                "<div style='font-size:0.8rem;color:#a8c5ff;"
+                "font-weight:600;margin-bottom:5px'>"
+                "👉 " + nl_strategy + " · $" + t_key + " Trading-Ideen:"
+                "</div>"
+                + _rows
+                + "</div>"
+            )
 
         # Title-Link
         if link:
@@ -1056,8 +1095,10 @@ if global_news:
             + emoji + " " + title_html + ticker_badge_html + src_html
             + "</div>"
             + (
-                "<div style='font-size:0.83rem;color:#bbb;line-height:1.6;margin-bottom:4px'>"
-                + desc_de[:460] + "</div>"
+                "<div style='font-size:0.83rem;color:#bbb;line-height:1.65;"
+                "margin:6px 0 4px 0'>"
+                + (desc_de[:550].rsplit(" ", 1)[0] + " …" if len(desc_de) > 550 else desc_de)
+                + "</div>"
                 if desc_de else ""
             )
             + take_html
