@@ -15,7 +15,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import email.utils as _eutils
 
 st.set_page_config(
     page_title="Markt Newsletter · Stillhalter AI App",
@@ -250,33 +251,54 @@ def _sector_etf_perf(etf: str) -> dict:
         return {}
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def _rss_news(url: str, max_items: int = 5) -> list[dict]:
-    """Parsed einen RSS-Feed und gibt die neuesten Artikel zurück (inkl. Beschreibung)."""
+@st.cache_data(ttl=300, show_spinner=False)
+def _rss_news(url: str, max_items: int = 5, max_age_hours: int = 48) -> list[dict]:
+    """RSS-Feed parsen — nur Artikel der letzten max_age_hours Stunden."""
+    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "StillhalterApp/3.0"})
         if r.status_code != 200:
             return []
         root = ET.fromstring(r.content)
         items = []
-        for item in root.findall(".//item")[:max_items]:
+        for item in root.findall(".//item"):
             title    = (item.findtext("title") or "").strip()
             link     = (item.findtext("link") or "").strip()
             pubdate  = (item.findtext("pubDate") or "").strip()
             desc_raw = (item.findtext("description") or "").strip()
-            # HTML-Tags und Entities bereinigen
             desc = _html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_raw))
             desc = re.sub(r'\s+', ' ', desc).strip()[:600]
-            if title:
-                items.append({"title": title, "link": link, "date": pubdate, "description": desc})
-        return items
+            if not title:
+                continue
+            # Datum parsen (RFC 2822)
+            pub_dt: datetime | None = None
+            age_h:  int | None = None
+            if pubdate:
+                try:
+                    t = _eutils.parsedate(pubdate)
+                    if t:
+                        pub_dt = datetime(*t[:6])        # naive UTC
+                        age_h  = int((datetime.utcnow() - pub_dt).total_seconds() / 3600)
+                except Exception:
+                    pass
+            # Zu alt? Überspringen
+            if pub_dt and pub_dt < cutoff:
+                continue
+            items.append({
+                "title": title, "link": link, "date": pubdate,
+                "description": desc, "pub_dt": pub_dt, "age_h": age_h,
+            })
+        # Neueste zuerst
+        items.sort(key=lambda x: x.get("pub_dt") or datetime.min, reverse=True)
+        return items[:max_items]
     except Exception:
         return []
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def _global_news(max_per_source: int = 4) -> list[dict]:
-    """Holt Top-Finanznews aus mehreren RSS-Quellen (inkl. Beschreibung)."""
+@st.cache_data(ttl=300, show_spinner=False)
+def _global_news(max_per_source: int = 4, max_age_hours: int = 48) -> list[dict]:
+    """Top-Finanznews aus mehreren RSS-Quellen — max. max_age_hours alt."""
+    cutoff    = datetime.utcnow() - timedelta(hours=max_age_hours)
     all_items: list[dict] = []
     seen: set[str] = set()
     for source_name, url in GLOBAL_RSS_SOURCES:
@@ -289,20 +311,56 @@ def _global_news(max_per_source: int = 4) -> list[dict]:
             for item in root.findall(".//item"):
                 title    = (item.findtext("title") or "").strip()
                 link     = (item.findtext("link") or "").strip()
+                pubdate  = (item.findtext("pubDate") or "").strip()
                 desc_raw = (item.findtext("description") or "").strip()
                 desc = _html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_raw))
                 desc = re.sub(r'\s+', ' ', desc).strip()[:600]
-                if title and title not in seen:
-                    seen.add(title)
-                    all_items.append({
-                        "title": title, "link": link,
-                        "source": source_name, "description": desc,
-                    })
-                    count += 1
-                    if count >= max_per_source:
-                        break
+                if not title or title in seen:
+                    continue
+                pub_dt: datetime | None = None
+                age_h:  int | None = None
+                if pubdate:
+                    try:
+                        t = _eutils.parsedate(pubdate)
+                        if t:
+                            pub_dt = datetime(*t[:6])
+                            age_h  = int((datetime.utcnow() - pub_dt).total_seconds() / 3600)
+                    except Exception:
+                        pass
+                if pub_dt and pub_dt < cutoff:
+                    continue
+                seen.add(title)
+                all_items.append({
+                    "title": title, "link": link, "source": source_name,
+                    "description": desc, "pub_dt": pub_dt, "age_h": age_h,
+                })
+                count += 1
+                if count >= max_per_source:
+                    break
         except Exception:
             continue
+    all_items.sort(key=lambda x: x.get("pub_dt") or datetime.min, reverse=True)
+    return all_items
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _sector_stock_news(tickers: tuple, max_age_hours: int = 48,
+                       max_per_ticker: int = 3) -> list[dict]:
+    """Aktuelle Aktien-News (< max_age_hours) für konkrete Ticker-RSS-Feeds."""
+    all_items: list[dict] = []
+    seen: set[str] = set()
+    for ticker in tickers:
+        items = _rss_news(_stock_rss_url(ticker),
+                          max_items=max_per_ticker + 2,   # etwas mehr holen, dann filtern
+                          max_age_hours=max_age_hours)
+        for it in items:
+            key = it["title"][:70]
+            if key not in seen:
+                seen.add(key)
+                it["ticker"] = ticker          # Quelle bekannt
+                all_items.append(it)
+    # Neueste zuerst, dann auf max_per_ticker * len(tickers) begrenzen
+    all_items.sort(key=lambda x: x.get("pub_dt") or datetime.min, reverse=True)
     return all_items
 
 
@@ -1115,8 +1173,8 @@ st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("### 📊 Sektoren-News")
 st.caption(
-    "11 Sektoren · RSS-News je ETF + Aktien-News je Sektor · "
-    "Kurse und TA auf Knopfdruck im Deep Dive."
+    "11 Sektoren · Nur Aktien-News (heute & gestern, max. 48h) · "
+    "3 Trading-Ideen je Aktie · Kurse im Deep Dive."
 )
 
 for sname, sector in SECTORS.items():
@@ -1124,13 +1182,26 @@ for sname, sector in SECTORS.items():
     color = sector["color"]
 
     with st.spinner(f"Lade {sname}…"):
-        etf_p    = _sector_etf_perf(etf)
-        rss_etf  = _rss_news(sector["rss"], max_items=int(n_news_items))
-        # Alle 3 GICS-Leitaktien des Sektors
+        etf_p      = _sector_etf_perf(etf)
+        # Aktien-spezifische News (heute + gestern, max 48h)
+        stock_news = _sector_stock_news(
+            tuple(sector["stocks"]),
+            max_age_hours=48,
+            max_per_ticker=int(n_news_items),
+        )
+        # Kurse & Optionen für alle 3 Sektor-Aktien vorladen
         stock_items: list[dict] = []
+        _sec_prices: dict[str, dict] = {}
+        _sec_opts:   dict[str, dict] = {}
         for t in sector["stocks"]:
             pdata = _quick_price(t)
             stock_items.append(pdata)
+            _sec_prices[t] = pdata
+            _sec_opts[t] = {
+                "wk": _best_option(t,  3,   9, nl_strategy),
+                "mo": _best_option(t, 20,  45, nl_strategy),
+                "yr": _best_option(t, 90, 365, nl_strategy),
+            }
 
     d1  = etf_p.get("1d")
     d7  = etf_p.get("1w")
@@ -1159,48 +1230,45 @@ for sname, sector in SECTORS.items():
     col_news, col_stocks = st.columns([3, 2])
 
     with col_news:
-        # ETF-RSS-News im Morning-Crunch-Stil, auf Deutsch, mit Optionen bei Ticker-Erwähnung
-        sector_tickers = sector["stocks"]
-        if rss_etf:
-            # Tickers vorab erkennen & Optionen laden
-            _sec_ticker_map: dict[int, str] = {}
-            for _si, _si_item in enumerate(rss_etf):
-                _sf = _detect_tickers_in_text(
-                    _si_item["title"] + " " + _si_item.get("description", ""),
-                    sector_tickers,
-                )
-                if _sf:
-                    _sec_ticker_map[_si] = _sf[0]
-
-            _sec_opts: dict[str, dict | None] = {}
-            _sec_prices: dict[str, dict] = {}
-            for _t in set(_sec_ticker_map.values()):
-                _sec_opts[_t]   = _best_option(_t, 20, 45, nl_strategy)
-                _sec_prices[_t] = _quick_price(_t)
-
-            for si, item in enumerate(rss_etf):
-                title = item["title"]
-                link  = item.get("link", "")
-                desc  = item.get("description", "")
-                emoji = _news_emoji(title)
-                s_t   = _sec_ticker_map.get(si)
+        if stock_news:
+            for item in stock_news:
+                s_t      = item.get("ticker", "")
+                title    = item["title"]
+                link     = item.get("link", "")
+                desc     = item.get("description", "")
+                age_h    = item.get("age_h")
+                emoji    = _news_emoji(title)
 
                 title_de = _translate_de(title)
                 desc_de  = _translate_de(desc) if desc else ""
 
-                ticker_badge = ""
-                if s_t:
-                    pdata = _sec_prices.get(s_t, {})
-                    chg   = pdata.get("chg")
-                    if chg is not None:
-                        tc = "#22c55e" if chg >= 0 else "#ef4444"
-                        ti = "▲" if chg >= 0 else "▼"
-                        ticker_badge = (
-                            " <span style='color:#e2c97e;font-weight:700'>$" + s_t + "</span>"
-                            + " <span style='color:" + tc + ";font-size:0.8rem'>( "
-                            + ti + " " + f"{abs(chg):.2f}%" + " )</span>"
-                        )
+                # Alter-Badge
+                if age_h is None:
+                    age_badge = ""
+                elif age_h < 1:
+                    age_badge = "<span style='color:#22c55e;font-size:0.7rem'>● gerade eben</span> "
+                elif age_h < 24:
+                    age_badge = "<span style='color:#22c55e;font-size:0.7rem'>● vor " + str(age_h) + " Std.</span> "
+                else:
+                    age_badge = "<span style='color:#f59e0b;font-size:0.7rem'>● gestern</span> "
 
+                # Ticker-Badge mit Kurs
+                pdata = _sec_prices.get(s_t, {})
+                chg   = pdata.get("chg")
+                if chg is not None and s_t:
+                    tc = "#22c55e" if chg >= 0 else "#ef4444"
+                    ti = "▲" if chg >= 0 else "▼"
+                    ticker_badge = (
+                        " <span style='color:#e2c97e;font-weight:700'>$" + s_t + "</span>"
+                        + " <span style='color:" + tc + ";font-size:0.8rem'>( "
+                        + ti + " " + f"{abs(chg):.2f}%" + " )</span>"
+                    )
+                elif s_t:
+                    ticker_badge = " <span style='color:#e2c97e;font-weight:700'>$" + s_t + "</span>"
+                else:
+                    ticker_badge = ""
+
+                # Titel-Link
                 if link:
                     title_lnk = (
                         "<a href='" + link + "' target='_blank' "
@@ -1210,37 +1278,37 @@ for sname, sector in SECTORS.items():
                 else:
                     title_lnk = "<strong style='color:#e8dcc8'>" + title_de + "</strong>"
 
+                # Stillhalter-Take (3 DTE)
                 take_part = ""
-                if s_t:
-                    opt = _sec_opts.get(s_t)
-                    if opt:
-                        try:
-                            exp_d2 = pd.to_datetime(opt["expiry"]).strftime("%d.%m.")
-                        except Exception:
-                            exp_d2 = str(opt["expiry"])
-                        take_part = (
-                            "<div style='font-size:0.78rem;color:#a8c5ff;margin-top:5px'>"
-                            "👉 <b>Stillhalter-Take:</b> "
-                            + nl_strategy + " Strike $" + f"{opt['strike']:.0f}"
-                            + " · " + exp_d2
-                            + " · Prämie $" + _fmt(opt["premium"])
-                            + " · Rendite <b>" + _fmt(opt["rendite"]) + "%</b>"
-                            + "</div>"
-                        )
-                    else:
-                        take_part = (
-                            "<div style='font-size:0.78rem;color:#666;margin-top:5px'>"
-                            "👉 Kein Setup für " + s_t + " gefunden."
-                            + "</div>"
-                        )
+                if s_t and s_t in _sec_opts:
+                    _trio = _sec_opts[s_t]
+                    _o_wk = _trio.get("wk"); _c_wk = _opt_confirmed(_o_wk, "wk")
+                    _o_mo = _trio.get("mo"); _c_mo = _opt_confirmed(_o_mo, "mo")
+                    _o_yr = _trio.get("yr"); _c_yr = _opt_confirmed(_o_yr, "yr")
+                    _rows = (
+                        _opt_row_html("📅 Woche",  _o_wk, _c_wk)
+                        + _opt_row_html("📅 Monat", _o_mo, _c_mo)
+                        + _opt_row_html("📅 Jahr",  _o_yr, _c_yr)
+                    )
+                    take_part = (
+                        "<div style='margin-top:7px;padding-top:6px;"
+                        "border-top:1px solid rgba(255,255,255,0.06)'>"
+                        "<div style='font-size:0.78rem;color:#a8c5ff;"
+                        "font-weight:600;margin-bottom:4px'>"
+                        "👉 " + nl_strategy + " · $" + s_t + " Trading-Ideen:"
+                        "</div>" + _rows + "</div>"
+                    )
 
                 st.markdown(
                     "<div style='padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05)'>"
+                    "<div style='font-size:0.82rem;margin-bottom:3px'>" + age_badge + "</div>"
                     "<div style='font-size:0.93rem'>"
                     + emoji + " " + title_lnk + ticker_badge + "</div>"
                     + (
-                        "<div style='font-size:0.79rem;color:#bbb;line-height:1.55;"
-                        "margin:4px 0'>" + desc_de[:360] + "</div>"
+                        "<div style='font-size:0.79rem;color:#bbb;line-height:1.58;"
+                        "margin:5px 0 3px 0'>"
+                        + (desc_de[:480].rsplit(" ", 1)[0] + " …" if len(desc_de) > 480 else desc_de)
+                        + "</div>"
                         if desc_de else ""
                     )
                     + take_part
@@ -1248,7 +1316,7 @@ for sname, sector in SECTORS.items():
                     unsafe_allow_html=True,
                 )
         else:
-            st.caption("Keine RSS-News verfügbar.")
+            st.caption("📭 Keine aktuellen Aktien-News in den letzten 48 Stunden.")
 
     with col_stocks:
         st.caption(
