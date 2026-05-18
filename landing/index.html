@@ -273,8 +273,11 @@
     /* ────────────────── Feature cards ─────────────────────── */
     .features {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      grid-template-columns: repeat(3, 1fr);
       gap: 18px; max-width: 1000px; margin: 0 auto;
+    }
+    @media (max-width: 700px) {
+      .features { grid-template-columns: 1fr; }
     }
     .feature-card {
       background: #fff; border: 1px solid var(--g200);
@@ -573,8 +576,8 @@
       <div class="feat-icon">🎯</div>
       <div class="feat-title">Für Stillhalter gemacht</div>
       <div class="feat-desc">
-        Kein allgemeines Börsen-Blabla. Jede Trading-Idee ist auf Prämienstrategien
-        ausgerichtet — Short Puts, Cash Covered Puts, Covered Calls.
+        Kein allgemeines Börsen-Blabla. Jede Trading-Idee ist auf
+        Prämienstrategien ausgerichtet — Short Puts, Cash Covered Puts, Covered Calls.
       </div>
     </div>
   </div>
