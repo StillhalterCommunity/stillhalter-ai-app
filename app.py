@@ -298,6 +298,52 @@ elif _pl["last_update"]:
 st.html("<div style='margin-bottom:8px'></div>")
 
 # ══════════════════════════════════════════════════════════════════════════════
+# AUTO-SCAN beim App-Start — startet einmal pro Session wenn Cache veraltet
+# ══════════════════════════════════════════════════════════════════════════════
+import pickle as _pickle, os as _os
+
+_AUTO_SCAN_INTERVAL_H = 2          # Scan starten wenn Cache älter als 2 Stunden
+_AUTO_CACHE_PATH = _os.path.join(_os.path.dirname(__file__), "data", "last_scan_cache.pkl")
+
+def _cache_age_hours() -> float:
+    """Wie alt ist der letzte Scan-Cache in Stunden? 9999 wenn nicht vorhanden."""
+    try:
+        with open(_AUTO_CACHE_PATH, "rb") as _f:
+            _d = _pickle.load(_f)
+        return (datetime.now() - _d["timestamp"]).total_seconds() / 3600
+    except Exception:
+        return 9999.0
+
+_bg = bg_scan.get_state()
+
+# Einmal pro Session auto-triggern (session_state Flag verhindert Endlosschleife)
+if not st.session_state.get("_auto_scan_triggered"):
+    st.session_state._auto_scan_triggered = True   # nur einmal pro Session
+    _age_h = _cache_age_hours()
+    if not _bg["running"] and _age_h > _AUTO_SCAN_INTERVAL_H:
+        # Alle Watchlist-Ticker, Standardparameter für Cash Covered Put
+        from data.watchlist import ALL_TICKERS as _AT
+        _auto_tickers = ["SPY", "QQQ"] + [t for t in _AT if t not in ("SPY", "QQQ")]
+        _started = bg_scan.start_scan(
+            tickers        = _auto_tickers,
+            strategy       = "Cash Covered Put",
+            delta_min      = -0.35,
+            delta_max      = -0.05,
+            dte_min        = 14,
+            dte_max        = 60,
+            iv_min         = 0.15,
+            premium_min    = 0.05,
+            min_oi         = 5,
+            otm_min        = 3.0,
+            otm_max        = 50.0,
+            max_spread_pct = 40.0,
+            require_valid_market = False,   # Off-Hours: Last Price verwenden
+            exclude_earnings     = True,
+        )
+        if _started:
+            _bg = bg_scan.get_state()   # State nach Start aktualisieren
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HINTERGRUND-SCAN STATUS — zeigt laufenden Scan auf der Startseite
 # ══════════════════════════════════════════════════════════════════════════════
 _bg = bg_scan.get_state()
@@ -306,17 +352,22 @@ if _bg["running"]:
     done = _bg["done"]
     tot  = _bg["total"]
     cur  = _bg["current"]
+    _scan_acc = "#2d6a4f" if _is_green else "#d4a843"
+    _scan_bg  = "rgba(45,106,79,0.08)" if _is_green else "rgba(212,168,67,0.08)"
+    _scan_bd  = "rgba(45,106,79,0.3)"  if _is_green else "rgba(212,168,67,0.3)"
+    _scan_txt = "#1b4332" if _is_green else "#f0f0f0"
+    _scan_sub = "#475569" if _is_green else "#888888"
     st.html(f"""
-<div style='background:rgba(212,168,67,0.08);border:1px solid rgba(212,168,67,0.3);
+<div style='background:{_scan_bg};border:1px solid {_scan_bd};
             border-radius:10px;padding:12px 18px;margin-bottom:4px'>
     <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.85rem;
-                color:#d4a843;margin-bottom:6px'>
-        🔍 WATCHLIST-SCAN LÄUFT IM HINTERGRUND
+                color:{_scan_acc};margin-bottom:6px'>
+        🔍 WATCHLIST-SCAN LÄUFT IM HINTERGRUND — automatisch gestartet
     </div>
-    <div style='font-family:RedRose,sans-serif;font-size:0.8rem;color:#888'>
+    <div style='font-family:RedRose,sans-serif;font-size:0.8rem;color:{_scan_sub}'>
         Strategie: {_bg['strategy']} &nbsp;·&nbsp;
         Fortschritt: {done}/{tot} Aktien ({pct*100:.0f}%) &nbsp;·&nbsp;
-        Aktuell: <strong style='color:#f0f0f0'>{cur}</strong>
+        Aktuell: <strong style='color:{_scan_txt}'>{cur}</strong>
         &nbsp;·&nbsp; Seite wechseln ist jederzeit möglich ✓
     </div>
 </div>
