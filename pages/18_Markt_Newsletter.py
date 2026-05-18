@@ -478,32 +478,68 @@ def _stock_analysis(ticker: str) -> dict:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _best_option(ticker: str, dte_min: int, dte_max: int, strategy: str = "Cash Covered Put") -> dict | None:
-    """Bestes Option-Setup für einen DTE-Bereich."""
+    """
+    Bestes Option-Setup für einen DTE-Bereich.
+    Delta-Bereiche sind laufzeitabhängig und auf attraktive Renditen ausgelegt:
+      Wochenoption  (≤10 DTE): Delta 0.20–0.45 → hohe Wochenprämien
+      Monatsoption  (≤50 DTE): Delta 0.20–0.35 → Standard-Stillhalter-Zone
+      Jahresoption  (>50 DTE): Delta 0.10–0.25 → breiter OTM-Puffer
+    Sortiert nach annualisierter Rendite (beste Option zuerst).
+    """
+    is_put = strategy in ("Cash Covered Put", "Short Strangle")
+
+    # Laufzeitabhängige Delta-Grenzen (absolut) und Mindestprämie
+    if dte_max <= 10:          # Wochenoption — nah am Geld für hohe Prämien
+        abs_d_min, abs_d_max = 0.20, 0.45
+        otm_lo, otm_hi       = 0.3, 15.0
+        prem_min             = 0.10
+    elif dte_max <= 50:        # Monatsoption — klassische Stillhalter-Zone
+        abs_d_min, abs_d_max = 0.20, 0.35
+        otm_lo, otm_hi       = 1.0, 20.0
+        prem_min             = 0.20
+    else:                      # Jahresoption — weiter OTM, aber noch Prämie
+        abs_d_min, abs_d_max = 0.10, 0.25
+        otm_lo, otm_hi       = 3.0, 30.0
+        prem_min             = 0.50
+
+    # Delta-Vorzeichen je nach Strategie
+    d_lo = -abs_d_max if is_put else abs_d_min   # untere Grenze (z.B. -0.35)
+    d_hi = -abs_d_min if is_put else abs_d_max   # obere Grenze (z.B. -0.20)
+
     try:
         df = scan_ticker(
             ticker=ticker,
             strategy=strategy,
-            delta_min=-0.35,
-            delta_max=-0.05,
+            delta_min=d_lo,
+            delta_max=d_hi,
             dte_min=dte_min,
             dte_max=dte_max,
             iv_min=0.0,
-            premium_min=0.01,
+            premium_min=prem_min,
             min_oi=1,
-            otm_min=0.0,
-            otm_max=40.0,
+            otm_min=otm_lo,
+            otm_max=otm_hi,
             require_valid_market=False,
             max_spread_pct=999.0,
         )
         if df.empty:
             return None
+        # Beste Option = höchste annualisierte Rendite
+        if "Rendite % Laufzeit" in df.columns and "DTE" in df.columns:
+            df = df.copy()
+            df["_ann"] = df["Rendite % Laufzeit"] * 365 / df["DTE"].clip(lower=1)
+            df = df.sort_values("_ann", ascending=False)
+        elif "CRV Score" in df.columns:
+            df = df.sort_values("CRV Score", ascending=False)
         row = df.iloc[0]
+        ann = float(row.get("Rendite % Laufzeit", 0)) * 365 / max(int(row.get("DTE", 1)), 1)
         return {
             "strike":   float(row.get("Strike", 0)),
             "expiry":   row.get("Verfall", ""),
             "dte":      int(row.get("DTE", 0)),
             "premium":  float(row.get("Prämie", 0)),
             "rendite":  float(row.get("Rendite % Laufzeit", 0)),
+            "ann":      ann,           # annualisierte Rendite
             "crv":      float(row.get("CRV Score", 0)),
             "otm":      float(row.get("OTM %", 0)),
             "delta":    float(row.get("Delta", 0)),
@@ -514,41 +550,54 @@ def _best_option(ticker: str, dte_min: int, dte_max: int, strategy: str = "Cash 
 
 
 def _opt_confirmed(opt: dict | None, kind: str) -> bool:
-    """Prüft Indikatoren: zeige Option nur wenn Mindest-Kriterien erfüllt."""
+    """
+    Zeige Option nur wenn Mindest-Kriterien für attraktive Stillhalter-Renditen erfüllt.
+      Wochenoption : ≥ 0.8 % Rendite über Laufzeit  + Delta ≥ 0.15
+      Monatsoption : ≥ 2.0 % Rendite über Laufzeit  + Delta ≥ 0.15  (~24 % p.a.)
+      Jahresoption : ≥ 10 % annualisierte Rendite   + deutlich OTM
+    """
     if not opt:
         return False
-    r   = opt.get("rendite", 0)
+    r   = opt.get("rendite", 0)           # % über DTE-Laufzeit
     d   = abs(opt.get("delta", 0))
     otm = opt.get("otm", 0)
     dte = max(opt.get("dte", 1), 1)
+    ann = opt.get("ann", r * 365 / dte)  # annualisierte Rendite
+
     if kind == "wk":
-        return r >= 0.3 and d >= 0.05          # Mindest-Rendite + echtes Delta
+        # Wochenoption: mind. 0.8 % (≈ 40 % p.a.) + echtes Delta
+        return r >= 0.8 and d >= 0.15
     if kind == "mo":
-        return r >= 0.4 and otm >= 1.5          # Rendite + genug OTM-Puffer
-    # yr: annualisierte Rendite ≥ 4 % + deutlich OTM
-    return (r * 365 / dte) >= 4.0 and otm >= 5.0
+        # Monatsoption: mind. 2 % über Laufzeit (≈ 24 % p.a.) + ausreichend OTM
+        return r >= 2.0 and d >= 0.15 and otm >= 1.0
+    # Jahresoption: annualisierte Rendite ≥ 10 % + deutlich OTM
+    return ann >= 10.0 and otm >= 3.0
 
 
 def _opt_row_html(label: str, opt: dict | None, confirmed: bool) -> str:
     """Rendert eine Zeile für Woche/Monat/Jahr im Stillhalter-Take."""
     if not confirmed:
         return (
-            "<div style='font-size:0.76rem;color:#444;margin:2px 0'>"
+            "<div style='font-size:0.76rem;color:#555;margin:2px 0'>"
             "<span style='display:inline-block;width:96px;color:#4a4a4a'>" + label + "</span>"
-            "kein Setup bestätigt</div>"
+            "– kein attraktives Setup</div>"
         )
     try:
         exp_d = pd.to_datetime(opt["expiry"]).strftime("%d.%m.%y")
     except Exception:
         exp_d = str(opt["expiry"])
+    ann  = opt.get("ann", 0)
+    dte  = max(opt.get("dte", 1), 1)
+    ann_str = f" · <b style='color:#a8ffb0'>{ann:.0f}% p.a.</b>" if ann > 0 else ""
     return (
         "<div style='font-size:0.76rem;margin:2px 0'>"
         "<span style='display:inline-block;width:96px;color:#888'>" + label + "</span>"
         "<span style='color:#22c55e'>✓ </span>"
         "Strike <b style='color:#e2c97e'>$" + f"{opt['strike']:.0f}" + "</b>"
-        " · Verfall " + exp_d
+        " · Verfall " + exp_d + f" ({dte}d)"
         + " · Prämie <b>$" + _fmt(opt["premium"]) + "</b>"
         + " · Rendite <b style='color:#22c55e'>" + _fmt(opt["rendite"]) + "%</b>"
+        + ann_str
         + " · Δ " + f"{opt['delta']:.2f}"
         + "</div>"
     )
@@ -1231,6 +1280,9 @@ for sname, sector in SECTORS.items():
 
     with col_news:
         if stock_news:
+            # Optionen pro Ticker nur einmal anzeigen (nicht unter jedem Artikel)
+            _tickers_with_opts_shown: set[str] = set()
+
             for item in stock_news:
                 s_t      = item.get("ticker", "")
                 title    = item["title"]
@@ -1278,26 +1330,29 @@ for sname, sector in SECTORS.items():
                 else:
                     title_lnk = "<strong style='color:#e8dcc8'>" + title_de + "</strong>"
 
-                # Stillhalter-Take (3 DTE)
+                # Stillhalter-Take — nur beim ERSTEN News-Artikel pro Ticker
                 take_part = ""
-                if s_t and s_t in _sec_opts:
+                if s_t and s_t in _sec_opts and s_t not in _tickers_with_opts_shown:
+                    _tickers_with_opts_shown.add(s_t)
                     _trio = _sec_opts[s_t]
                     _o_wk = _trio.get("wk"); _c_wk = _opt_confirmed(_o_wk, "wk")
                     _o_mo = _trio.get("mo"); _c_mo = _opt_confirmed(_o_mo, "mo")
                     _o_yr = _trio.get("yr"); _c_yr = _opt_confirmed(_o_yr, "yr")
-                    _rows = (
-                        _opt_row_html("📅 Woche",  _o_wk, _c_wk)
-                        + _opt_row_html("📅 Monat", _o_mo, _c_mo)
-                        + _opt_row_html("📅 Jahr",  _o_yr, _c_yr)
-                    )
-                    take_part = (
-                        "<div style='margin-top:7px;padding-top:6px;"
-                        "border-top:1px solid rgba(255,255,255,0.06)'>"
-                        "<div style='font-size:0.78rem;color:#a8c5ff;"
-                        "font-weight:600;margin-bottom:4px'>"
-                        "👉 " + nl_strategy + " · $" + s_t + " Trading-Ideen:"
-                        "</div>" + _rows + "</div>"
-                    )
+                    # Nur anzeigen wenn mind. eine Option bestätigt ist
+                    if _c_wk or _c_mo or _c_yr:
+                        _rows = (
+                            _opt_row_html("📅 Woche",  _o_wk, _c_wk)
+                            + _opt_row_html("📅 Monat", _o_mo, _c_mo)
+                            + _opt_row_html("📅 Jahr",  _o_yr, _c_yr)
+                        )
+                        take_part = (
+                            "<div style='margin-top:7px;padding-top:6px;"
+                            "border-top:1px solid rgba(255,255,255,0.06)'>"
+                            "<div style='font-size:0.78rem;color:#a8c5ff;"
+                            "font-weight:600;margin-bottom:4px'>"
+                            "👉 " + nl_strategy + " · $" + s_t + " Trading-Idee:"
+                            "</div>" + _rows + "</div>"
+                        )
 
                 st.markdown(
                     "<div style='padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05)'>"
