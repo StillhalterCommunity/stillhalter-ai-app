@@ -315,7 +315,7 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
     with row2[2]:
         iv_min = st.number_input("IV min %", 0, 300, _p.get("iv_min", 0), step=5,
                                   help="Mindest-IV: höhere IV = höhere Prämien")
-        iv_max = st.number_input("IV max %", 5, 500, _p.get("iv_max", 200), step=10)
+        iv_max = st.number_input("IV max %", 5, 999, _p.get("iv_max", 200), step=10)
     with row2[3]:
         _default_otm_min = 15 if scan_strategy == "Short Strangle" else _p.get("otm_min", 3)
         _default_otm_max = 40 if scan_strategy == "Short Strangle" else _p.get("otm_max", 25)
@@ -542,9 +542,17 @@ st.info(
 )
 
 # ── Session State früh initialisieren (vor Hintergrund-Scan-Check) ───────────
-for _k in ["scan_results", "scan_meta", "tf_results"]:
+for _k in ["scan_results", "scan_meta", "tf_results", "scan_running"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
+
+# ── Unterbrochenen Scan aufräumen ─────────────────────────────────────────────
+# Wenn scan_running=True aber der Button nicht geklickt wurde, wurde der
+# Scan durch eine Filteränderung unterbrochen → State zurücksetzen damit
+# der Benutzer ohne Seitenaktualisierung neu starten kann.
+if st.session_state.get("scan_running"):
+    st.session_state.scan_running = False
+    st.session_state.scan_results = None
 
 # ── Hintergrund-Scan Status anzeigen ─────────────────────────────────────────
 import data.background_scan as bg_scan
@@ -625,6 +633,11 @@ st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
 # ── Scan ausführen ────────────────────────────────────────────────────────────
 if start_scan:
+    # Scan-Status setzen: ermöglicht saubere Erkennung bei Unterbrechung
+    st.session_state.scan_running = True
+    # Vorherige Ergebnisse löschen (auch von unterbrochenen Scans)
+    st.session_state.scan_results = None
+
     progress_bar = st.progress(0.0)
     status_ph = st.empty()
 
@@ -655,6 +668,7 @@ if start_scan:
     if not filtered_tickers:
         st.warning("Kein Ticker erfüllt die technischen Filterkriterien. Passe die Tech-Filter an.")
         st.session_state.scan_results = pd.DataFrame()
+        st.session_state.scan_running = False
     else:
         # Schritt 2: Optionen scannen — mit Live-Anzeige
         phase_offset = 0.5 if use_tech_filter else 0.0
@@ -838,6 +852,9 @@ if start_scan:
         # P2: Memory-Lean — nur Ticker im Ergebnis cachen (nicht alle 225)
         result_keys = set(results["Ticker"].unique()) if not results.empty else set()
         st.session_state.tf_results = {k: v for k, v in tf_cache.items() if k in result_keys}
+
+    # Scan erfolgreich abgeschlossen — Flag zurücksetzen
+    st.session_state.scan_running = False
 
 # ── Ergebnisse ────────────────────────────────────────────────────────────────
 results = st.session_state.scan_results
