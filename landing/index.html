@@ -433,9 +433,20 @@
         <input type="tel" name="whatsapp" placeholder="+49 170 1234567">
       </div>
 
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="input-group">
+          <label>Vorname *</label>
+          <input type="text" name="vorname" placeholder="Max" required>
+        </div>
+        <div class="input-group">
+          <label>Nachname *</label>
+          <input type="text" name="nachname" placeholder="Mustermann" required>
+        </div>
+      </div>
+
       <div class="input-group">
-        <label>Vorname (optional)</label>
-        <input type="text" name="vorname" placeholder="Max">
+        <label>Firma (optional)</label>
+        <input type="text" name="firma" placeholder="Mustermann GmbH">
       </div>
 
       <button type="submit" class="submit-btn" id="submit-btn">
