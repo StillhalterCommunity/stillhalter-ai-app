@@ -339,27 +339,40 @@ def _css_green() -> str:
         color: {g["700"]} !important; border-bottom: 2px solid {g["600"]} !important;
     }}
 
-    /* ── Buttons ───────────────────────────────────────────────────────── */
-    .stButton > button,
-    .stButton > button[kind="secondary"] {{
-        font-family: 'RedRose', sans-serif !important; font-weight: 600 !important;
-        font-size: 0.85rem !important; letter-spacing: 0.05em !important;
-        border-radius: 8px !important; border: 1px solid {g["300"]} !important;
-        background: {g["50"]} !important; color: {g["800"]} !important;
-        padding: 0.5rem 1.2rem !important; transition: all 0.2s !important;
+    /* ── Buttons — exakte Landing-Page-Vorlage ─────────────────────────── */
+    /* Alle Buttons: helles Grün-Weiß wie landing .channel-btn */
+    .stButton button,
+    button[data-testid="baseButton-secondary"],
+    [data-testid="baseButton-secondary"] {{
+        font-family: 'RedRose', sans-serif !important;
+        font-weight: 600 !important; font-size: 0.85rem !important;
+        letter-spacing: 0.04em !important; border-radius: 8px !important;
+        border: 1px solid {g["200"]} !important;
+        background: {g["25"]} !important; color: {g["800"]} !important;
+        padding: 0.5rem 1.2rem !important; transition: all 0.18s !important;
+        box-shadow: none !important;
     }}
-    .stButton > button:hover {{
-        border-color: {g["600"]} !important; color: {g["700"]} !important;
-        background: {g["100"]} !important;
+    .stButton button:hover,
+    button[data-testid="baseButton-secondary"]:hover {{
+        border-color: {g["600"]} !important;
+        background: {g["50"]} !important;
+        color: {g["800"]} !important;
     }}
-    .stButton > button[kind="primary"],
-    [data-testid="baseButton-primary"] {{
-        background: linear-gradient(135deg, {g["600"]}, {g["700"]}) !important;
-        color: #ffffff !important; border: none !important; font-weight: 700 !important;
-    }}
-    .stButton > button[kind="primary"]:hover {{
-        background: linear-gradient(135deg, {g["700"]}, {g["800"]}) !important;
+    /* Primary: dunkelgrün + weißer Text — wie landing .nav-cta / .submit-btn */
+    button[data-testid="baseButton-primary"],
+    [data-testid="baseButton-primary"],
+    .stButton button[kind="primary"] {{
+        background: {g["800"]} !important;   /* #1b4332 */
         color: #ffffff !important;
+        border: none !important;
+        font-weight: 700 !important;
+        box-shadow: 0 2px 8px rgba(27,67,50,.25) !important;
+    }}
+    button[data-testid="baseButton-primary"]:hover,
+    .stButton button[kind="primary"]:hover {{
+        background: {g["900"]} !important;   /* #0d2318 — noch dunkler */
+        color: #ffffff !important;
+        box-shadow: 0 4px 16px rgba(27,67,50,.35) !important;
     }}
 
     /* ── Eingabefelder ─────────────────────────────────────────────────── */

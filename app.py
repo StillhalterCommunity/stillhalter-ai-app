@@ -83,30 +83,35 @@ if not st.session_state.authenticated:
 from ui.sidebar import render_sidebar
 
 # ── Kompaktes Spacing: Card → Link-Footer nahtlos ────────────────────────────
-st.markdown("""
+_pl_link_bg     = "#f6fdfb" if _is_green else "#0c0c0c"
+_pl_link_border = "#b7e4c7" if _is_green else "#1e1e1e"
+_pl_link_color  = "#475569" if _is_green else "#555555"
+_pl_link_hover  = "#2d6a4f" if _is_green else "#d4a843"
+_pl_link_hbg    = "#eef8f5" if _is_green else "#111111"
+st.markdown(f"""
 <style>
-[data-testid="stMain"] [data-testid="stElementContainer"]:has([data-testid="stPageLink"]) {
+[data-testid="stMain"] [data-testid="stElementContainer"]:has([data-testid="stPageLink"]) {{
     margin-top: -10px !important;
     margin-bottom: 8px !important;
-}
-[data-testid="stMain"] [data-testid="stPageLink"] > a {
+}}
+[data-testid="stMain"] [data-testid="stPageLink"] > a {{
     border-radius: 0 0 14px 14px !important;
-    background: #0c0c0c !important;
-    border: 1px solid #1e1e1e !important;
+    background: {_pl_link_bg} !important;
+    border: 1px solid {_pl_link_border} !important;
     border-top: none !important;
     padding: 9px 20px !important;
     font-size: 0.82rem !important;
-    color: #555 !important;
+    color: {_pl_link_color} !important;
     width: 100% !important;
     display: block !important;
     text-decoration: none !important;
     transition: color 0.15s, background 0.15s !important;
-}
-[data-testid="stMain"] [data-testid="stPageLink"] > a:hover {
-    color: #d4a843 !important;
-    background: #111 !important;
+}}
+[data-testid="stMain"] [data-testid="stPageLink"] > a:hover {{
+    color: {_pl_link_hover} !important;
+    background: {_pl_link_hbg} !important;
     text-decoration: none !important;
-}
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -119,10 +124,23 @@ import data.background_scan as bg_scan
 
 render_sidebar()
 
+# ── Theme-Farben für inline Styles ──────────────────────────────────────────
+_th           = st.session_state.get("app_theme", "dark")
+_is_green     = _th == "green"
+_title_color  = "#0d2318" if _is_green else "#f0f0f0"
+_sub_color    = "#475569" if _is_green else "#666666"
+_user_color   = "#2d6a4f" if _is_green else "#d4a843"
+_badge_bg     = "#eef8f5" if _is_green else "#1a1a2e"
+_badge_border = "#b7e4c7" if _is_green else "#333333"
+_preload_acc  = "#2d6a4f" if _is_green else "#d4a843"
+_preload_pct  = "#0d2318" if _is_green else "#f0f0f0"
+_preload_sub  = "#475569" if _is_green else "#555555"
+_logo_variant = "black"   if _is_green else "white"
+
 # ── Header ────────────────────────────────────────────────────────────────────
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.html(get_logo_html("white", 48))
+    st.html(get_logo_html(_logo_variant, 48))
 with col_title:
     market_open  = is_market_open()
     ext_session  = get_extended_hours_session()
@@ -140,7 +158,7 @@ with col_title:
             spy_chg   = spy_ext["change_pct"]
             spy_time  = spy_ext["time_str"]
             ext_badge = (
-                f" &nbsp;·&nbsp; <span style='background:#1a1a2e;border:1px solid #333;"
+                f" &nbsp;·&nbsp; <span style='background:{_badge_bg};border:1px solid {_badge_border};"
                 f"border-radius:4px;padding:1px 8px;font-size:0.75rem;"
                 f"color:{lbl_color}'>{lbl_text}</span>"
                 f" &nbsp;<span style='color:{col_chg};font-size:0.78rem'>"
@@ -151,12 +169,12 @@ with col_title:
     st.html(
         f"<div style='padding-top:6px'>"
         f"<div style='font-family:RedRose,sans-serif;font-weight:700;font-size:2rem;"
-        f"color:#f0f0f0;letter-spacing:0.04em'>STILLHALTER AI APP</div>"
+        f"color:{_title_color};letter-spacing:0.04em'>STILLHALTER AI APP</div>"
         f"<div style='font-family:RedRose,sans-serif;font-weight:300;font-size:0.8rem;"
-        f"color:#666;text-transform:uppercase;letter-spacing:0.15em;margin-top:2px'>"
+        f"color:{_sub_color};text-transform:uppercase;letter-spacing:0.15em;margin-top:2px'>"
         f"Options Trading Dashboard &nbsp;·&nbsp; <span class='{mkt_class}'>{market_status_text()}</span>"
         f"{ext_badge}"
-        f" &nbsp;·&nbsp; <span style='color:#d4a843'>👤 {user_name}</span>"
+        f" &nbsp;·&nbsp; <span style='color:{_user_color}'>👤 {user_name}</span>"
         f"</div></div>"
     )
 
@@ -167,9 +185,10 @@ with st.expander("⚙️ System", expanded=False):
 
     # ── Theme-Umschalter ──────────────────────────────────────────────────────
     current_theme = st.session_state.get("app_theme", "dark")
+    _lbl_color = "#475569" if _is_green else "#888888"
     th_label = "🌙 Dark · Schwarz/Gold" if current_theme == "dark" else "🌿 Hell · Grün/Weiß"
     st.markdown(
-        f"<div style='font-size:0.75rem;color:#888;letter-spacing:0.08em;"
+        f"<div style='font-size:0.75rem;color:{_lbl_color};letter-spacing:0.08em;"
         f"text-transform:uppercase;margin-bottom:6px'>Aktives Theme: <b>{th_label}</b></div>",
         unsafe_allow_html=True,
     )
@@ -254,10 +273,10 @@ if _pl["running"]:
     _pl_bar  = st.progress(_pl["progress"])
     _pl_hdr.html(f"""
 <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:0.95rem;
-            color:#d4a843;letter-spacing:0.08em;margin-bottom:4px'>
+            color:{_preload_acc};letter-spacing:0.08em;margin-bottom:4px'>
     ⚡ DATENIMPORT &nbsp;
-    <span style='font-size:1.4rem;color:#f0f0f0'>{pct_int}%</span>
-    <span style='font-size:0.75rem;color:#555;font-weight:300;margin-left:8px'>
+    <span style='font-size:1.4rem;color:{_preload_pct}'>{pct_int}%</span>
+    <span style='font-size:0.75rem;color:{_preload_sub};font-weight:300;margin-left:8px'>
         — {done}/{total} Ticker · Du kannst die App bereits nutzen
     </span>
 </div>
