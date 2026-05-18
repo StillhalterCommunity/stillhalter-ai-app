@@ -36,15 +36,15 @@ if not st.session_state.authenticated:
     with center:
         st.html(f"""
 <div style='text-align:center;margin:60px 0 32px 0'>
-    {get_logo_html("white", 56)}
+    {get_logo_html("black", 56)}
 </div>
-<div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
-            border-radius:14px;padding:32px 36px;'>
+<div style='background:#ffffff;border:1px solid #b7e4c7;border-top:3px solid #2d6a4f;
+            border-radius:14px;padding:32px 36px;box-shadow:0 8px 32px rgba(27,67,50,.10);'>
     <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.4rem;
-                color:#f0f0f0;letter-spacing:0.05em;margin-bottom:4px'>
+                color:#0d2318;letter-spacing:0.05em;margin-bottom:4px'>
         STILLHALTER AI APP
     </div>
-    <div style='font-family:RedRose,sans-serif;font-size:0.78rem;color:#555;
+    <div style='font-family:RedRose,sans-serif;font-size:0.78rem;color:#94a3b8;
                 letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px'>
         Beta-Zugang · Bitte Passwort eingeben
     </div>
@@ -81,20 +81,20 @@ st.markdown("""
 }
 [data-testid="stMain"] [data-testid="stPageLink"] > a {
     border-radius: 0 0 14px 14px !important;
-    background: #0c0c0c !important;
-    border: 1px solid #1e1e1e !important;
+    background: #f6fdfb !important;
+    border: 1px solid #b7e4c7 !important;
     border-top: none !important;
     padding: 9px 20px !important;
     font-size: 0.82rem !important;
-    color: #555 !important;
+    color: #475569 !important;
     width: 100% !important;
     display: block !important;
     text-decoration: none !important;
     transition: color 0.15s, background 0.15s !important;
 }
 [data-testid="stMain"] [data-testid="stPageLink"] > a:hover {
-    color: #d4a843 !important;
-    background: #111 !important;
+    color: #1b4332 !important;
+    background: #eef8f5 !important;
     text-decoration: none !important;
 }
 </style>
