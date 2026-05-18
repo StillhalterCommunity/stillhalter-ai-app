@@ -270,10 +270,16 @@ def _css_green() -> str:
 
     html, body, .stApp {{
         background-color: #ffffff !important;
-        color: {_INK};
+        color: {_INK} !important;
         font-family: 'RedRose', 'Inter', sans-serif;
     }}
     .main .block-container {{ padding-top: 0.75rem; padding-bottom: 1rem; max-width: 1600px; }}
+
+    /* Allgemeiner Text — sicherstellen dass alles dunkel und lesbar ist */
+    p, label, span, div, li, td, th {{
+        font-family: 'RedRose', 'Inter', sans-serif;
+        color: {_INK2};
+    }}
 
     h1, h2, h3, h4, h5 {{
         font-family: 'RedRose', sans-serif !important;
@@ -283,7 +289,6 @@ def _css_green() -> str:
     h2 {{ font-weight: 600; font-size: 1.4rem !important; }}
     h3 {{ font-weight: 600; font-size: 1.15rem !important; }}
     h4 {{ font-weight: 400; font-size: 1rem !important; }}
-    p, label, span, div {{ font-family: 'RedRose', 'Inter', sans-serif; }}
 
     section[data-testid="stSidebar"] {{
         background-color: {g["25"]} !important; border-right: 1px solid {g["200"]};
@@ -291,25 +296,36 @@ def _css_green() -> str:
     section[data-testid="stSidebar"] .stSelectbox label,
     section[data-testid="stSidebar"] p,
     section[data-testid="stSidebar"] span {{
-        font-family: 'RedRose', sans-serif; font-size: 0.85rem; color: {_INK3};
+        font-family: 'RedRose', sans-serif; font-size: 0.85rem; color: {_INK3} !important;
     }}
     section[data-testid="stSidebar"] [data-testid="stMarkdown"] h2 {{
         font-size: 1rem !important; color: {g["700"]} !important;
         text-transform: uppercase; letter-spacing: 0.1em;
     }}
 
+    /* ── Metric-Karten ─────────────────────────────────────────────────── */
     [data-testid="metric-container"] {{
-        background: {g["25"]} !important; border: 1px solid {g["200"]} !important;
+        background: {g["50"]} !important; border: 1px solid {g["200"]} !important;
         border-radius: 10px !important; padding: 12px 16px !important;
     }}
-    [data-testid="metric-container"] [data-testid="stMetricLabel"] {{
+    [data-testid="metric-container"] [data-testid="stMetricLabel"],
+    [data-testid="metric-container"] [data-testid="stMetricLabel"] *,
+    [data-testid="metric-container"] [data-testid="stMetricLabel"] p {{
         font-size: 0.75rem !important; color: {_INK3} !important;
         text-transform: uppercase; letter-spacing: 0.08em;
     }}
-    [data-testid="metric-container"] [data-testid="stMetricValue"] {{
-        font-size: 1.4rem !important; font-weight: 700 !important; color: {g["900"]} !important;
+    [data-testid="metric-container"] [data-testid="stMetricValue"],
+    [data-testid="metric-container"] [data-testid="stMetricValue"] *,
+    [data-testid="metric-container"] [data-testid="stMetricValue"] div {{
+        font-size: 1.4rem !important; font-weight: 700 !important;
+        color: {g["900"]} !important;
+    }}
+    [data-testid="metric-container"] [data-testid="stMetricDelta"],
+    [data-testid="metric-container"] [data-testid="stMetricDelta"] * {{
+        font-size: 0.85rem !important;
     }}
 
+    /* ── Tabs ──────────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {{
         background: transparent; border-bottom: 1px solid {g["200"]}; gap: 4px;
     }}
@@ -323,32 +339,72 @@ def _css_green() -> str:
         color: {g["700"]} !important; border-bottom: 2px solid {g["600"]} !important;
     }}
 
-    .stButton > button {{
-        font-family: 'RedRose', sans-serif; font-weight: 600; font-size: 0.85rem;
-        letter-spacing: 0.05em; border-radius: 8px; border: 1px solid {g["200"]};
-        background: {g["50"]}; color: {g["800"]}; padding: 0.5rem 1.2rem; transition: all 0.2s;
+    /* ── Buttons ───────────────────────────────────────────────────────── */
+    .stButton > button,
+    .stButton > button[kind="secondary"] {{
+        font-family: 'RedRose', sans-serif !important; font-weight: 600 !important;
+        font-size: 0.85rem !important; letter-spacing: 0.05em !important;
+        border-radius: 8px !important; border: 1px solid {g["300"]} !important;
+        background: {g["50"]} !important; color: {g["800"]} !important;
+        padding: 0.5rem 1.2rem !important; transition: all 0.2s !important;
     }}
     .stButton > button:hover {{
-        border-color: {g["600"]}; color: {g["800"]}; background: {g["100"]};
+        border-color: {g["600"]} !important; color: {g["700"]} !important;
+        background: {g["100"]} !important;
     }}
-    [data-testid="baseButton-primary"] > button,
-    .stButton > button[kind="primary"] {{
+    .stButton > button[kind="primary"],
+    [data-testid="baseButton-primary"] {{
         background: linear-gradient(135deg, {g["600"]}, {g["700"]}) !important;
         color: #ffffff !important; border: none !important; font-weight: 700 !important;
     }}
-
-    .stSelectbox [data-baseweb="select"] > div,
-    .stNumberInput input, .stTextInput input, .stTextArea textarea {{
-        background: {g["25"]} !important; border: 1px solid {g["200"]} !important;
-        border-radius: 8px !important; color: {_INK} !important;
-        font-family: 'RedRose', sans-serif;
+    .stButton > button[kind="primary"]:hover {{
+        background: linear-gradient(135deg, {g["700"]}, {g["800"]}) !important;
+        color: #ffffff !important;
     }}
-    .stSelectbox [data-baseweb="select"] > div:focus-within {{ border-color: {g["600"]} !important; }}
 
+    /* ── Eingabefelder ─────────────────────────────────────────────────── */
+    .stSelectbox [data-baseweb="select"] > div,
+    .stSelectbox [data-baseweb="select"] > div > div,
+    .stTextInput input, .stTextArea textarea {{
+        background: #ffffff !important; border: 1px solid {g["300"]} !important;
+        border-radius: 8px !important; color: {_INK} !important;
+        font-family: 'RedRose', sans-serif !important;
+    }}
+    .stSelectbox [data-baseweb="select"] > div:focus-within {{
+        border-color: {g["600"]} !important;
+    }}
+    .stSelectbox [data-baseweb="select"] span,
+    .stSelectbox [data-baseweb="select"] div {{
+        color: {_INK} !important;
+    }}
+
+    /* Number Input — Container, Eingabefeld und ±-Buttons */
+    .stNumberInput > div,
+    .stNumberInput [data-baseweb="input"],
+    .stNumberInput [data-baseweb="base-input"] {{
+        background: #ffffff !important; border: 1px solid {g["300"]} !important;
+        border-radius: 8px !important;
+    }}
+    .stNumberInput input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stNumberInputField"] {{
+        background: #ffffff !important; color: {_INK} !important;
+        font-family: 'RedRose', sans-serif !important; font-weight: 600 !important;
+    }}
+    .stNumberInput button,
+    [data-testid="stNumberInput"] button {{
+        background: {g["100"]} !important; color: {g["700"]} !important;
+        border: none !important; border-left: 1px solid {g["200"]} !important;
+    }}
+    .stNumberInput button:hover {{
+        background: {g["200"]} !important; color: {g["800"]} !important;
+    }}
+
+    /* ── Tabellen ──────────────────────────────────────────────────────── */
     [data-testid="stDataFrame"] {{ border: 1px solid {g["200"]}; border-radius: 10px; overflow: hidden; }}
     [data-testid="stDataFrame"] th {{
-        background: {g["50"]} !important; color: {g["700"]} !important;
-        font-family: 'RedRose', sans-serif; font-weight: 600; font-size: 0.8rem;
+        background: {g["100"]} !important; color: {g["800"]} !important;
+        font-family: 'RedRose', sans-serif; font-weight: 700; font-size: 0.8rem;
         text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid {g["200"]};
     }}
     [data-testid="stDataFrame"] td {{
@@ -357,55 +413,100 @@ def _css_green() -> str:
     }}
     [data-testid="stDataFrame"] tr:hover td {{ background: {g["25"]} !important; }}
 
-    [data-testid="stAlert"] {{ border-radius: 8px !important; font-family: 'RedRose', sans-serif; font-size: 0.88rem; }}
-
-    [data-testid="stExpander"] {{
-        background: {g["25"]} !important; border: 1px solid {g["200"]} !important; border-radius: 10px !important;
+    /* ── Alerts / Warnings ─────────────────────────────────────────────── */
+    [data-testid="stAlert"] {{
+        border-radius: 8px !important; font-family: 'RedRose', sans-serif;
+        font-size: 0.88rem; color: {_INK2} !important;
     }}
-    [data-testid="stExpander"] summary {{ font-family: 'RedRose', sans-serif; font-weight: 600; color: {_INK3}; }}
+    [data-testid="stAlert"] * {{ color: {_INK2} !important; }}
 
+    /* ── Expander — dunkelgrün Header, helle Schrift ───────────────────── */
+    [data-testid="stExpander"] {{
+        background: #ffffff !important; border: 1px solid {g["300"]} !important;
+        border-radius: 10px !important; overflow: hidden !important;
+    }}
+    [data-testid="stExpander"] details summary,
+    [data-testid="stExpander"] > details > summary {{
+        background: {g["800"]} !important; color: #ffffff !important;
+        font-family: 'RedRose', sans-serif !important; font-weight: 600 !important;
+        padding: 10px 16px !important; border-radius: 8px 8px 0 0 !important;
+    }}
+    [data-testid="stExpander"] details:not([open]) summary {{
+        border-radius: 8px !important;
+    }}
+    [data-testid="stExpander"] details summary:hover {{
+        background: {g["700"]} !important;
+    }}
+    [data-testid="stExpander"] details summary * {{
+        color: #ffffff !important;
+    }}
+    [data-testid="stExpander"] details summary svg {{
+        stroke: #ffffff !important; fill: #ffffff !important;
+    }}
+    [data-testid="stExpander"] details > div {{
+        background: #ffffff !important; padding: 12px 16px !important;
+    }}
+
+    /* ── Fortschrittsbalken ────────────────────────────────────────────── */
     .stProgress > div > div > div {{
-        background: linear-gradient(90deg, {g["600"]}, {g["400"]}) !important; border-radius: 4px;
+        background: linear-gradient(90deg, {g["600"]}, {g["400"]}) !important;
+        border-radius: 4px;
+    }}
+    .stProgress > div > div {{
+        background: {g["100"]} !important;
     }}
 
     hr {{ border-color: {g["200"]} !important; margin: 1rem 0; }}
 
+    /* ── Seiten-Header ─────────────────────────────────────────────────── */
     .sc-header {{
         display: flex; align-items: center; gap: 16px; padding: 12px 0 8px 0;
         border-bottom: 1px solid {g["200"]}; margin-bottom: 16px;
     }}
-    .sc-page-title {{ font-family: 'RedRose', sans-serif; font-weight: 700; font-size: 1.6rem; color: {g["900"]}; letter-spacing: 0.04em; flex: 1; }}
-    .sc-page-subtitle {{ font-family: 'RedRose', sans-serif; font-weight: 300; font-size: 0.8rem; color: {_INK4}; text-transform: uppercase; letter-spacing: 0.1em; }}
+    .sc-page-title {{
+        font-family: 'RedRose', sans-serif; font-weight: 700; font-size: 1.6rem;
+        color: {g["900"]} !important; letter-spacing: 0.04em; flex: 1;
+    }}
+    .sc-page-subtitle {{
+        font-family: 'RedRose', sans-serif; font-weight: 300; font-size: 0.8rem;
+        color: {_INK4} !important; text-transform: uppercase; letter-spacing: 0.1em;
+    }}
 
-    .market-open  {{ color: #16a34a; font-weight: 600; }}
-    .market-closed {{ color: #d97706; font-weight: 600; }}
+    .market-open  {{ color: #16a34a !important; font-weight: 600; }}
+    .market-closed {{ color: #d97706 !important; font-weight: 600; }}
 
+    /* ── Tags ──────────────────────────────────────────────────────────── */
     .tag {{ display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.05em; margin-right: 4px; }}
-    .tag-gold  {{ background: {g["50"]};  color: {g["700"]}; border: 1px solid {g["300"]}; }}
-    .tag-green {{ background: #dcfce7;    color: #16a34a;    border: 1px solid #86efac; }}
-    .tag-red   {{ background: #fee2e2;    color: #ef4444;    border: 1px solid #fca5a5; }}
-    .tag-gray  {{ background: #f1f5f9;    color: {_INK3};    border: 1px solid #cbd5e1; }}
-    .tag-blue  {{ background: #eff6ff;    color: #3b82f6;    border: 1px solid #93c5fd; }}
+    .tag-gold  {{ background: {g["100"]}; color: {g["800"]}; border: 1px solid {g["300"]}; }}
+    .tag-green {{ background: #dcfce7;   color: #15803d;   border: 1px solid #86efac; }}
+    .tag-red   {{ background: #fee2e2;   color: #b91c1c;   border: 1px solid #fca5a5; }}
+    .tag-gray  {{ background: #f1f5f9;   color: {_INK3};   border: 1px solid #cbd5e1; }}
+    .tag-blue  {{ background: #eff6ff;   color: #1d4ed8;   border: 1px solid #93c5fd; }}
 
+    /* ── Signal Cards ──────────────────────────────────────────────────── */
     .signal-card {{ background: {g["25"]}; border: 1px solid {g["200"]}; border-radius: 10px; padding: 12px 16px; margin-bottom: 6px; }}
-    .signal-card-bullish {{ border-left: 3px solid #22c55e !important; }}
+    .signal-card-bullish {{ border-left: 3px solid #16a34a !important; }}
     .signal-card-bearish {{ border-left: 3px solid #ef4444 !important; }}
-    .signal-card-neutral {{ border-left: 3px solid #f59e0b !important; }}
+    .signal-card-neutral {{ border-left: 3px solid #d97706 !important; }}
 
-    .crv-score-high {{ color: {g["700"]}; font-weight: 700; font-size: 1.1em; }}
-    .crv-score-mid  {{ color: {_INK3};   font-weight: 600; }}
-    .crv-score-low  {{ color: {_INK4};   font-weight: 400; }}
+    .crv-score-high {{ color: {g["700"]} !important; font-weight: 700; font-size: 1.1em; }}
+    .crv-score-mid  {{ color: {_INK3}   !important; font-weight: 600; }}
+    .crv-score-low  {{ color: {_INK4}   !important; font-weight: 400; }}
 
+    /* ── News Cards ────────────────────────────────────────────────────── */
     .news-card {{ background: {g["25"]}; border: 1px solid {g["200"]}; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; transition: border-color 0.2s; }}
     .news-card:hover {{ border-color: {g["500"]}; }}
-    .news-title {{ font-weight: 600; color: {_INK}; font-size: 0.92rem; line-height: 1.4; }}
-    .news-meta  {{ font-size: 0.78rem; color: {_INK4}; margin-top: 4px; }}
+    .news-title {{ font-weight: 600; color: {_INK} !important; font-size: 0.92rem; line-height: 1.4; }}
+    .news-meta  {{ font-size: 0.78rem; color: {_INK4} !important; margin-top: 4px; }}
 
-    .stCheckbox label {{ font-family: 'RedRose', sans-serif; font-size: 0.88rem; color: {_INK3}; }}
+    /* ── Checkboxen / Radio / Slider ───────────────────────────────────── */
+    .stCheckbox label, .stCheckbox label span {{ font-family: 'RedRose', sans-serif; font-size: 0.88rem; color: {_INK2} !important; }}
     .stCheckbox [data-testid="stCheckbox"] {{ accent-color: {g["600"]}; }}
-    .stRadio label {{ font-family: 'RedRose', sans-serif; font-size: 0.85rem; color: {_INK3}; }}
+    .stRadio label, .stRadio label span {{ font-family: 'RedRose', sans-serif; font-size: 0.85rem; color: {_INK2} !important; }}
     [data-testid="stSlider"] [data-baseweb="slider"] [data-testid="stTickBar"] {{ color: {_INK4}; }}
+    [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {{ background: {g["600"]} !important; }}
 
+    /* Trennlinie */
     .gold-line {{ height: 2px; background: linear-gradient(90deg, {g["600"]}, transparent); margin: 12px 0; border: none; }}
     """
 
