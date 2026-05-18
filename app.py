@@ -82,6 +82,9 @@ if not st.session_state.authenticated:
 # ── Ab hier: nur für eingeloggte Nutzer ──────────────────────────────────────
 from ui.sidebar import render_sidebar
 
+# _is_green muss VOR dem Page-Link-CSS bekannt sein
+_is_green = st.session_state.get("app_theme", "dark") == "green"
+
 # ── Kompaktes Spacing: Card → Link-Footer nahtlos ────────────────────────────
 _pl_link_bg     = "#f6fdfb" if _is_green else "#0c0c0c"
 _pl_link_border = "#b7e4c7" if _is_green else "#1e1e1e"
