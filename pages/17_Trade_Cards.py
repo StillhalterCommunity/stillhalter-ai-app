@@ -220,6 +220,79 @@ def _cached_stock_data(ticker: str) -> dict:
     return {"info": info, "fund": fund}
 
 
+def _translate_de(text: str) -> str:
+    """Übersetzt englischen Text auf Deutsch via Google Translate (kostenlos)."""
+    if not text or len(text) < 10:
+        return text
+    try:
+        r = requests.get(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "en", "tl": "de", "dt": "t", "q": text[:500]},
+            timeout=6, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            data = r.json()
+            translated = "".join(
+                p[0] for p in data[0] if isinstance(p, list) and p and p[0]
+            )
+            return translated.strip() or text
+    except Exception:
+        pass
+    return text
+
+
+def _ta_zeilen(row: pd.Series) -> list[str]:
+    """Extrahiert TA-Signale aus dem Scan-Ergebnis als lesbare Zeilen."""
+    lines = []
+
+    # SC Trend
+    trend = str(row.get("SC Trend(1D)", "")).lower()
+    if "↑cross" in trend or "cross" in trend and "bull" in trend:
+        lines.append("  • ↑ Kaufsignal (Trend-Cross bullish)")
+    elif "↑" in trend or "bull" in trend:
+        lines.append("  • ↑ Aufwärtstrend")
+    elif "↓cross" in trend or "cross" in trend and "bear" in trend:
+        lines.append("  • ↓ Verkaufssignal (Trend-Cross bearish)")
+    elif "↓" in trend or "bear" in trend:
+        lines.append("  • ↓ Abwärtstrend")
+
+    # MACD
+    macd = str(row.get("MACD(1D)", "")).lower()
+    if "↑cross" in macd or ("cross" in macd and "bull" in macd):
+        lines.append("  • MACD Pro: Bullish Cross ✅")
+    elif "↓cross" in macd or ("cross" in macd and "bear" in macd):
+        lines.append("  • MACD Pro: Bearish Cross ⚠️")
+    elif "bull" in macd:
+        lines.append("  • MACD Pro: bullish")
+    elif "bear" in macd:
+        lines.append("  • MACD Pro: bearish")
+    else:
+        lines.append("  • MACD Pro: neutral")
+
+    # Stochastik
+    stoch_raw = str(row.get("Stoch(1D)", ""))
+    try:
+        stoch_val = float(re.search(r"\d+", stoch_raw).group())
+        if stoch_val < 20:
+            lines.append(f"  • Dual Stoch: überverkauft ✅ ({stoch_val:.0f})")
+        elif stoch_val > 80:
+            lines.append(f"  • Dual Stoch: überkauft ⚠️ ({stoch_val:.0f})")
+        else:
+            lines.append(f"  • Dual Stoch: neutral ({stoch_val:.0f})")
+    except Exception:
+        pass
+
+    # RSI
+    rsi_raw = str(row.get("RSI(1D)", ""))
+    try:
+        rsi_val = float(re.search(r"\d+", rsi_raw).group())
+        lines.append(f"  • RSI {rsi_val:.0f}")
+    except Exception:
+        pass
+
+    return lines
+
+
 def _build_card_text(
     ticker: str,
     trade_exp: str,
@@ -234,30 +307,79 @@ def _build_card_text(
     trend_note: str,
     background: str,
     news_text: str,
+    delta: float = 0.0,
+    iv: float = 0.0,
+    crv: float = 0.0,
+    sektor: str = "",
+    company_name: str = "",
+    ta_lines: list[str] | None = None,
+    price_now: float = 0.0,
 ) -> str:
     """Generiert den kompletten WhatsApp-Text einer Trade Card."""
 
-    premium_total = round(premium * 100)
-    ath_str   = f" (-{_fmt_num(ath_dist, 0)}% unten ATH)" if ath_dist else ""
-    dte_str   = f" ({dte} Tage)" if dte else ""
+    premium_total  = round(premium * 100)
+    dte_safe       = max(dte, 1)
+    ann_rendite    = rendite_lz * 365 / dte_safe
+    otm_pct        = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
+    assign_prob    = round(abs(delta) * 100)
+    cash_reserve   = int(strike * 100)
+
+    # Roll-Potenzial: 1-Sigma wöchentliche Bewegung (IV × Kurs × √(7/365))
+    roll_usd = 0.0
+    if price_now > 0 and iv > 0:
+        roll_usd = price_now * (iv / 100) * (7 / 365) ** 0.5
+
+    # Absicherungs-Zeilen strukturiert aufbauen
+    absi_lines = []
+    if trend_note:
+        absi_lines.append(f"  • {trend_note}")
+    absi_lines.append(
+        f"  • Delta {delta:.2f} — Einbuchungsrisiko {'konservativ (≤20%)' if assign_prob <= 20 else 'moderat' if assign_prob <= 35 else 'erhöht'}"
+    )
+    if iv > 15:
+        absi_lines.append("  • Rollbar (IV ausreichend hoch)")
+    absi_lines.append(f"  • Cash Reserve: USD {cash_reserve:,} pro Kontrakt einplanen".replace(",", "."))
+
+    ta_block = "\n".join(ta_lines) if ta_lines else "  • Keine TA-Daten"
+
+    roll_line = ""
+    if roll_usd > 0:
+        roll_line = (
+            f"\n🔄 Roll-Potenzial: ±USD {_fmt_num(roll_usd)} pro Woche "
+            f"(1σ bei IV {iv:.0f}%)\n"
+            f"   → Rollbar auf Strike -{_fmt_num(roll_usd)} nach einer Woche möglich"
+        )
+
+    sektor_str  = sektor.upper() if sektor else "–"
+    crv_str     = f"{crv:.0f}" if crv else "–"
+    company_str = f"\n🏢 {company_name}" if company_name else ""
 
     lines = [
         "Aus Sicht der Technischen Analyse finde ich folgende Optionen spannend:",
         "",
         f"🔔 Trading Idee | {ticker} {trade_exp} @{strike:.0f} {option_type} verkaufen",
         "",
-        f"💰 Prämie: {_fmt_num(premium)} USD | {premium_total} USD gesamt (1x)",
-        f"📈 Rendite: ~{_fmt_num(rendite_lz)} %",
+        f"💰 Prämie: {_fmt_num(premium)} USD | {premium_total} USD gesamt (1x Kontrakt)",
+        f"📈 Rendite: ~{_fmt_num(ann_rendite, 1)}% p.a. / {_fmt_num(rendite_lz)}% Laufzeit ({dte}T)",
         f"📉 Strategie: {strategie}",
-        f"🎯 Strike: {strike:.0f} USD{ath_str}",
-        f"📅 Laufzeit: {german_exp}{dte_str}",
-        f"🛡️ Absicherung: {trend_note}",
+        f"🎯 Strike: USD {strike:.2f} ({_fmt_num(otm_pct, 1)}% OTM)",
+        f"📅 Laufzeit: {trade_exp} ({dte} Tage)",
+        f"⚡ Einbuchungswahrscheinlichkeit: ~{assign_prob}% (Delta {delta:.2f})",
         "",
-        f"🔍 Underlying Background {ticker}:",
-        background,
+        f"📊 Technische Analyse (1D):",
+        ta_block,
+        roll_line,
+        f"🛡️ Absicherung:",
+        "\n".join(absi_lines),
         "",
-        f"📰 News {ticker}:",
+        f"⭐ CRV Score: {crv_str}  ·  IV: {iv:.0f}%  ·  Sektor: {sektor_str}",
+        company_str,
+        "",
+        f"📰 Aktuelle News {ticker}:",
         news_text,
+        "",
+        f"📋 Hintergrund:",
+        background,
     ]
     return "\n".join(lines)
 
@@ -319,14 +441,11 @@ with st.expander("⚙️ **Einstellungen**", expanded=False):
     with s3:
         news_count = st.number_input("News-Zeilen pro Trade", 1, 6, 3)
 
-# Top N nach gewählter Sortierung
-top_df = (
-    df_all
-    .sort_values(sort_col, ascending=False)
-    .drop_duplicates(subset=["Ticker"])
-    .head(int(n_cards))
-    .reset_index(drop=True)
-)
+# Top N nach gewählter Sortierung — nur Optionen mit sinnvollem Delta
+_df_sorted = df_all.sort_values(sort_col, ascending=False).drop_duplicates(subset=["Ticker"])
+if "Delta" in _df_sorted.columns:
+    _df_sorted = _df_sorted[_df_sorted["Delta"].abs() >= 0.10]
+top_df = _df_sorted.head(int(n_cards)).reset_index(drop=True)
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
@@ -365,6 +484,16 @@ for idx, row in top_df.iterrows():
         news_auto    = _format_news_text(rss_items)
         ath_pct_val  = _ath_pct(ticker, strike)
 
+        # ── Zusätzliche Felder aus der Scan-Row ───────────────────────────
+        delta_raw   = float(row.get("Delta", 0.0))
+        iv_raw      = float(row.get("IV %", 0.0))
+        sektor_raw  = str(row.get("Sektor", ""))
+        # Kurs-Schätzung: aus Info-Objekt oder OTM-Back-Rechnung
+        price_now_raw = float(info.get("price") or info.get("currentPrice") or 0.0)
+        if price_now_raw <= 0 and otm_pct > 0:
+            price_now_raw = strike / (1 - otm_pct / 100)
+        ta_lines_built = _ta_zeilen(row)
+
         # ── Editierbare Felder ─────────────────────────────────────────────
         col_left, col_right = st.columns([3, 2])
 
@@ -376,8 +505,11 @@ for idx, row in top_df.iterrows():
                 "Hintergrund-Text (bearbeiten → auf Deutsch, 2–3 Sätze)</div>",
                 unsafe_allow_html=True,
             )
-            # Englischer Text als Vorschlag, bearbeitbar
-            default_bg = eng_desc[:600] if eng_desc else f"{company_name} ist ein börsennotiertes Unternehmen."
+            # Englischen Text übersetzen, bearbeitbar
+            if eng_desc:
+                default_bg = _translate_de(eng_desc[:400])
+            else:
+                default_bg = f"{company_name} ist ein börsennotiertes Unternehmen."
             background = st.text_area(
                 "Hintergrund",
                 value=default_bg,
@@ -414,6 +546,7 @@ for idx, row in top_df.iterrows():
         with col_right:
             st.markdown("**📊 Trade-Details**")
             ath_label = f"{_fmt_num(ath_pct_val, 0)}% unter ATH" if ath_pct_val else "ATH nicht verfügbar"
+            ann_r = rendite * 365 / max(dte, 1)
             st.markdown(f"""
 | | |
 |---|---|
@@ -422,7 +555,10 @@ for idx, row in top_df.iterrows():
 | **{option_type}-Verfall** | {german_exp} ({dte} Tage) |
 | **Prämie** | {_fmt_num(premium)} USD |
 | **Gesamt (1x)** | {round(premium*100)} USD |
+| **Rendite p.a.** | ~{_fmt_num(ann_r, 1)} % |
 | **Rendite LZ** | {_fmt_num(rendite)} % |
+| **Delta** | {delta_raw:.2f} |
+| **IV** | {iv_raw:.0f} % |
 | **OTM** | {_fmt_num(otm_pct, 1)} % |
 | **ATH-Abstand** | {ath_label} |
 | **CRV Score** | {crv:.0f} |
@@ -443,6 +579,13 @@ for idx, row in top_df.iterrows():
             trend_note=trend_note,
             background=background,
             news_text=news_text,
+            delta=delta_raw,
+            iv=iv_raw,
+            crv=crv,
+            sektor=sektor_raw,
+            company_name=company_name,
+            ta_lines=ta_lines_built,
+            price_now=price_now_raw,
         )
 
         all_card_texts.append(card_text)
