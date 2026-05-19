@@ -293,6 +293,99 @@ def _ta_zeilen(row: pd.Series) -> list[str]:
     return lines
 
 
+def _funda_block(fund: dict, price_now: float) -> str:
+    """Baut den Fundamentalanalyse-Textblock aus fetch_fundamentals()-Ergebnis."""
+    lines = []
+    f = fund or {}
+
+    def _pct(v) -> str:
+        """Formatiert Wachstum in %, z.B. 0.152 → +15,2%."""
+        try:
+            return ("+") + _fmt_num(float(v) * 100, 1) + "%" if float(v) >= 0 \
+                else _fmt_num(float(v) * 100, 1) + "%"
+        except Exception:
+            return "–"
+
+    def _val(v, dec=2, prefix="", suffix="") -> str:
+        try:
+            return f"{prefix}{_fmt_num(float(v), dec)}{suffix}"
+        except Exception:
+            return "–"
+
+    # EPS
+    eps_t = f.get("eps_trailing")
+    eps_f = f.get("eps_forward")
+    if eps_t or eps_f:
+        eps_str = _val(eps_t, 2, "$") if eps_t else "–"
+        fwd_str = _val(eps_f, 2, "$") if eps_f else "–"
+        lines.append(f"  • EPS: {eps_str} (TTM)  |  Forward: {fwd_str}")
+
+    # EPS-Wachstum
+    g_yoy  = f.get("earnings_growth_yoy")
+    g_next = f.get("eps_growth_next_year")
+    if g_yoy or g_next:
+        yoy_str  = _pct(g_yoy)  if g_yoy  is not None else "–"
+        next_str = _pct(g_next) if g_next is not None else "–"
+        lines.append(f"  • EPS-Wachstum: {yoy_str} (YoY)  |  {next_str} (nächstes Jahr)")
+
+    # Umsatzwachstum
+    rev_g = f.get("revenue_growth")
+    if rev_g is not None:
+        lines.append(f"  • Umsatzwachstum: {_pct(rev_g)} (YoY)")
+
+    # KGV
+    pe_t = f.get("pe_trailing")
+    pe_f = f.get("pe_forward")
+    if pe_t or pe_f:
+        pe_str  = _val(pe_t, 1) if pe_t else "–"
+        pef_str = _val(pe_f, 1) if pe_f else "–"
+        lines.append(f"  • KGV: {pe_str} (TTM)  |  Forward KGV: {pef_str}")
+
+    # PEG Ratio
+    peg = f.get("peg_ratio")
+    if peg is not None:
+        try:
+            peg_v   = float(peg)
+            peg_urt = "attraktiv (< 1,0) ✅" if peg_v < 1.0 \
+                      else "fair (1–2)" if peg_v < 2.0 \
+                      else "teuer (> 2) ⚠️"
+            lines.append(f"  • PEG Ratio: {_fmt_num(peg_v, 2)}  →  {peg_urt}")
+        except Exception:
+            pass
+
+    # DCF-Schätzung (Benjamin Graham: IV = EPS × (8,5 + 2g))
+    if eps_f and g_next:
+        try:
+            e   = float(eps_f)
+            g   = float(g_next) * 100        # in Prozent
+            dcf = e * (8.5 + 2 * g)
+            if dcf > 0 and price_now > 0:
+                margin = (dcf - price_now) / price_now * 100
+                margin_str = (f"+{_fmt_num(margin, 0)}% über Kurs ✅" if margin > 0
+                              else f"{_fmt_num(margin, 0)}% unter Kurs ⚠️")
+                lines.append(
+                    f"  • DCF-Schätzwert: ~${dcf:.0f} (Graham-Formel)  →  {margin_str}"
+                )
+        except Exception:
+            pass
+
+    # Analystenziel
+    target = f.get("target_price")
+    rating = f.get("analyst_rating", "")
+    n_ana  = f.get("num_analysts")
+    if target:
+        upside_str = ""
+        if price_now > 0:
+            upside = (float(target) - price_now) / price_now * 100
+            upside_str = f"  ({'+' if upside >= 0 else ''}{_fmt_num(upside, 0)}% Upside)"
+        ana_str = f"{n_ana} Analysten · " if n_ana else ""
+        lines.append(
+            f"  • Analystenziel: ${float(target):.0f}{upside_str}  ({ana_str}{rating})"
+        )
+
+    return "\n".join(lines) if lines else "  • Keine Fundamentaldaten verfügbar"
+
+
 def _build_card_text(
     ticker: str,
     trade_exp: str,
@@ -314,41 +407,69 @@ def _build_card_text(
     company_name: str = "",
     ta_lines: list[str] | None = None,
     price_now: float = 0.0,
+    fund: dict | None = None,
 ) -> str:
     """Generiert den kompletten WhatsApp-Text einer Trade Card."""
 
-    premium_total  = round(premium * 100)
-    dte_safe       = max(dte, 1)
-    ann_rendite    = rendite_lz * 365 / dte_safe
-    otm_pct        = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
-    assign_prob    = round(abs(delta) * 100)
-    cash_reserve   = int(strike * 100)
+    premium_total = round(premium * 100)
+    dte_safe      = max(dte, 1)
+    ann_rendite   = rendite_lz * 365 / dte_safe
+    otm_pct       = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
+    assign_prob   = round(abs(delta) * 100)
+    cash_reserve  = int(strike * 100)
 
-    # Roll-Potenzial: 1-Sigma wöchentliche Bewegung (IV × Kurs × √(7/365))
+    # Roll-Potenzial: 1σ wöchentliche Bewegung (IV × Kurs × √(7/365))
     roll_usd = 0.0
     if price_now > 0 and iv > 0:
         roll_usd = price_now * (iv / 100) * (7 / 365) ** 0.5
 
-    # Absicherungs-Zeilen strukturiert aufbauen
-    absi_lines = []
-    if trend_note:
-        absi_lines.append(f"  • {trend_note}")
-    absi_lines.append(
-        f"  • Delta {delta:.2f} — Einbuchungsrisiko {'konservativ (≤20%)' if assign_prob <= 20 else 'moderat' if assign_prob <= 35 else 'erhöht'}"
-    )
-    if iv > 15:
-        absi_lines.append("  • Rollbar (IV ausreichend hoch)")
-    absi_lines.append(f"  • Cash Reserve: USD {cash_reserve:,} pro Kontrakt einplanen".replace(",", "."))
-
+    # ── Technische Analyse ──────────────────────────────────────────────────
     ta_block = "\n".join(ta_lines) if ta_lines else "  • Keine TA-Daten"
 
-    roll_line = ""
+    # ── Fundamentalanalyse ──────────────────────────────────────────────────
+    funda_text = _funda_block(fund or {}, price_now)
+
+    # ── Risikomanagement ────────────────────────────────────────────────────
+    risk_lines = []
+
+    # Absicherung
+    if trend_note:
+        risk_lines.append(f"  • {trend_note}")
+    risk_lines.append(
+        f"  • Delta {delta:.2f} — Einbuchungsrisiko "
+        f"{'konservativ (≤20%)' if assign_prob <= 20 else 'moderat (21–35%)' if assign_prob <= 35 else 'erhöht (>35%)'}"
+    )
+    if iv > 15:
+        risk_lines.append("  • Rollbar (IV ausreichend hoch ✅)")
+    risk_lines.append(
+        f"  • Cash Reserve: USD {cash_reserve:,} pro Kontrakt einplanen".replace(",", ".")
+    )
+
+    # Roll-Potenzial
     if roll_usd > 0:
-        roll_line = (
-            f"\n🔄 Roll-Potenzial: ±USD {_fmt_num(roll_usd)} pro Woche "
-            f"(1σ bei IV {iv:.0f}%)\n"
-            f"   → Rollbar auf Strike -{_fmt_num(roll_usd)} nach einer Woche möglich"
+        new_strike = strike - roll_usd
+        risk_lines.append(
+            f"\n  🔄 Roll-Potenzial: ±USD {_fmt_num(roll_usd)} pro Woche (1σ bei IV {iv:.0f}%)"
         )
+        risk_lines.append(
+            f"     → Rollen möglich auf Strike ~${new_strike:.0f} nach einer Woche"
+        )
+
+    # Plan A / B / C
+    risk_lines.append("")
+    risk_lines.append(
+        f"  Plan A ✅  Take Profit: Position bei 50% Gewinn schließen"
+        f"{' (70% bei Laufzeit < 7T)' if dte < 14 else ''}"
+    )
+    risk_lines.append(
+        "  Plan B 🔄  Rollen: Wenn Strike bedroht → auf späteren Verfall"
+        f" rollen und Strike auf ~${new_strike:.0f} anpassen" if roll_usd > 0
+        else "  Plan B 🔄  Rollen: Wenn Strike bedroht → auf späteren Verfall / tieferen Strike rollen"
+    )
+    risk_lines.append(
+        "  Plan C 🆘  Einbuchung: Aktien einbuchen lassen → sofort Covered Call "
+        f"schreiben (Strike ~${strike * 1.05:.0f}, oberhalb Einstandspreis)"
+    )
 
     sektor_str  = sektor.upper() if sektor else "–"
     crv_str     = f"{crv:.0f}" if crv else "–"
@@ -366,11 +487,14 @@ def _build_card_text(
         f"📅 Laufzeit: {trade_exp} ({dte} Tage)",
         f"⚡ Einbuchungswahrscheinlichkeit: ~{assign_prob}% (Delta {delta:.2f})",
         "",
-        f"📊 Technische Analyse (1D):",
+        "📊 Technische Analyse (1D):",
         ta_block,
-        roll_line,
-        f"🛡️ Absicherung:",
-        "\n".join(absi_lines),
+        "",
+        "📐 Fundamentalanalyse:",
+        funda_text,
+        "",
+        "🛡️ Risikomanagement:",
+        "\n".join(risk_lines),
         "",
         f"⭐ CRV Score: {crv_str}  ·  IV: {iv:.0f}%  ·  Sektor: {sektor_str}",
         company_str,
@@ -378,7 +502,7 @@ def _build_card_text(
         f"📰 Aktuelle News {ticker}:",
         news_text,
         "",
-        f"📋 Hintergrund:",
+        "📋 Hintergrund:",
         background,
     ]
     return "\n".join(lines)
@@ -481,6 +605,7 @@ for idx, row in top_df.iterrows():
 
         company_name = info.get("name", ticker)
         eng_desc     = (info.get("description") or "").strip()
+        fund_data    = stock_data["fund"]
         news_auto    = _format_news_text(rss_items)
         ath_pct_val  = _ath_pct(ticker, strike)
 
@@ -545,23 +670,45 @@ for idx, row in top_df.iterrows():
 
         with col_right:
             st.markdown("**📊 Trade-Details**")
-            ath_label = f"{_fmt_num(ath_pct_val, 0)}% unter ATH" if ath_pct_val else "ATH nicht verfügbar"
+            ath_label = f"{_fmt_num(ath_pct_val, 0)}% unter ATH" if ath_pct_val else "–"
             ann_r = rendite * 365 / max(dte, 1)
+
+            # Fundamental-Werte für Tabelle
+            def _fd(key, dec=1, mul=1.0, prefix="", suffix=""):
+                v = fund_data.get(key)
+                try:
+                    return f"{prefix}{_fmt_num(float(v) * mul, dec)}{suffix}"
+                except Exception:
+                    return "–"
+
+            pe_t_disp  = _fd("pe_trailing",  1)
+            pe_f_disp  = _fd("pe_forward",   1)
+            peg_disp   = _fd("peg_ratio",    2)
+            eps_t_disp = _fd("eps_trailing", 2, prefix="$")
+            g_yoy_disp = _fd("earnings_growth_yoy", 1, mul=100, suffix="%")
+            tgt_disp   = _fd("target_price", 0, prefix="$")
+
             st.markdown(f"""
 | | |
 |---|---|
 | **Strategie** | {strategie} |
 | **Strike** | ${strike:.0f} |
-| **{option_type}-Verfall** | {german_exp} ({dte} Tage) |
+| **{option_type}-Verfall** | {german_exp} ({dte}T) |
 | **Prämie** | {_fmt_num(premium)} USD |
 | **Gesamt (1x)** | {round(premium*100)} USD |
-| **Rendite p.a.** | ~{_fmt_num(ann_r, 1)} % |
-| **Rendite LZ** | {_fmt_num(rendite)} % |
+| **Rendite p.a.** | ~{_fmt_num(ann_r, 1)}% |
+| **Rendite LZ** | {_fmt_num(rendite)}% |
 | **Delta** | {delta_raw:.2f} |
-| **IV** | {iv_raw:.0f} % |
-| **OTM** | {_fmt_num(otm_pct, 1)} % |
+| **IV** | {iv_raw:.0f}% |
+| **OTM** | {_fmt_num(otm_pct, 1)}% |
 | **ATH-Abstand** | {ath_label} |
 | **CRV Score** | {crv:.0f} |
+| | |
+| **EPS (TTM)** | {eps_t_disp} |
+| **EPS-Wachstum** | {g_yoy_disp} |
+| **KGV / Fwd** | {pe_t_disp} / {pe_f_disp} |
+| **PEG Ratio** | {peg_disp} |
+| **Analystenziel** | {tgt_disp} |
 """)
 
         # ── Generierter Text ───────────────────────────────────────────────
@@ -586,6 +733,7 @@ for idx, row in top_df.iterrows():
             company_name=company_name,
             ta_lines=ta_lines_built,
             price_now=price_now_raw,
+            fund=fund_data,
         )
 
         all_card_texts.append(card_text)
