@@ -293,97 +293,207 @@ def _ta_zeilen(row: pd.Series) -> list[str]:
     return lines
 
 
-def _funda_block(fund: dict, price_now: float) -> str:
-    """Baut den Fundamentalanalyse-Textblock aus fetch_fundamentals()-Ergebnis."""
-    lines = []
+def _pct_str(v) -> str:
+    """Formatiert Dezimal-Wachstum als %-String: 0.15 → '+15%'."""
+    try:
+        p = float(v) * 100
+        return f"+{_fmt_num(p, 0)}%" if p >= 0 else f"{_fmt_num(p, 0)}%"
+    except Exception:
+        return "–"
+
+
+def _strike_dte_reason(
+    strike: float, price_now: float, delta: float,
+    dte: int, iv: float, otm_pct: float,
+) -> str:
+    """Erklärt in 2–3 Sätzen warum Strike und Laufzeit so gewählt wurden."""
+    abs_d = abs(delta)
+    parts = []
+
+    # Strike-Begründung
+    if abs_d <= 0.20:
+        parts.append(
+            f"Strike ${strike:.0f} liegt {_fmt_num(otm_pct, 1)}% unter dem aktuellen Kurs "
+            f"(Delta {delta:.2f}) — konservativ, niedriges Einbuchungsrisiko."
+        )
+    elif abs_d <= 0.35:
+        parts.append(
+            f"Strike ${strike:.0f} liegt {_fmt_num(otm_pct, 1)}% unter dem aktuellen Kurs "
+            f"(Delta {delta:.2f}) — moderate Balance aus attraktiver Prämie und Sicherheitsabstand."
+        )
+    else:
+        parts.append(
+            f"Strike ${strike:.0f} liegt {_fmt_num(otm_pct, 1)}% unter dem aktuellen Kurs "
+            f"(Delta {delta:.2f}) — aggressiv nahe ATM für maximale Prämie, nur bei starkem Aufwärtstrend sinnvoll."
+        )
+
+    # Laufzeit-Begründung
+    if dte <= 10:
+        parts.append(
+            f"Laufzeit {dte} Tage (Wochenoption): täglicher Theta-Abbau am höchsten — "
+            "maximale annualisierte Rendite bei kurzer Kapitalbindung."
+        )
+    elif dte <= 45:
+        parts.append(
+            f"Laufzeit {dte} Tage (Monatsoption): optimales Theta-Fenster zwischen "
+            "Zeitwertrendite und ausreichender Rollingflexibilität."
+        )
+    else:
+        parts.append(
+            f"Laufzeit {dte} Tage (Quartalsoption): höhere absolute Prämie durch längere IV-Zeitprämie, "
+            "mehr Puffer für Kurskorrekturen."
+        )
+
+    # IV-Kontext
+    if iv > 40:
+        parts.append(f"IV {iv:.0f}% ist überdurchschnittlich hoch — Prämie deutlich über Normalwert.")
+    elif iv > 25:
+        parts.append(f"IV {iv:.0f}% im normalen Bereich — faire Prämie für das Risiko.")
+    elif iv > 0:
+        parts.append(f"IV {iv:.0f}% gering — Strike nahe am Kurs gewählt, um ausreichend Prämie zu erzielen.")
+
+    return "\n".join(f"  {p}" for p in parts)
+
+
+def _crv_reason(
+    crv: float, delta: float, iv: float,
+    rendite_lz: float, dte: int, otm_pct: float,
+) -> str:
+    """Kurze Begründung warum diese Option den besten CRV hat."""
+    ann = rendite_lz * 365 / max(dte, 1)
+    abs_d = abs(delta)
+    reasons = [
+        f"~{_fmt_num(ann, 1)}% p.a. bei {_fmt_num(otm_pct, 1)}% OTM (Delta {delta:.2f})"
+    ]
+    if iv > 35:
+        reasons.append(f"erhöhte IV ({iv:.0f}%) hebt Prämie überproportional an")
+    elif iv > 20:
+        reasons.append(f"IV {iv:.0f}% liefert faire Zeitwertprämie")
+    if abs_d <= 0.25:
+        reasons.append("konservatives Delta verbessert Chance/Risiko-Verhältnis")
+    elif abs_d > 0.35:
+        reasons.append("höheres Delta liefert aggressive Prämie bei Trendunterstützung")
+    return f"  CRV Score {crv:.0f}: " + " · ".join(reasons)
+
+
+def _covered_call_reco(
+    row: pd.Series, price_now: float, dte: int, iv: float,
+) -> str:
+    """Empfiehlt Covered Call wenn TA auf mehreren TFs bullish ist."""
+    if price_now <= 0:
+        return ""
+
+    sc        = str(row.get("SC Trend(1D)", "")).lower()
+    macd      = str(row.get("MACD(1D)",    "")).lower()
+    stoch_raw = str(row.get("Stoch(1D)",   ""))
+
+    bullish = 0
+    signals = []
+    if "bull" in sc or "↑" in sc:
+        bullish += 1
+        signals.append("SC Trend ↑")
+    if "bull" in macd or "↑cross" in macd:
+        bullish += 1
+        signals.append("MACD bullish")
+    try:
+        sv = float(re.search(r"\d+", stoch_raw).group())
+        if sv < 60:
+            bullish += 1
+            signals.append(f"Stoch {sv:.0f} (nicht überkauft)")
+    except Exception:
+        pass
+
+    if bullish < 2:
+        return ""
+
+    # Strike-Vorschläge auf sinnvollen Abstand runden
+    step = 5 if price_now >= 100 else 2.5 if price_now >= 30 else 1
+    atm_strike = round(price_now / step) * step
+    otm_strike = round((price_now * 1.035) / step) * step
+
+    if bullish >= 3:
+        empfehlung = (
+            f"OTM Call ${otm_strike:.0f} empfohlen bei starkem Aufwärtstrend "
+            f"({', '.join(signals)}) — Prämie kassieren + Kursgewinn bis ${otm_strike:.0f} mitnehmen."
+        )
+    else:
+        empfehlung = (
+            f"ATM Call ${atm_strike:.0f} empfohlen bei moderatem Aufwärtstrend "
+            f"({', '.join(signals)}) — maximale Zeitwertrendite, Kursgewinn begrenzt."
+        )
+
+    return "\n".join([
+        "",
+        "💡 Covered Call Alternative (Aufwärtstrend erkannt):",
+        f"  Aktie kaufen bei ~${price_now:.2f}",
+        f"  → ATM ${atm_strike:.0f} CALL verkaufen: maximale Prämie "
+        f"| Kursgewinn bis ${atm_strike:.0f}",
+        f"  → OTM ${otm_strike:.0f} CALL verkaufen: kleinere Prämie "
+        f"| Kursgewinn bis ${otm_strike:.0f} (+{(otm_strike/price_now-1)*100:.1f}%)",
+        f"  ✅ {empfehlung}",
+    ])
+
+
+def _funda_compact(fund: dict, price_now: float) -> str:
+    """Kompakte 2-Zeilen Fundamentalübersicht."""
     f = fund or {}
 
-    def _pct(v) -> str:
-        """Formatiert Wachstum in %, z.B. 0.152 → +15,2%."""
+    def _fv(key, dec=1, prefix="", suffix="", mul=1.0):
+        v = f.get(key)
         try:
-            return ("+") + _fmt_num(float(v) * 100, 1) + "%" if float(v) >= 0 \
-                else _fmt_num(float(v) * 100, 1) + "%"
+            return f"{prefix}{_fmt_num(float(v) * mul, dec)}{suffix}"
         except Exception:
             return "–"
 
-    def _val(v, dec=2, prefix="", suffix="") -> str:
-        try:
-            return f"{prefix}{_fmt_num(float(v), dec)}{suffix}"
-        except Exception:
-            return "–"
-
-    # EPS
-    eps_t = f.get("eps_trailing")
-    eps_f = f.get("eps_forward")
-    if eps_t or eps_f:
-        eps_str = _val(eps_t, 2, "$") if eps_t else "–"
-        fwd_str = _val(eps_f, 2, "$") if eps_f else "–"
-        lines.append(f"  • EPS: {eps_str} (TTM)  |  Forward: {fwd_str}")
-
-    # EPS-Wachstum
+    pe_t   = _fv("pe_trailing", 1)
+    pe_f   = _fv("pe_forward",  1)
+    peg    = f.get("peg_ratio")
     g_yoy  = f.get("earnings_growth_yoy")
+    eps_f  = f.get("eps_forward")
     g_next = f.get("eps_growth_next_year")
-    if g_yoy or g_next:
-        yoy_str  = _pct(g_yoy)  if g_yoy  is not None else "–"
-        next_str = _pct(g_next) if g_next is not None else "–"
-        lines.append(f"  • EPS-Wachstum: {yoy_str} (YoY)  |  {next_str} (nächstes Jahr)")
+    target = f.get("target_price")
+    rating = f.get("analyst_rating", "")
+    n_ana  = f.get("num_analysts", "")
 
-    # Umsatzwachstum
-    rev_g = f.get("revenue_growth")
-    if rev_g is not None:
-        lines.append(f"  • Umsatzwachstum: {_pct(rev_g)} (YoY)")
-
-    # KGV
-    pe_t = f.get("pe_trailing")
-    pe_f = f.get("pe_forward")
-    if pe_t or pe_f:
-        pe_str  = _val(pe_t, 1) if pe_t else "–"
-        pef_str = _val(pe_f, 1) if pe_f else "–"
-        lines.append(f"  • KGV: {pe_str} (TTM)  |  Forward KGV: {pef_str}")
-
-    # PEG Ratio
-    peg = f.get("peg_ratio")
+    # Zeile 1: Bewertung
+    l1_parts = [f"KGV {pe_t} / Fwd {pe_f}"]
     if peg is not None:
         try:
-            peg_v   = float(peg)
-            peg_urt = "attraktiv (< 1,0) ✅" if peg_v < 1.0 \
-                      else "fair (1–2)" if peg_v < 2.0 \
-                      else "teuer (> 2) ⚠️"
-            lines.append(f"  • PEG Ratio: {_fmt_num(peg_v, 2)}  →  {peg_urt}")
+            pv = float(peg)
+            sym = "✅" if pv < 1.0 else "⚠️" if pv > 2.0 else ""
+            l1_parts.append(f"PEG {_fmt_num(pv, 2)}{sym}")
         except Exception:
             pass
+    if g_yoy is not None:
+        l1_parts.append(f"EPS-Wachstum {_pct_str(g_yoy)} (YoY)")
+    line1 = "  • " + "  |  ".join(l1_parts)
 
-    # DCF-Schätzung (Benjamin Graham: IV = EPS × (8,5 + 2g))
+    # Zeile 2: DCF + Analystenziel
+    l2_parts = []
     if eps_f and g_next:
         try:
-            e   = float(eps_f)
-            g   = float(g_next) * 100        # in Prozent
-            dcf = e * (8.5 + 2 * g)
+            dcf = float(eps_f) * (8.5 + 2 * float(g_next) * 100)
             if dcf > 0 and price_now > 0:
-                margin = (dcf - price_now) / price_now * 100
-                margin_str = (f"+{_fmt_num(margin, 0)}% über Kurs ✅" if margin > 0
-                              else f"{_fmt_num(margin, 0)}% unter Kurs ⚠️")
-                lines.append(
-                    f"  • DCF-Schätzwert: ~${dcf:.0f} (Graham-Formel)  →  {margin_str}"
+                m   = (dcf - price_now) / price_now * 100
+                sym = "✅" if m > 0 else "⚠️"
+                l2_parts.append(
+                    f"DCF ~${dcf:.0f} ({'+' if m >= 0 else ''}{m:.0f}% z. Kurs) {sym}"
                 )
         except Exception:
             pass
-
-    # Analystenziel
-    target = f.get("target_price")
-    rating = f.get("analyst_rating", "")
-    n_ana  = f.get("num_analysts")
     if target:
-        upside_str = ""
-        if price_now > 0:
-            upside = (float(target) - price_now) / price_now * 100
-            upside_str = f"  ({'+' if upside >= 0 else ''}{_fmt_num(upside, 0)}% Upside)"
-        ana_str = f"{n_ana} Analysten · " if n_ana else ""
-        lines.append(
-            f"  • Analystenziel: ${float(target):.0f}{upside_str}  ({ana_str}{rating})"
-        )
+        try:
+            t = float(target)
+            up = (t - price_now) / price_now * 100 if price_now > 0 else 0
+            ana = f"{n_ana} Analysten · " if n_ana else ""
+            l2_parts.append(
+                f"Ziel ${t:.0f} ({'+' if up >= 0 else ''}{up:.0f}%) — {ana}{rating}"
+            )
+        except Exception:
+            pass
+    line2 = ("  • " + "  |  ".join(l2_parts)) if l2_parts else ""
 
-    return "\n".join(lines) if lines else "  • Keine Fundamentaldaten verfügbar"
+    return "\n".join(x for x in [line1, line2] if x) or "  • Keine Fundamentaldaten verfügbar"
 
 
 def _build_card_text(
@@ -408,6 +518,7 @@ def _build_card_text(
     ta_lines: list[str] | None = None,
     price_now: float = 0.0,
     fund: dict | None = None,
+    covered_call: str = "",
 ) -> str:
     """Generiert den kompletten WhatsApp-Text einer Trade Card."""
 
@@ -418,16 +529,18 @@ def _build_card_text(
     assign_prob   = round(abs(delta) * 100)
     cash_reserve  = int(strike * 100)
 
-    # Roll-Potenzial: 1σ wöchentliche Bewegung (IV × Kurs × √(7/365))
-    roll_usd = 0.0
+    # Roll-Potenzial: 1σ wöchentliche Bewegung
+    roll_usd   = 0.0
+    new_strike = strike
     if price_now > 0 and iv > 0:
-        roll_usd = price_now * (iv / 100) * (7 / 365) ** 0.5
+        roll_usd   = price_now * (iv / 100) * (7 / 365) ** 0.5
+        new_strike = strike - roll_usd
 
-    # ── Technische Analyse ──────────────────────────────────────────────────
-    ta_block = "\n".join(ta_lines) if ta_lines else "  • Keine TA-Daten"
-
-    # ── Fundamentalanalyse ──────────────────────────────────────────────────
-    funda_text = _funda_block(fund or {}, price_now)
+    # ── Erklärungsblöcke ────────────────────────────────────────────────────
+    ta_block       = "\n".join(ta_lines) if ta_lines else "  • Keine TA-Daten"
+    funda_text     = _funda_compact(fund or {}, price_now)
+    crv_text       = _crv_reason(crv, delta, iv, rendite_lz, dte, otm_pct)
+    strike_dte_txt = _strike_dte_reason(strike, price_now, delta, dte, iv, otm_pct)
 
     # ── Risikomanagement ────────────────────────────────────────────────────
     risk_lines = []
@@ -437,75 +550,68 @@ def _build_card_text(
         risk_lines.append(f"  • {trend_note}")
     risk_lines.append(
         f"  • Delta {delta:.2f} — Einbuchungsrisiko "
-        f"{'konservativ (≤20%)' if assign_prob <= 20 else 'moderat (21–35%)' if assign_prob <= 35 else 'erhöht (>35%)'}"
+        f"{'konservativ ≤20%' if assign_prob <= 20 else 'moderat 21–35%' if assign_prob <= 35 else 'erhöht >35%'}"
     )
     if iv > 15:
         risk_lines.append("  • Rollbar (IV ausreichend hoch ✅)")
     risk_lines.append(
         f"  • Cash Reserve: USD {cash_reserve:,} pro Kontrakt einplanen".replace(",", ".")
     )
-
-    # Roll-Potenzial
     if roll_usd > 0:
-        new_strike = strike - roll_usd
         risk_lines.append(
-            f"\n  🔄 Roll-Potenzial: ±USD {_fmt_num(roll_usd)} pro Woche (1σ bei IV {iv:.0f}%)"
-        )
-        risk_lines.append(
-            f"     → Rollen möglich auf Strike ~${new_strike:.0f} nach einer Woche"
+            f"  • Roll-Potenzial: ±USD {_fmt_num(roll_usd)} / Woche (1σ IV {iv:.0f}%)"
+            f" → Strike auf ~${new_strike:.0f} rollbar"
         )
 
-    # Plan A / B / C
-    risk_lines.append("")
-    risk_lines.append(
-        f"  Plan A ✅  Take Profit: Position bei 50% Gewinn schließen"
-        f"{' (70% bei Laufzeit < 7T)' if dte < 14 else ''}"
-    )
-    risk_lines.append(
-        "  Plan B 🔄  Rollen: Wenn Strike bedroht → auf späteren Verfall"
-        f" rollen und Strike auf ~${new_strike:.0f} anpassen" if roll_usd > 0
-        else "  Plan B 🔄  Rollen: Wenn Strike bedroht → auf späteren Verfall / tieferen Strike rollen"
-    )
-    risk_lines.append(
-        "  Plan C 🆘  Einbuchung: Aktien einbuchen lassen → sofort Covered Call "
-        f"schreiben (Strike ~${strike * 1.05:.0f}, oberhalb Einstandspreis)"
-    )
+    risk_lines += [
+        "",
+        f"  Plan A ✅  Take Profit bei {70 if dte < 14 else 50}% Gewinn schließen",
+        f"  Plan B 🔄  Strike bedroht → auf nächsten Verfall rollen, Strike ~${new_strike:.0f}",
+        f"  Plan C 🆘  Einbuchung akzeptieren → Covered Call ${strike * 1.05:.0f} schreiben",
+    ]
 
     sektor_str  = sektor.upper() if sektor else "–"
     crv_str     = f"{crv:.0f}" if crv else "–"
-    company_str = f"\n🏢 {company_name}" if company_name else ""
+    company_str = f"🏢 {company_name}" if company_name else ""
+    price_str   = f"${price_now:.2f}" if price_now > 0 else "–"
 
     lines = [
         "Aus Sicht der Technischen Analyse finde ich folgende Optionen spannend:",
         "",
         f"🔔 Trading Idee | {ticker} {trade_exp} @{strike:.0f} {option_type} verkaufen",
+        f"💵 Kurs aktuell: {price_str}  ·  Strike ${strike:.0f} ({_fmt_num(otm_pct, 1)}% OTM)",
         "",
-        f"💰 Prämie: {_fmt_num(premium)} USD | {premium_total} USD gesamt (1x Kontrakt)",
+        f"💰 Prämie: {_fmt_num(premium)} USD | {premium_total} USD (1 Kontrakt)",
         f"📈 Rendite: ~{_fmt_num(ann_rendite, 1)}% p.a. / {_fmt_num(rendite_lz)}% Laufzeit ({dte}T)",
         f"📉 Strategie: {strategie}",
-        f"🎯 Strike: USD {strike:.2f} ({_fmt_num(otm_pct, 1)}% OTM)",
-        f"📅 Laufzeit: {trade_exp} ({dte} Tage)",
-        f"⚡ Einbuchungswahrscheinlichkeit: ~{assign_prob}% (Delta {delta:.2f})",
+        f"⚡ Einbuchungsrisiko: ~{assign_prob}% (Delta {delta:.2f})",
+        "",
+        "💡 Warum diese Option?",
+        crv_text,
+        "",
+        "🎯 Strike & Laufzeit:",
+        strike_dte_txt,
         "",
         "📊 Technische Analyse (1D):",
         ta_block,
         "",
-        "📐 Fundamentalanalyse:",
+        "📐 Fundamentals:",
         funda_text,
         "",
         "🛡️ Risikomanagement:",
         "\n".join(risk_lines),
+        covered_call,
         "",
-        f"⭐ CRV Score: {crv_str}  ·  IV: {iv:.0f}%  ·  Sektor: {sektor_str}",
+        f"⭐ CRV {crv_str}  ·  IV {iv:.0f}%  ·  Sektor {sektor_str}",
         company_str,
         "",
-        f"📰 Aktuelle News {ticker}:",
+        f"📰 News {ticker}:",
         news_text,
         "",
         "📋 Hintergrund:",
         background,
     ]
-    return "\n".join(lines)
+    return "\n".join(x for x in lines if x is not None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -617,7 +723,8 @@ for idx, row in top_df.iterrows():
         price_now_raw = float(info.get("price") or info.get("currentPrice") or 0.0)
         if price_now_raw <= 0 and otm_pct > 0:
             price_now_raw = strike / (1 - otm_pct / 100)
-        ta_lines_built = _ta_zeilen(row)
+        ta_lines_built    = _ta_zeilen(row)
+        covered_call_text = _covered_call_reco(row, price_now_raw, dte, iv_raw)
 
         # ── Editierbare Felder ─────────────────────────────────────────────
         col_left, col_right = st.columns([3, 2])
@@ -734,6 +841,7 @@ for idx, row in top_df.iterrows():
             ta_lines=ta_lines_built,
             price_now=price_now_raw,
             fund=fund_data,
+            covered_call=covered_call_text,
         )
 
         all_card_texts.append(card_text)
