@@ -557,6 +557,8 @@ if st.session_state.get("scan_running"):
 # ── Hintergrund-Scan Status anzeigen ─────────────────────────────────────────
 import data.background_scan as bg_scan
 _bg = bg_scan.get_state()
+_bg_poll_needed = False   # Polling-Flag: rerun erst am Ende, NACH Buttons!
+
 if _bg["running"]:
     pct  = _bg["progress"]
     done = _bg["done"]
@@ -577,7 +579,9 @@ if _bg["running"]:
     if st.button("⏹ Scan abbrechen", key="btn_stop_bg"):
         bg_scan.stop_scan()
         st.rerun()
-    import time as _t; _t.sleep(2); st.rerun()
+    # ⚠️  KEIN sleep+rerun hier — Button-Klicks würden sonst verschluckt!
+    # Das Polling passiert am Seitenende (nach allen Buttons).
+    _bg_poll_needed = True
 elif _bg["finished_at"] and _bg["results"] is not None and not _bg["results"].empty:
     # Ergebnisse aus Hintergrund-Scan übernehmen
     if st.session_state.scan_results is None or st.session_state.scan_results.empty:
@@ -1321,3 +1325,10 @@ else:
             margin=dict(l=10, r=10, t=20, b=40),
         )
         st.plotly_chart(fig, use_container_width=True)
+
+# ── Hintergrund-Scan Polling (am Seitenende — nach allen Buttons!) ────────────
+# Erst hier sleep+rerun, damit Button-Klicks in dieser Runde verarbeitet werden.
+if _bg_poll_needed and not start_scan:
+    import time as _t
+    _t.sleep(2)
+    st.rerun()
