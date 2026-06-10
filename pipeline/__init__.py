@@ -1,0 +1,1 @@
+# Stillhalter AI — Signal Pipeline
