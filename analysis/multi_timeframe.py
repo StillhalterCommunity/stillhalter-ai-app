@@ -728,7 +728,7 @@ class ConvergenceResult:
     """
     strategy: str = "put"          # "put" | "call"
 
-    # Gesamt-Score 0-100 (gewichteter Durchschnitt 1D 60% + 4H 40%)
+    # Gesamt-Score 0-100
     score: float = 0.0
     score_1d: float = 0.0
     score_4h: float = 0.0
@@ -736,20 +736,59 @@ class ConvergenceResult:
     label: str = "–"               # "Perfekt" | "Sehr nah" | "Nah" | "Entfernt"
     bar: str = ""                  # visueller Balken "████░░░░░░"
 
+    # Transparenz — Komponenten-Breakdown (neu)
+    components_primary: dict = None    # {"stoch": x, "rsi": x, "ema": x, ...}
+    components_secondary: dict = None
+    primary_tf: str = "1D"         # Name des primären Timeframes
+    secondary_tf: str = "4H"       # Name des sekundären Timeframes
+    contradiction: bool = False    # True wenn primär/sekundär widersprechen
+    contradiction_penalty: float = 1.0  # < 1.0 wenn Widerspruch vorliegt
+
+    def __post_init__(self):
+        if self.components_primary is None:
+            self.components_primary = {}
+        if self.components_secondary is None:
+            self.components_secondary = {}
+
 
 def _proximity_put(tf: TFSignal) -> dict:
     """Berechnet Short Put Konvergenz-Teilscores für einen Timeframe (je 0-100)."""
 
-    # ── Stochastik: ideal = %K kreuzt 20 aufwärts ─────────────────────────
-    k = tf.stoch_k
-    if tf.stoch_cross_20_up:
+    # ── Stillhalter Dual Stochastik (fast 14,3,3 + slow 35,10,5) ───────────
+    # Regel: beide sollen sich unterstützen, nicht widersprechen.
+    # Widerspruch = fast oversold (<20) aber slow overbought (>80) oder umgekehrt.
+    # Flexibilität: beide oversold genügt (kein gleichzeitiger Cross nötig).
+    k      = tf.stoch_k
+    slow_k = tf.stoch_slow_k
+
+    stoch_contradict = (
+        (tf.stoch_oversold and tf.stoch_slow_overbought) or
+        (tf.stoch_overbought and tf.stoch_slow_oversold)
+    )
+
+    if stoch_contradict:
+        # Widerspruch = kein verlässliches Signal
+        stoch_s = 5
+    elif tf.stoch_both_oversold and (tf.stoch_cross_20_up or tf.stoch_ready_buy):
+        # Ideal: BEIDE oversold + K kreuzt D aufwärts (oder K>D im oversold)
         stoch_s = 100
-    elif k < 20 and tf.stoch_bullish:          # überverkauft + K dreht auf
+    elif tf.stoch_both_oversold:
+        # Beide oversold, noch kein Cross — bestätigendes Setup (Flexibilität!)
         stoch_s = 88
-    elif k < 20:                               # überverkauft, noch fallend
-        stoch_s = 65
-    elif k < 30:                               # gerade aus Überverkauft-Zone
-        stoch_s = int(80 - (k - 20) * 3.5)    # 80 bei k=20 → 45 bei k=30
+    elif tf.stoch_cross_20_up and slow_k < 35:
+        # Fast-Cross vorhanden, slow nähert sich oversold
+        stoch_s = 82
+    elif tf.stoch_oversold and slow_k < 35:
+        # Fast oversold, slow kommt nach — gutes Setup
+        stoch_s = 72
+    elif tf.stoch_cross_20_up:
+        # Cross vorhanden, slow noch neutral — vorsichtig positiv
+        stoch_s = 68
+    elif k < 20:
+        # Nur fast oversold, slow neutral
+        stoch_s = 55
+    elif k < 30:
+        stoch_s = int(80 - (k - 20) * 3.5)
     elif k < 50:
         stoch_s = int(max(10, 40 - (k - 30) * 1.5))
     else:
@@ -841,16 +880,34 @@ def _proximity_put(tf: TFSignal) -> dict:
 def _proximity_call(tf: TFSignal) -> dict:
     """Berechnet Short Call Konvergenz-Teilscores für einen Timeframe (je 0-100)."""
 
-    # ── Stochastik: ideal = %K kreuzt 80 abwärts ──────────────────────────
-    k = tf.stoch_k
-    if tf.stoch_cross_80_down:
+    # ── Stillhalter Dual Stochastik (fast 14,3,3 + slow 35,10,5) ───────────
+    # Für Short Call: beide sollen overbought sein, kein Widerspruch.
+    k      = tf.stoch_k
+    slow_k = tf.stoch_slow_k
+
+    stoch_contradict = (
+        (tf.stoch_overbought and tf.stoch_slow_oversold) or
+        (tf.stoch_oversold and tf.stoch_slow_overbought)
+    )
+
+    if stoch_contradict:
+        stoch_s = 5
+    elif tf.stoch_both_overbought and (tf.stoch_cross_80_down or tf.stoch_ready_sell):
+        # Ideal: BEIDE overbought + K kreuzt D abwärts
         stoch_s = 100
-    elif k > 80 and tf.stoch_bearish:          # überkauft + K dreht ab
+    elif tf.stoch_both_overbought:
+        # Beide overbought, noch kein Cross — bestätigend (Flexibilität!)
         stoch_s = 88
+    elif tf.stoch_cross_80_down and slow_k > 65:
+        stoch_s = 82
+    elif tf.stoch_overbought and slow_k > 65:
+        stoch_s = 72
+    elif tf.stoch_cross_80_down:
+        stoch_s = 68
     elif k > 80:
-        stoch_s = 65
+        stoch_s = 55
     elif k > 70:
-        stoch_s = int(80 - (80 - k) * 3.5)    # 80 bei k=80 → 45 bei k=70
+        stoch_s = int(80 - (80 - k) * 3.5)
     elif k > 50:
         stoch_s = int(max(10, 40 - (70 - k) * 1.5))
     else:
@@ -977,6 +1034,101 @@ def calc_convergence_score(mtf: MultiTFResult, strategy: str = "put") -> Converg
         strategy=strategy,
         score=combined, score_1d=score_1d, score_4h=score_4h,
         label=label, bar=bar,
+        components_primary=s_1d, components_secondary=s_4h,
+        primary_tf="1D", secondary_tf="4H",
+    )
+
+
+def calc_convergence_score_dte(
+    mtf: "MultiTFResult",
+    strategy: str = "put",
+    dte: int = 30,
+) -> ConvergenceResult:
+    """
+    DTE-gewichtete Konvergenz — Timeframe-Gewichtung abhängig von Optionslaufzeit:
+
+    0–21 DTE  → 4H primär (65%) + 1D sekundär (35%)
+                Kurzläufer reagieren schnell: 4H-Chart entscheidet.
+                1D-Trend darf nicht widersprechen (Penalty bei Widerspruch).
+
+    21–60 DTE → 1D primär (65%) + 4H sekundär (35%)
+                Mittelfristig: 1D-Chart entscheidet.
+                4H-Trend darf nicht widersprechen.
+
+    >60 DTE   → 1D primär (55%) + 1W sekundär (45%)
+                Langläufer: Wochentrend wird dominanter.
+                1W-Trend darf nicht widersprechen.
+
+    Widerspruch-Definition: primär bullish (score >55) aber sekundär bearish (score <30)
+    → 30% Penalty auf den Gesamt-Score (Indikatoren bestätigen sich nicht gegenseitig).
+    """
+    proximity_fn = _proximity_put if strategy == "put" else _proximity_call
+    zero = {"stoch": 0, "rsi": 0, "ema": 0, "macd": 0, "div": 0, "squeeze": 0, "volume": 0, "total": 0}
+
+    # ── Timeframe-Auswahl nach DTE ────────────────────────────────────────────
+    if dte <= 21:
+        primary_tf   = mtf.tf_4h
+        secondary_tf = mtf.tf_1d
+        w_prim, w_sec = 0.65, 0.35
+        prim_name, sec_name = "4H", "1D"
+    elif dte <= 60:
+        primary_tf   = mtf.tf_1d
+        secondary_tf = mtf.tf_4h
+        w_prim, w_sec = 0.65, 0.35
+        prim_name, sec_name = "1D", "4H"
+    else:
+        primary_tf   = mtf.tf_1d
+        secondary_tf = mtf.tf_1w
+        w_prim, w_sec = 0.55, 0.45
+        prim_name, sec_name = "1D", "1W"
+
+    if primary_tf is None:
+        # Fallback: Basisberechnung
+        return calc_convergence_score(mtf, strategy)
+
+    s_prim = proximity_fn(primary_tf)
+    s_sec  = proximity_fn(secondary_tf) if secondary_tf is not None else zero
+
+    score_prim = round(s_prim["total"], 1)
+    score_sec  = round(s_sec["total"],  1)
+
+    # ── Widerspruch-Prüfung ───────────────────────────────────────────────────
+    # Primär deutlich bullish (>55), Sekundär deutlich bearish (<30) = widersprechen sich
+    contradiction = (score_prim > 55 and score_sec < 30)
+    penalty       = 0.70 if contradiction else (0.88 if score_prim > 55 and score_sec < 40 else 1.0)
+
+    combined = round((score_prim * w_prim + score_sec * w_sec) * penalty, 1)
+    combined = max(0.0, min(100.0, combined))
+
+    if combined >= 78:
+        label = "🟢 Perfekt"
+    elif combined >= 60:
+        label = "🟡 Sehr nah"
+    elif combined >= 40:
+        label = "🟠 Nah"
+    else:
+        label = "🔴 Entfernt"
+
+    filled = round(combined / 10)
+    bar    = "█" * filled + "░" * (10 - filled)
+
+    # score_1d / score_4h für Rückwärtskompatibilität immer befüllen
+    score_1d = score_prim if prim_name == "1D" else score_sec
+    score_4h = score_prim if prim_name == "4H" else score_sec
+
+    return ConvergenceResult(
+        strategy=strategy,
+        score=combined,
+        score_1d=score_1d,
+        score_4h=score_4h,
+        label=label,
+        bar=bar,
+        components_primary=s_prim,
+        components_secondary=s_sec,
+        primary_tf=prim_name,
+        secondary_tf=sec_name,
+        contradiction=contradiction,
+        contradiction_penalty=penalty,
     )
 
 

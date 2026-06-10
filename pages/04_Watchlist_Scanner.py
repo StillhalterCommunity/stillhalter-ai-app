@@ -27,7 +27,8 @@ from data.universes import get_universe_tickers, UNIVERSE_OPTIONS, UNIVERSE_COUN
 from analysis.batch_screener import scan_watchlist
 from analysis.multi_timeframe import (
     analyze_multi_timeframe, matches_tech_filter,
-    TechFilterParams, tf_summary_row, calc_convergence_score
+    TechFilterParams, tf_summary_row,
+    calc_convergence_score, calc_convergence_score_dte,
 )
 from ui.charts import render_option_mini_chart, render_payoff_diagram
 from data.preset_manager import load_presets, save_preset, delete_preset, get_preset
@@ -810,22 +811,98 @@ if start_scan:
             results["SC Trend(1D)"] = [x[3] for x in tf_cols]
             results["TF-Align"] = [x[4] for x in tf_cols]
 
-            # ── Best Convergence Score ──────────────────────────────────────
+            # ── DTE-gewichtete Konvergenz + Breakdown ──────────────────────
             conv_strategy = "call" if scan_strategy == "Covered Call" else "put"
 
-            def _conv_score(ticker):
+            def _conv_score_dte(row):
+                """DTE-gewichtete Konvergenz: 4H-primär für <21T, 1D für 21-60T, 1W für >60T."""
                 try:
-                    tf = tf_cache.get(ticker)
+                    tf  = tf_cache.get(row.get("Ticker", ""))
+                    dte = int(row.get("DTE", 30))
                     if tf is None:
-                        return (0.0, "🔴 Entfernt")
-                    c = calc_convergence_score(tf, conv_strategy)
-                    return (c.score, c.label)
+                        return (0.0, "🔴 Entfernt", "", "", "", False)
+                    c = calc_convergence_score_dte(tf, conv_strategy, dte)
+                    # Primär-TF-Kürzel für Anzeige
+                    prim_label = f"{c.primary_tf} primär"
+                    # Komponenten-Kurzinfo: Stoch/RSI/EMA/MACD je Ampel
+                    def _amp(v):
+                        return "🟢" if v >= 70 else "🟡" if v >= 40 else "🔴"
+                    cp = c.components_primary
+                    breakdown = (
+                        f"Dual-Stoch {_amp(cp.get('stoch',0))} "
+                        f"RSI {_amp(cp.get('rsi',0))} "
+                        f"Trend {_amp(cp.get('ema',0))} "
+                        f"MACD {_amp(cp.get('macd',0))} "
+                        f"Vol {_amp(cp.get('volume',0))}"
+                    )
+                    warn = "⚠️ Widerspruch" if c.contradiction else ""
+                    return (c.score, c.label, prim_label, breakdown, warn, c.contradiction)
                 except Exception:
-                    return (0.0, "–")
+                    return (0.0, "–", "", "", "", False)
 
-            conv_cols = results["Ticker"].apply(_conv_score)
-            results["Konvergenz"]  = [x[0] for x in conv_cols]
-            results["Konv."]       = [x[1] for x in conv_cols]
+            conv_rows = results.apply(_conv_score_dte, axis=1)
+            results["Konvergenz"]     = [x[0] for x in conv_rows]
+            results["Konv."]          = [x[1] for x in conv_rows]
+            results["Konv. TF"]       = [x[2] for x in conv_rows]
+            results["Konv. Ampeln"]   = [x[3] for x in conv_rows]
+            results["Konv. Hinweis"]  = [x[4] for x in conv_rows]
+
+            # ── S/R-Schutz: Strike hinter Support/Widerstand ───────────────
+            def _sr_protection(row):
+                """Prüft ob der Strike hinter einem S/R-Level liegt."""
+                try:
+                    ticker   = str(row.get("Ticker", ""))
+                    strike   = float(row.get("Strike", 0))
+                    is_put   = "call" not in conv_strategy
+                    hist     = fetch_price_history(ticker, period="3mo")
+                    if hist.empty or strike <= 0:
+                        return ("–", 0.0)
+
+                    if is_put:
+                        # Support finden: Swing-Tiefs ÜBER dem Strike (schützen ihn)
+                        lows = hist["Low"]
+                        # Lokale Minima: niedriger als Nachbarn (5-Bar-Fenster)
+                        is_local_min = (
+                            (lows < lows.shift(1)) & (lows < lows.shift(2)) &
+                            (lows < lows.shift(-1)) & (lows < lows.shift(-2))
+                        )
+                        swing_lows = lows[is_local_min]
+                        protecting = swing_lows[(swing_lows > strike) & (swing_lows < float(hist["Close"].iloc[-1]))]
+                        if not protecting.empty:
+                            nearest = float(protecting.iloc[-1])
+                            buf_pct = (nearest - strike) / nearest * 100
+                            return (f"✅ S {nearest:.0f} (+{buf_pct:.1f}%)", nearest)
+                        # Fallback: 20-Tage-Tief als einfacher Proxy
+                        low20 = float(lows.tail(20).min())
+                        if low20 > strike:
+                            return (f"✅ Low {low20:.0f}", low20)
+                        return ("⚠️ kein S/R", 0.0)
+                    else:
+                        # Resistance finden: Swing-Hochs UNTER dem Strike (schützen ihn)
+                        highs = hist["High"]
+                        is_local_max = (
+                            (highs > highs.shift(1)) & (highs > highs.shift(2)) &
+                            (highs > highs.shift(-1)) & (highs > highs.shift(-2))
+                        )
+                        swing_highs = highs[is_local_max]
+                        price_now = float(hist["Close"].iloc[-1])
+                        protecting = swing_highs[(swing_highs < strike) & (swing_highs > price_now)]
+                        if not protecting.empty:
+                            nearest = float(protecting.iloc[-1])
+                            buf_pct = (strike - nearest) / strike * 100
+                            return (f"✅ R {nearest:.0f} (-{buf_pct:.1f}%)", nearest)
+                        high20 = float(highs.tail(20).max())
+                        if high20 < strike:
+                            return (f"✅ Hoch {high20:.0f}", high20)
+                        return ("⚠️ kein S/R", 0.0)
+                except Exception:
+                    return ("–", 0.0)
+
+            sr_ph = st.empty()
+            sr_ph.caption("🛡️ Berechne S/R-Schutz…")
+            sr_rows = results.apply(_sr_protection, axis=1)
+            results["S/R Schutz"] = [x[0] for x in sr_rows]
+            sr_ph.empty()
 
         progress_bar.progress(1.0)
         n_found = len(results)
@@ -898,19 +975,34 @@ else:
                 _cached_tf[_mt] = analyze_multi_timeframe(_mt)
             _ph.empty()
 
-        def _lazy_conv(ticker):
+        def _lazy_conv(row):
             try:
-                tf = _cached_tf.get(ticker)
+                tf  = _cached_tf.get(row.get("Ticker", ""))
+                dte = int(row.get("DTE", 30))
                 if tf is None:
-                    return (0.0, "–")
-                c = calc_convergence_score(tf, _conv_strategy)
-                return (c.score, c.label)
+                    return (0.0, "–", "", "", "")
+                c = calc_convergence_score_dte(tf, _conv_strategy, dte)
+                def _amp(v):
+                    return "🟢" if v >= 70 else "🟡" if v >= 40 else "🔴"
+                cp = c.components_primary
+                breakdown = (
+                    f"Dual-Stoch {_amp(cp.get('stoch',0))} "
+                    f"RSI {_amp(cp.get('rsi',0))} "
+                    f"Trend {_amp(cp.get('ema',0))} "
+                    f"MACD {_amp(cp.get('macd',0))} "
+                    f"Vol {_amp(cp.get('volume',0))}"
+                )
+                return (c.score, c.label, f"{c.primary_tf} primär", breakdown,
+                        "⚠️ Widerspruch" if c.contradiction else "")
             except Exception:
-                return (0.0, "–")
+                return (0.0, "–", "", "", "")
 
-        _cx = results["Ticker"].apply(_lazy_conv)
-        results["Konvergenz"] = [x[0] for x in _cx]
-        results["Konv."]      = [x[1] for x in _cx]
+        _cx = results.apply(_lazy_conv, axis=1)
+        results["Konvergenz"]    = [x[0] for x in _cx]
+        results["Konv."]         = [x[1] for x in _cx]
+        results["Konv. TF"]      = [x[2] for x in _cx]
+        results["Konv. Ampeln"]  = [x[3] for x in _cx]
+        results["Konv. Hinweis"] = [x[4] for x in _cx]
         st.session_state.scan_results = results
         st.session_state.tf_results = {**st.session_state.get("tf_results", {}), **_cached_tf}
 
@@ -1048,8 +1140,10 @@ else:
                      "Trend", "⚠️ Earnings"]
     # Tech-Spalten wenn vorhanden
     tech_cols = [c for c in ["RSI(1D)", "Stoch(1D)", "MACD(1D)", "SC Trend(1D)", "TF-Align"] if c in display_df.columns]
-    # Konvergenz-Spalten
-    conv_cols_show = [c for c in ["Konvergenz", "Konv."] if c in display_df.columns]
+    # Konvergenz-Spalten inkl. neue Breakdown + S/R Schutz
+    conv_cols_show = [c for c in [
+        "Konvergenz", "Konv.", "Konv. TF", "Konv. Ampeln", "Konv. Hinweis", "S/R Schutz",
+    ] if c in display_df.columns]
     show_cols = [c for c in base_cols + tech_cols + conv_cols_show + ["⭐ CRV"] if c in display_df.columns]
 
     col_config = {
@@ -1086,12 +1180,24 @@ else:
                                                        help="Handelsvolumen der Option heute"),
         "⚠️ Earnings":  st.column_config.TextColumn("Earnings", width="medium",
                                                       help="⚠️ Earnings-Termin fällt in die Laufzeit der Option"),
-        # Konvergenz-Spalten
+        # Konvergenz-Spalten (DTE-gewichtet)
         "Konvergenz": st.column_config.ProgressColumn(
             "⚡ Konvergenz", min_value=0, max_value=100, format="%.0f",
-            help="Best Convergence 0–100: Annäherung aller 7 Indikatoren an idealen Einstiegszeitpunkt (4H · 1D)"
+            help=(
+                "DTE-gewichtete Konvergenz: 0–21T → 4H primär (65%), "
+                "21–60T → 1D primär (65%), >60T → 1W primär (55%). "
+                "Widerspruch zwischen primärem und sekundärem TF = 30% Penalty."
+            ),
         ),
-        "Konv.": st.column_config.TextColumn("Konv.", width="small"),
+        "Konv.":         st.column_config.TextColumn("Konv.", width="small"),
+        "Konv. TF":      st.column_config.TextColumn("TF-Basis", width="small",
+                                                      help="Primärer Timeframe (DTE-abhängig)"),
+        "Konv. Ampeln":  st.column_config.TextColumn("Indikatoren", width="large",
+                                                      help="🟢≥70 · 🟡40-70 · 🔴<40 (Dual-Stoch · RSI · Trend · MACD · Vol)"),
+        "Konv. Hinweis": st.column_config.TextColumn("Hinweis", width="small",
+                                                      help="⚠️ Widerspruch wenn primärer und sekundärer Timeframe widersprechen"),
+        "S/R Schutz":    st.column_config.TextColumn("S/R Schutz", width="medium",
+                                                      help="✅ Strike liegt hinter einer Unterstützung/Widerstand · ⚠️ Kein S/R gefunden"),
     }
 
     # ── Styling: Top-3 Zeilen + Spalten-Max/Min ────────────────────────────
