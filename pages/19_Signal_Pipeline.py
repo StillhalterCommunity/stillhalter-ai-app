@@ -314,11 +314,6 @@ with tab_offen:
 # TAB 3 — FREIGABE & PUBLISH
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_publish:
-    st.markdown(
-        "**Reihenfolge:** Erst Circle posten → URL holen → WhatsApp mit Link senden."
-    )
-    st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-
     aktive_cards = [c for c in open_cards if c.status == "AKTIV"]
     neue_heute   = [
         c for c in aktive_cards
@@ -326,25 +321,71 @@ with tab_publish:
         or (c.status_history and c.status_history[-1].ts[:10] == datetime.now().strftime("%Y-%m-%d"))
     ]
 
-    # ── CIRCLE ────────────────────────────────────────────────────────────────
-    st.subheader("🌐 Circle Posts")
-    if not aktive_cards:
-        st.info("Keine aktiven Trades. Kandidaten im Tab **Neue Kandidaten** freigeben.")
-    else:
-        member_level = st.selectbox(
-            "Vorschau für Eignungsstufe",
-            ["einsteiger", "fortgeschritten", "profi"],
-            index=2,
-        )
-        for card in aktive_cards:
-            rendered = render_circle(card, member_level=member_level)
-            with st.expander(f"**{card.ticker}** — {rendered['title']}", expanded=False):
-                # HTML-Vorschau
-                with st.container():
-                    st.markdown("**HTML-Vorschau (gekürzt):**")
-                    st.code(rendered["html"][:800] + "\n…", language="html")
+    # ── Workflow-Erklärung ────────────────────────────────────────────────────
+    st.info(
+        "**Workflow:** Schritt 1 → Circle-Post erstellen (manuell oder API) → "
+        "URL eintragen → Schritt 2 → WhatsApp mit Circle-Link senden.",
+        icon="📋",
+    )
 
-                # Post-Buttons je Tier
+    if not aktive_cards:
+        st.warning("Keine aktiven Trades. Kandidaten im Tab **Neue Kandidaten** freigeben.")
+        st.stop()
+
+    member_level = st.selectbox(
+        "Circle-Vorschau für Eignungsstufe",
+        ["einsteiger", "fortgeschritten", "profi"],
+        index=2,
+    )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SCHRITT 1: CIRCLE
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("### 🌐 Schritt 1 — Circle Posts")
+    st.caption("Manuell oder per API — beides möglich. Erst Circle, dann WhatsApp.")
+
+    for card in aktive_cards:
+        rendered   = render_circle(card, member_level=member_level)
+        card_title = rendered["title"]
+        card_html  = rendered["html"]
+
+        with st.expander(f"**{card.ticker}** · {card_title}", expanded=True):
+
+            # ── Manueller Weg ─────────────────────────────────────────────────
+            st.markdown("#### 📋 Manuell posten")
+            st.markdown(
+                "1. Öffne **[circle.so](https://circle.so)** → Space auswählen\n"
+                "2. **Neuer Post** → Titel aus Zeile unten kopieren\n"
+                "3. Editor auf **HTML-Modus** umschalten → HTML einfügen\n"
+                "4. Veröffentlichen → Post-URL hier eintragen (Schritt unten)"
+            )
+            # Titel zum Kopieren
+            st.markdown("**Post-Titel (kopieren):**")
+            st.code(card_title, language="text")
+
+            # Vollständiger HTML-Code zum Kopieren
+            st.markdown("**HTML-Code (kopieren → in Circle HTML-Editor einfügen):**")
+            st.code(card_html, language="html")
+
+            # Circle-URL manuell eintragen
+            url_key = f"circle_url_{card.trade_id}"
+            saved_url = card.circle_url or ""
+            new_url = st.text_input(
+                "Circle Post-URL eintragen (nach manuellem Posting):",
+                value=saved_url,
+                placeholder="https://community.circle.so/c/daily-trades/...",
+                key=url_key,
+            )
+            if new_url and new_url != saved_url:
+                if st.button("💾 URL speichern", key=f"save_url_{card.trade_id}"):
+                    updated = replace(card, circle_url=new_url)
+                    store.upsert(updated)
+                    st.success(f"✅ URL gespeichert: {new_url}")
+                    st.rerun()
+
+            # ── Automatischer Weg ──────────────────────────────────────────────
+            st.markdown("#### ⚡ Automatisch per API")
+            if _ci_ok:
                 tier_cols = st.columns(3)
                 for col, tier in zip(tier_cols, ["daily", "masterclass", "vip"]):
                     with col:
@@ -353,48 +394,68 @@ with tab_publish:
                             "daily": "Daily (79€)", "masterclass": "Masterclass", "vip": "VIP",
                         }[tier]
                         if not vis:
-                            st.caption(f"🚫 {tier_label}: nicht sichtbar")
+                            st.caption(f"🚫 {tier_label}")
                             continue
                         if st.button(
-                            f"🌐 {tier_label} posten",
+                            f"🌐 {tier_label}",
                             key=f"ci_{card.trade_id}_{tier}",
-                            disabled=not _ci_ok,
                             use_container_width=True,
+                            type="primary",
                         ):
                             try:
                                 pub = CirclePublisher(token=_ci_token, space_ids=_ci_spaces)
-                                url = pub.create_post(tier, rendered["title"], rendered["html"])
+                                url = pub.create_post(tier, card_title, card_html)
                                 updated = replace(card, circle_url=url)
                                 store.upsert(updated)
-                                st.success(f"✅ {tier_label}: {url}")
+                                st.success(f"✅ {tier_label}: [{url}]({url})")
                                 st.rerun()
                             except Exception as exc:
                                 st.error(f"❌ {exc}")
-
-        if not _ci_ok:
-            st.warning(
-                "⚙️ Circle nicht konfiguriert. "
-                "CIRCLE_API_TOKEN + CIRCLE_SPACE_* im Tab **Konfiguration** eintragen."
-            )
+            else:
+                st.caption(
+                    "⚙️ API nicht konfiguriert — `CIRCLE_API_TOKEN` + `CIRCLE_SPACE_*` "
+                    "im Tab **Konfiguration** eintragen."
+                )
 
     st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
-    # ── WHATSAPP ─────────────────────────────────────────────────────────────
-    st.subheader("📱 WhatsApp-Post")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SCHRITT 2: WHATSAPP
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("### 📱 Schritt 2 — WhatsApp-Post")
+    st.caption(
+        "Circle-URLs werden automatisch eingebunden sobald sie gespeichert sind. "
+        "Text bearbeiten → kopieren oder per API senden."
+    )
+
+    # Aktuelle Cards mit Circle-URLs für den WA-Post
+    cards_for_wa = [store.get_by_id(c.trade_id) or c for c in aktive_cards]
     wa_text = render_whatsapp(
-        new_cards=neue_heute,
+        new_cards=[c for c in cards_for_wa if c in neue_heute or not hasattr(c, "_is_old")],
         status_changes=[],
         datum=datetime.now().strftime("%d.%m.%Y"),
     )
     wa_text_edit = st.text_area(
-        "WhatsApp-Text (bearbeiten vor dem Senden)",
+        "WhatsApp-Text bearbeiten:",
         value=wa_text,
-        height=300,
+        height=320,
+        key="wa_text_edit",
     )
+
+    # Kopieren-Block (immer sichtbar)
+    st.markdown("**📋 Manuell senden:**")
+    st.code(wa_text_edit, language="text")
+    st.caption(
+        "👆 Oben rechts im Code-Block auf **Kopieren** klicken → "
+        "WhatsApp öffnen → in den Kanal einfügen → senden."
+    )
+
+    # API-Senden (optional)
+    st.markdown("**⚡ Automatisch per API:**")
     wa_col1, wa_col2 = st.columns([1, 3])
     with wa_col1:
         if st.button(
-            "📱 Jetzt senden",
+            "📱 Per API senden",
             type="primary",
             disabled=not _wa_ok,
             use_container_width=True,
@@ -402,14 +463,14 @@ with tab_publish:
             try:
                 pub    = WhatsAppPublisher(api_key=_wa_key, channel_id=_wa_channel, provider=_wa_provider)
                 result = pub.publish(wa_text_edit)
-                st.success(f"✅ WhatsApp gesendet  ·  {result}")
+                st.success(f"✅ WhatsApp gesendet · {result}")
             except Exception as exc:
-                st.error(f"❌ Fehler beim Senden: {exc}")
+                st.error(f"❌ {exc}")
     with wa_col2:
         if not _wa_ok:
-            st.warning(
-                "⚙️ WhatsApp nicht konfiguriert. "
-                "WHATSAPP_API_KEY + WHATSAPP_CHANNEL_ID im Tab **Konfiguration** eintragen."
+            st.caption(
+                "⚙️ API nicht konfiguriert — `WHATSAPP_API_KEY` + `WHATSAPP_CHANNEL_ID` "
+                "im Tab **Konfiguration** eintragen."
             )
 
 # ═══════════════════════════════════════════════════════════════════════════════
