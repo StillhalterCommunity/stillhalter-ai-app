@@ -1131,13 +1131,13 @@ else:
                      "Rendite ann. %", "Rendite % Laufzeit",
                      "Delta PUT", "Delta CALL", "IV %", "IV Rank",
                      "Break-even Low", "Break-even High",
-                     "Trend", "⚠️ Earnings"]
+                     "Trend", "⚠️ Earnings", "OptionStrat"]
     else:
         base_cols = ["Top", "Liq.", "Ticker", "Sektor", "Kurs", "Strike", "OTM %",
                      "Verfall", "DTE", "Prämie", "Bid", "Ask", "Kursquelle", "Spread %",
                      "Prämie/Tag", "Rendite ann. %", "Rendite % Laufzeit", "Rendite %/Tag",
                      "Delta", "Theta/Tag", "IV %", "IV Rank", "OI", "Volumen",
-                     "Trend", "⚠️ Earnings"]
+                     "Trend", "⚠️ Earnings", "OptionStrat"]
     # Tech-Spalten wenn vorhanden
     tech_cols = [c for c in ["RSI(1D)", "Stoch(1D)", "MACD(1D)", "SC Trend(1D)", "TF-Align"] if c in display_df.columns]
     # Konvergenz-Spalten inkl. neue Breakdown + S/R Schutz
@@ -1198,6 +1198,12 @@ else:
                                                       help="⚠️ Widerspruch wenn primärer und sekundärer Timeframe widersprechen"),
         "S/R Schutz":    st.column_config.TextColumn("S/R Schutz", width="medium",
                                                       help="✅ Strike liegt hinter einer Unterstützung/Widerstand · ⚠️ Kein S/R gefunden"),
+        "OptionStrat":   st.column_config.LinkColumn(
+            "📊 OptionStrat",
+            display_text="→ Analysieren",
+            width="medium",
+            help="Direkt auf OptionStrat öffnen — Live-Prämie, Payoff-Diagramm, Greeks",
+        ),
     }
 
     # ── Styling: Top-3 Zeilen + Spalten-Max/Min ────────────────────────────
@@ -1316,6 +1322,19 @@ else:
                         fig_pay.update_layout(height=260, margin=dict(l=5,r=5,t=45,b=30))
                         st.plotly_chart(fig_pay, use_container_width=True,
                                         config={"displayModeBar": False})
+
+                    # ── OptionStrat-Button ────────────────────────────────
+                    _os_url = str(_r.get("OptionStrat", ""))
+                    if not _os_url and _tkr and _strike > 0 and _expiry:
+                        # Fallback: live generieren falls Spalte fehlt
+                        from analysis.batch_screener import _optionstrat_url as _mkurl
+                        _os_url = _mkurl(_tkr, _strike, _expiry, _is_call)
+                    if _os_url:
+                        st.link_button(
+                            "📊 Auf OptionStrat analysieren →",
+                            url=_os_url,
+                            use_container_width=True,
+                        )
 
                     # ── Trade-Button ──────────────────────────────────────
                     _delta_val = float(_r.get("Delta", 0) or 0)

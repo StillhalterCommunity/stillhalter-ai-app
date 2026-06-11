@@ -22,6 +22,50 @@ from data.fetcher import (
 from data.watchlist import get_sector_for_ticker, SECTOR_ICONS
 
 
+# ── OptionStrat Link Builder ──────────────────────────────────────────────────
+
+def _optionstrat_url(
+    ticker: str,
+    strike: float,
+    expiry,            # str "2025-07-18" oder pd.Timestamp
+    is_call: bool,
+    strategy_name: str = "",
+) -> str:
+    """
+    Generiert den direkten OptionStrat-Link für eine Option.
+    Format: https://optionstrat.com/build/short-put/AAPL/-185p250718
+    """
+    try:
+        d = pd.to_datetime(expiry)
+        exp_str  = d.strftime("%y%m%d")           # YYMMDD (OptionStrat-Format)
+        right    = "c" if is_call else "p"
+        strat_sl = "short-call" if is_call else "short-put"
+        return (
+            f"https://optionstrat.com/build/{strat_sl}/{ticker}"
+            f"/-{strike:.0f}{right}{exp_str}"
+        )
+    except Exception:
+        return ""
+
+
+def _optionstrat_url_strangle(
+    ticker: str,
+    put_strike: float,
+    call_strike: float,
+    expiry,
+) -> str:
+    """OptionStrat-Link für Short Strangle (beide Legs)."""
+    try:
+        d       = pd.to_datetime(expiry)
+        exp_str = d.strftime("%y%m%d")
+        return (
+            f"https://optionstrat.com/build/short-strangle/{ticker}"
+            f"/-{put_strike:.0f}p{exp_str},-{call_strike:.0f}c{exp_str}"
+        )
+    except Exception:
+        return ""
+
+
 # ── CRV Score ─────────────────────────────────────────────────────────────────
 
 def calculate_crv_score(
@@ -283,6 +327,9 @@ def scan_strangle(
                 "Trend-Score":      0,
                 "CRV Score":        round(crv, 2),
                 "⚠️ Earnings":      earn_warn,
+                "OptionStrat":      _optionstrat_url_strangle(
+                                        ticker, put_strike, call_strike, expiry
+                                    ),
             })
 
         if not results:
@@ -563,6 +610,13 @@ def scan_ticker(
             "Trend-Score": round(trend_score, 0),
             "CRV Score": df["crv_score"],
             "⚠️ Earnings": df["dte"].apply(_earn_warn),
+            "OptionStrat": df.apply(
+                lambda r: _optionstrat_url(
+                    ticker, r["strike"], r["expiration"],
+                    is_call=(strategy == "Covered Call"),
+                ),
+                axis=1,
+            ),
         })
 
         result = result.sort_values("CRV Score", ascending=False)
