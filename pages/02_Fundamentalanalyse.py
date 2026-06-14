@@ -49,34 +49,33 @@ NDX100_TICKERS = [
 ]
 
 
+def _wiki_tickers(url: str) -> list:
+    """Holt Ticker-Symbole aus einer Wikipedia-Tabelle via urllib (kein lxml nötig)."""
+    import urllib.request, re
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    raw = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", errors="ignore")
+    matches = re.findall(
+        r"<tr>\s*<td[^>]*>\s*(?:<a[^>]*>)?([A-Z]{1,5}(?:-[A-Z])?)(?:</a>)?\s*</td>",
+        raw,
+    )
+    return [t for t in matches if t]
+
+
 @st.cache_data(ttl=86400, show_spinner=False)
 def _fetch_sp500_tickers() -> list:
-    """Holt S&P 500 Constituents von Wikipedia (gecacht 24h)."""
+    """Holt S&P 500 Constituents von Wikipedia (gecacht 24h, kein lxml nötig)."""
     try:
-        tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-            header=0,
-        )
-        col = "Symbol" if "Symbol" in tables[0].columns else tables[0].columns[0]
-        raw = tables[0][col].astype(str).str.replace(".", "-", regex=False).tolist()
-        return [t for t in raw if t and 1 <= len(t) <= 6]
+        return _wiki_tickers("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
     except Exception:
         return []
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def _fetch_russell2000_tickers() -> list:
-    """Holt Russell 2000 Constituents vom iShares IWM ETF (gecacht 24h)."""
+def _fetch_sp600_tickers() -> list:
+    """Holt S&P 600 Small Cap Constituents von Wikipedia (gecacht 24h, kein lxml nötig).
+    Bessere Datenqualität als Russell 2000: alle S&P 600 Werte erfüllen Liquiditätsanforderungen."""
     try:
-        url = (
-            "https://www.ishares.com/us/products/239726/ISHARES-RUSSELL-2000-ETF/"
-            "1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund"
-        )
-        df = pd.read_csv(url, skiprows=9, header=0)
-        col = next((c for c in df.columns if "Ticker" in str(c)), df.columns[1])
-        tickers = df[col].dropna().astype(str).str.strip().tolist()
-        _skip = {"CASH_USD", "USD", "-", "XTSLA", "IBTE", "nan", ""}
-        return [t for t in tickers if t and 1 <= len(t) <= 6 and t not in _skip and t[0].isalpha()]
+        return _wiki_tickers("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies")
     except Exception:
         return []
 
@@ -402,7 +401,7 @@ st.markdown("""
 with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
     universe = st.radio(
         "Aktien-Universum",
-        ["🗂️ Meine Watchlist", "📈 Dow Jones 30", "💹 NASDAQ 100", "📊 S&P 500", "📉 Russell 2000"],
+        ["🗂️ Meine Watchlist", "📈 Dow Jones 30", "💹 NASDAQ 100", "📊 S&P 500", "📉 S&P 600 Small Cap"],
         horizontal=True,
         key="vs_universe",
     )
@@ -442,18 +441,18 @@ if "Dow Jones" in universe:
     scan_tickers = DOW30_TICKERS
 elif "NASDAQ" in universe:
     scan_tickers = NDX100_TICKERS
-elif "S&P 500" in universe:
+elif "S&P 500" in universe and "Small" not in universe:
     if "_vs_sp500" not in st.session_state:
         st.session_state["_vs_sp500"] = _fetch_sp500_tickers()
     scan_tickers = st.session_state["_vs_sp500"]
     if not scan_tickers:
         _univ_warn = "⚠️ S&P 500 Komponenten konnten nicht geladen werden — Wikipedia-Verbindung prüfen."
-elif "Russell" in universe:
-    if "_vs_rut2000" not in st.session_state:
-        st.session_state["_vs_rut2000"] = _fetch_russell2000_tickers()
-    scan_tickers = st.session_state["_vs_rut2000"]
+elif "S&P 600" in universe or "Small" in universe:
+    if "_vs_sp600" not in st.session_state:
+        st.session_state["_vs_sp600"] = _fetch_sp600_tickers()
+    scan_tickers = st.session_state["_vs_sp600"]
     if not scan_tickers:
-        _univ_warn = "⚠️ Russell 2000 Komponenten konnten nicht geladen werden — iShares-Verbindung prüfen."
+        _univ_warn = "⚠️ S&P 600 Komponenten konnten nicht geladen werden — Wikipedia-Verbindung prüfen."
 else:
     scan_tickers = ALL_TICKERS if "Alle" in scan_sector else WATCHLIST.get(scan_sector, [])
 
@@ -467,7 +466,7 @@ with sv1:
 with sv2:
     if st.button("🗑️ Cache leeren", use_container_width=True):
         st.cache_data.clear()
-        for k in ["vs_results", "_vs_sp500", "_vs_rut2000"]:
+        for k in ["vs_results", "_vs_sp500", "_vs_sp600"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
