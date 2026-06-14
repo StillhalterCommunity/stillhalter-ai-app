@@ -29,6 +29,58 @@ from data.watchlist import WATCHLIST, SECTOR_ICONS, ALL_TICKERS, get_sector_for_
 import yfinance as yf
 
 
+# ── Index-Definitionen ─────────────────────────────────────────────────────────
+
+DOW30_TICKERS = [
+    "AAPL","AMGN","AMZN","AXP","BA","CAT","CRM","CSCO","CVX","DIS",
+    "DOW","GS","HD","HON","IBM","JNJ","JPM","KO","MCD","MMM",
+    "MRK","MSFT","NKE","NVDA","PG","TRV","UNH","V","VZ","WMT",
+]
+
+NDX100_TICKERS = [
+    "AAPL","ABNB","ADBE","ADI","ADP","ADSK","AEP","AMAT","AMD","AMGN","AMZN","ANSS",
+    "APP","ASML","AVGO","AZN","BIIB","BKNG","BKR","CCEP","CDNS","CDW","CEG","CHTR",
+    "CMCSA","COST","CPRT","CRWD","CSCO","CTSH","DASH","DDOG","DLTR","DXCM","EA",
+    "EXC","FANG","FAST","FTNT","GEHC","GILD","GOOG","GOOGL","HON","IDXX","ILMN",
+    "INTU","ISRG","KDP","KHC","KLAC","LRCX","LULU","MAR","MCHP","MDLZ","MELI",
+    "META","MNST","MRVL","MSFT","MU","NFLX","NVDA","NXPI","ODFL","ON","ORLY",
+    "PANW","PAYX","PCAR","PDD","PYPL","QCOM","REGN","ROP","ROST","SBUX","SNPS",
+    "TEAM","TMUS","TSLA","TTWO","TXN","VRSK","VRTX","WDAY","XEL","ZS","ARM","MDB",
+]
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_sp500_tickers() -> list:
+    """Holt S&P 500 Constituents von Wikipedia (gecacht 24h)."""
+    try:
+        tables = pd.read_html(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            header=0,
+        )
+        col = "Symbol" if "Symbol" in tables[0].columns else tables[0].columns[0]
+        raw = tables[0][col].astype(str).str.replace(".", "-", regex=False).tolist()
+        return [t for t in raw if t and 1 <= len(t) <= 6]
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def _fetch_russell2000_tickers() -> list:
+    """Holt Russell 2000 Constituents vom iShares IWM ETF (gecacht 24h)."""
+    try:
+        url = (
+            "https://www.ishares.com/us/products/239726/ISHARES-RUSSELL-2000-ETF/"
+            "1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund"
+        )
+        df = pd.read_csv(url, skiprows=9, header=0)
+        col = next((c for c in df.columns if "Ticker" in str(c)), df.columns[1])
+        tickers = df[col].dropna().astype(str).str.strip().tolist()
+        _skip = {"CASH_USD", "USD", "-", "XTSLA", "IBTE", "nan", ""}
+        return [t for t in tickers if t and 1 <= len(t) <= 6 and t not in _skip and t[0].isalpha()]
+    except Exception:
+        return []
+
+
 # ── Value Score Berechnung ─────────────────────────────────────────────────────
 
 import math
@@ -348,10 +400,22 @@ st.markdown("""
 
 # ── Scan-Einstellungen ─────────────────────────────────────────────────────────
 with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
+    universe = st.radio(
+        "Aktien-Universum",
+        ["🗂️ Meine Watchlist", "📈 Dow Jones 30", "💹 NASDAQ 100", "📊 S&P 500", "📉 Russell 2000"],
+        horizontal=True,
+        key="vs_universe",
+    )
+    st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
+    _idx_selected = "Watchlist" not in universe
+
     s1, s2, s3, s4, s5, s6 = st.columns(6)
     with s1:
         scan_sector = st.selectbox("Sektor",
-            ["🌐 Alle Sektoren"] + list(WATCHLIST.keys()), key="vs_sector")
+            ["🌐 Alle Sektoren"] + list(WATCHLIST.keys()),
+            key="vs_sector",
+            disabled=_idx_selected,
+        )
     with s2:
         min_score = st.number_input("Mind. Value Score", 0, 100, 0, 5,
             help="Filtert Aktien nach Mindest-Score (0–100)")
@@ -372,11 +436,32 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
         min_growth = st.number_input("Mind. Earnings Growth %", -50, 100, 0, 5,
             help="Mindest-Gewinnwachstum (YoY)")
 
+# Ticker-Universum bestimmen
+_univ_warn = ""
+if "Dow Jones" in universe:
+    scan_tickers = DOW30_TICKERS
+elif "NASDAQ" in universe:
+    scan_tickers = NDX100_TICKERS
+elif "S&P 500" in universe:
+    with st.spinner("S&P 500 Komponenten von Wikipedia laden …"):
+        scan_tickers = _fetch_sp500_tickers()
+    if not scan_tickers:
+        _univ_warn = "⚠️ S&P 500 Komponenten konnten nicht geladen werden — Wikipedia-Verbindung prüfen."
+elif "Russell" in universe:
+    with st.spinner("Russell 2000 Komponenten von iShares laden …"):
+        scan_tickers = _fetch_russell2000_tickers()
+    if not scan_tickers:
+        _univ_warn = "⚠️ Russell 2000 Komponenten konnten nicht geladen werden — iShares-Verbindung prüfen."
+else:
+    scan_tickers = ALL_TICKERS if "Alle" in scan_sector else WATCHLIST.get(scan_sector, [])
+
+if _univ_warn:
+    st.warning(_univ_warn)
+
 sv1, sv2, _ = st.columns([2, 2, 8])
 with sv1:
-    scan_tickers = ALL_TICKERS if "Alle" in scan_sector else WATCHLIST.get(scan_sector, [])
-    start_scan   = st.button(f"💎 Value-Scan starten ({len(scan_tickers)} Aktien)",
-                             type="primary", use_container_width=True)
+    start_scan = st.button(f"💎 Value-Scan starten ({len(scan_tickers)} Aktien)",
+                           type="primary", use_container_width=True)
 with sv2:
     if st.button("🗑️ Cache leeren", use_container_width=True):
         st.cache_data.clear()
@@ -412,9 +497,12 @@ if start_scan:
             try:
                 _, data = future.result(timeout=20)
                 if "error" not in data:
-                    sector = get_sector_for_ticker(ticker)
-                    sector_short = sector.split(".", 1)[-1].strip().split("(")[0].strip() \
-                                   if "." in sector else sector
+                    _wl_sector = get_sector_for_ticker(ticker)
+                    if _wl_sector:
+                        sector_short = _wl_sector.split(".", 1)[-1].strip().split("(")[0].strip() \
+                                       if "." in _wl_sector else _wl_sector
+                    else:
+                        sector_short = data.get("sector_yf", "–") or "–"
                     all_rows.append({
                         "Ticker":         ticker,
                         "Name":           data.get("name", ticker),
