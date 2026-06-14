@@ -436,20 +436,22 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
         min_growth = st.number_input("Mind. Earnings Growth %", -50, 100, 0, 5,
             help="Mindest-Gewinnwachstum (YoY)")
 
-# Ticker-Universum bestimmen
+# Ticker-Universum bestimmen (Index-Ticker in Session State cachen — kein st.spinner im Hauptfluss)
 _univ_warn = ""
 if "Dow Jones" in universe:
     scan_tickers = DOW30_TICKERS
 elif "NASDAQ" in universe:
     scan_tickers = NDX100_TICKERS
 elif "S&P 500" in universe:
-    with st.spinner("S&P 500 Komponenten von Wikipedia laden …"):
-        scan_tickers = _fetch_sp500_tickers()
+    if "_vs_sp500" not in st.session_state:
+        st.session_state["_vs_sp500"] = _fetch_sp500_tickers()
+    scan_tickers = st.session_state["_vs_sp500"]
     if not scan_tickers:
         _univ_warn = "⚠️ S&P 500 Komponenten konnten nicht geladen werden — Wikipedia-Verbindung prüfen."
 elif "Russell" in universe:
-    with st.spinner("Russell 2000 Komponenten von iShares laden …"):
-        scan_tickers = _fetch_russell2000_tickers()
+    if "_vs_rut2000" not in st.session_state:
+        st.session_state["_vs_rut2000"] = _fetch_russell2000_tickers()
+    scan_tickers = st.session_state["_vs_rut2000"]
     if not scan_tickers:
         _univ_warn = "⚠️ Russell 2000 Komponenten konnten nicht geladen werden — iShares-Verbindung prüfen."
 else:
@@ -465,7 +467,7 @@ with sv1:
 with sv2:
     if st.button("🗑️ Cache leeren", use_container_width=True):
         st.cache_data.clear()
-        for k in ["vs_results"]:
+        for k in ["vs_results", "_vs_sp500", "_vs_rut2000"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -561,11 +563,19 @@ if start_scan:
         df = df.sort_values("⭐ Value Score", ascending=False).reset_index(drop=True)
         df.insert(0, "Rang", range(1, len(df) + 1))
         st.session_state.vs_results = df
-        status_ph.markdown(f"✅ **Value-Scan abgeschlossen** — **{len(df)} Aktien** analysiert")
+        st.session_state["_vs_scan_msg"] = f"✅ **Value-Scan abgeschlossen** — **{len(df)} Aktien** analysiert"
     else:
-        status_ph.error("Keine Daten empfangen — Yahoo Finance Verbindung prüfen.")
+        st.session_state["_vs_scan_msg"] = "❌ Keine Daten empfangen — Yahoo Finance Verbindung prüfen."
+    st.rerun()
 
 # ── Ergebnisse anzeigen ────────────────────────────────────────────────────────
+if "_vs_scan_msg" in st.session_state:
+    msg = st.session_state.pop("_vs_scan_msg")
+    if msg.startswith("✅"):
+        st.success(msg)
+    else:
+        st.error(msg)
+
 df = st.session_state.vs_results
 
 if df is None:
