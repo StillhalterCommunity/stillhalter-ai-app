@@ -67,13 +67,13 @@ CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "last_scan_ca
 
 def load_top9_cache():
     if not os.path.exists(CACHE_PATH):
-        return None, None, None
+        return None, None, "–"
     try:
         with open(CACHE_PATH, "rb") as f:
             data = pickle.load(f)
-        return data.get("results"), data.get("timestamp"), data.get("strategy", "Cash Covered Put")
+        return data.get("results"), data.get("timestamp"), data.get("strategy", "–")
     except Exception:
-        return None, None, None
+        return None, None, "–"
 
 
 def get_risk_class(iv_pct, low=None, mid=None):
@@ -361,55 +361,78 @@ def _build_share_text(row: dict, tech: dict, strategy: str) -> str:
 # QUICK SCAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_quick_scan(strategy="Cash Covered Put", exclude_earnings=False):
-    """Scannt die komplette Watchlist und speichert Ergebnisse im Cache."""
+def _run_comprehensive_scan(exclude_earnings=False):
+    """Scannt die Watchlist für alle Strategien und DTE-Bereiche, speichert im Cache."""
     from analysis.batch_screener import scan_watchlist
     from data.watchlist import ALL_TICKERS
     import pickle as _pickle
     import datetime as _dt
 
     tickers = ALL_TICKERS
-    progress_bar = st.progress(0.0)
-    status_ph    = st.empty()
-    live_partial = []
+    all_parts = []
 
-    def on_progress(current, total_n, ticker):
-        progress_bar.progress(min(current / max(total_n, 1), 1.0))
-        status_ph.markdown(
-            f"⚡ Scanne `{ticker}` ({current}/{total_n}) — "
-            f"{len(live_partial)} Aktien mit Treffern"
+    SCAN_CONFIGS = [
+        {
+            "label":      "Short PUT",
+            "strategy":   "Cash Covered Put",
+            "delta_min":  -0.35, "delta_max": -0.05,
+            "dte_min":    7,     "dte_max":   180,
+        },
+        {
+            "label":      "Covered Call",
+            "strategy":   "Covered Call",
+            "delta_min":  0.05,  "delta_max":  0.35,
+            "dte_min":    3,     "dte_max":   180,
+        },
+    ]
+
+    scan_header_ph = st.empty()
+    n_total = len(SCAN_CONFIGS)
+
+    for i, cfg in enumerate(SCAN_CONFIGS):
+        scan_header_ph.markdown(
+            f"**🔍 Schritt {i+1}/{n_total}: {cfg['label']}** "
+            f"(DTE {cfg['dte_min']}–{cfg['dte_max']}T)"
         )
+        progress_bar = st.progress(0.0)
+        status_ph    = st.empty()
 
-    def on_result(ticker_r, df_r):
-        live_partial.append(df_r)
+        def on_progress(current, total_n, ticker, _c=cfg):
+            progress_bar.progress(min(current / max(total_n, 1), 1.0))
+            status_ph.markdown(f"⚡ `{ticker}` ({current}/{total_n})")
 
-    results = scan_watchlist(
-        tickers=tickers,
-        strategy=strategy,
-        delta_min=-0.35, delta_max=-0.05,
-        dte_min=14,      dte_max=60,
-        iv_min=0.15,     premium_min=0.05,
-        min_oi=5,        otm_min=3.0,   otm_max=50.0,
-        exclude_earnings=exclude_earnings,
-        progress_callback=on_progress,
-        result_callback=on_result,
-    )
+        results = scan_watchlist(
+            tickers=tickers,
+            strategy=cfg["strategy"],
+            delta_min=cfg["delta_min"], delta_max=cfg["delta_max"],
+            dte_min=cfg["dte_min"],    dte_max=cfg["dte_max"],
+            iv_min=0.15,  premium_min=0.05,
+            min_oi=5,     otm_min=2.0,  otm_max=55.0,
+            exclude_earnings=exclude_earnings,
+            progress_callback=on_progress,
+        )
+        progress_bar.empty()
+        status_ph.empty()
 
-    progress_bar.empty()
-    status_ph.empty()
+        if not results.empty:
+            r = results.copy()
+            r["_strategie"] = cfg["label"]
+            all_parts.append(r)
 
-    if not results.empty:
+    scan_header_ph.empty()
+
+    if all_parts:
+        combined = pd.concat(all_parts, ignore_index=True)
         try:
-            cache_path = os.path.join(os.path.dirname(__file__), "..", "data", "last_scan_cache.pkl")
-            with open(cache_path, "wb") as f:
+            with open(CACHE_PATH, "wb") as f:
                 _pickle.dump({
-                    "results":   results,
+                    "results":   combined,
                     "timestamp": _dt.datetime.now(),
-                    "strategy":  strategy,
+                    "strategy":  "Komplett-Scan",
                 }, f)
             st.success(
-                f"✅ Scan abgeschlossen — **{len(results)} Optionen** aus "
-                f"**{results['Ticker'].nunique()} Aktien** gespeichert"
+                f"✅ Komplett-Scan abgeschlossen — **{len(combined)} Optionen** aus "
+                f"**{combined['Ticker'].nunique()} Aktien** (Short PUT + Covered Call)"
             )
             st.rerun()
         except Exception as exc:
@@ -432,12 +455,12 @@ ts_str_g           = cached_ts.strftime("%d.%m.%Y %H:%M") if cached_ts else None
 mkt_open           = is_market_open()
 
 _qs_label = (
-    "🚀 Scan jetzt starten" if cache_stale else "🔄 Scan aktualisieren"
+    "🚀 Komplett-Scan starten" if cache_stale else "🔄 Scan aktualisieren"
 )
 _qs_expanded = (cached_results is None or cache_stale)
 
 with st.expander(_qs_label, expanded=_qs_expanded):
-    sq1, sq2, sq3 = st.columns([3, 2, 2])
+    sq1, sq2 = st.columns([4, 2])
     with sq1:
         if ts_str_g:
             st.markdown(
@@ -447,17 +470,11 @@ with st.expander(_qs_label, expanded=_qs_expanded):
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown("**Noch kein Scan gespeichert** — starte einen Watchlist-Scan um die Top 9 zu befüllen.")
+            st.markdown("**Noch kein Scan gespeichert** — starte einen Komplett-Scan um die Top 9 zu befüllen.")
         st.caption(
-            "Scannt alle ~225 Aktien der Watchlist · Cash Covered Puts · "
-            f"DTE 14–60 · Delta 0.05–0.35 · Dauer ca. 2–4 Minuten"
+            "Scannt alle ~225 Watchlist-Aktien · Short PUT (DTE 7–180) + Covered Call (DTE 3–180) · Dauer ca. 4–8 Minuten"
         )
     with sq2:
-        qs_strat = st.selectbox(
-            "Strategie", ["Cash Covered Put", "Covered Call"],
-            key="qs_strategy", label_visibility="collapsed"
-        )
-    with sq3:
         st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
         qs_excl_earn = st.checkbox(
             "📅 Earnings ausschließen",
@@ -465,9 +482,17 @@ with st.expander(_qs_label, expanded=_qs_expanded):
             key="qs_excl_earn",
             help="Optionen mit Earnings-Termin innerhalb der Laufzeit nicht anzeigen",
         )
-    if st.button("🚀 Watchlist-Scan starten", type="primary", use_container_width=True,
+    if st.button("🚀 Komplett-Scan starten", type="primary", use_container_width=True,
                  key="btn_quickscan"):
-        _run_quick_scan(qs_strat, exclude_earnings=qs_excl_earn)
+        _run_comprehensive_scan(exclude_earnings=qs_excl_earn)
+
+# Auto-Scan bei veralteten Daten (einmalig pro Session, nur bei offenem Markt)
+_AUTO_KEY = "_top9_autoscan_done"
+if (cached_results is None or age_hours_global > 4) and mkt_open:
+    if not st.session_state.get(_AUTO_KEY, False):
+        st.session_state[_AUTO_KEY] = True
+        st.info("🔄 Cache veraltet — automatischer Komplett-Scan wird gestartet…")
+        _run_comprehensive_scan()
 
 if cached_results is not None and not cached_results.empty:
     ts_str = cached_ts.strftime("%d.%m.%Y %H:%M") if cached_ts else "unbekannt"
@@ -493,10 +518,40 @@ if cached_results is not None and not cached_results.empty:
             help="Ideen mit Earnings-Termin in der Laufzeit aus der Anzeige ausblenden",
         )
 
+    # ── DTE-Selektor ──────────────────────────────────────────────────────────
+    dte_range = st.radio(
+        "⏱️ Laufzeit-Filter",
+        ["🏃 Sehr kurz 0–7T", "⚡ Kurz 7–21T", "📅 Mittel 21–60T", "📆 Lang 60–365T"],
+        horizontal=True,
+        key="top9_dte_range",
+        help="Filtert Optionen nach Restlaufzeit und wählt passende Strategien",
+    )
+    _DTE_CONFIG = {
+        "🏃 Sehr kurz 0–7T": {"min": 0,  "max": 7,   "strategies": ["Covered Call"],              "hint": ""},
+        "⚡ Kurz 7–21T":      {"min": 7,  "max": 21,  "strategies": ["Short PUT", "Covered Call"], "hint": ""},
+        "📅 Mittel 21–60T":   {"min": 21, "max": 60,  "strategies": ["Short PUT", "Covered Call"], "hint": "Auch Short Strangles geeignet"},
+        "📆 Lang 60–365T":    {"min": 60, "max": 365, "strategies": ["Short PUT", "Covered Call"], "hint": "Auch Synthetic Longs geeignet"},
+    }
+    _dte_cfg  = _DTE_CONFIG[dte_range]
+    dte_min_f = _dte_cfg["min"]
+    dte_max_f = _dte_cfg["max"]
+    strat_list_f = _dte_cfg["strategies"]
+    if _dte_cfg["hint"]:
+        st.caption(f"💡 {_dte_cfg['hint']}")
+
     df = cached_results.copy()
     # Earnings-Filter auf gecachte Ergebnisse anwenden
     if top9_excl_earn and "⚠️ Earnings" in df.columns:
         df = df[df["⚠️ Earnings"] == ""].reset_index(drop=True)
+    # DTE- und Strategie-Filter
+    if "DTE" in df.columns:
+        if "_strategie" in df.columns:
+            df = df[
+                (df["DTE"] >= dte_min_f) & (df["DTE"] <= dte_max_f) &
+                (df["_strategie"].isin(strat_list_f))
+            ].reset_index(drop=True)
+        else:
+            df = df[(df["DTE"] >= dte_min_f) & (df["DTE"] <= dte_max_f)].reset_index(drop=True)
     if "IV %" in df.columns:
         df["_risk_class"] = df["IV %"].apply(lambda x: get_risk_class(x, iv_thresh_low, iv_thresh_mid))
     else:
@@ -588,6 +643,7 @@ if cached_results is not None and not cached_results.empty:
             sektor   = str(row.get("Sektor", ""))
             iv_rank  = str(row.get("IV Rank", "–"))
             earnings = str(row.get("⚠️ Earnings", ""))
+            strategie = str(row.get("_strategie", ""))
 
             praemie_usd = praemie * 100
             einbuch_pct = abs(delta) * 100
@@ -679,6 +735,49 @@ if cached_results is not None and not cached_results.empty:
                 if earnings and "⚠️" in earnings else ""
             )
 
+            # Strategie-Badge
+            if "PUT" in strategie.upper() or "put" in strategie.lower():
+                strat_badge_html = "<span style='background:#0d2240;color:#60a5fa;border-radius:4px;padding:1px 7px;font-size:0.65rem;margin-left:6px'>🐻 Short PUT</span>"
+            elif "CALL" in strategie.upper() or "call" in strategie.lower():
+                strat_badge_html = "<span style='background:#0d2a1a;color:#4ade80;border-radius:4px;padding:1px 7px;font-size:0.65rem;margin-left:6px'>🐂 Covered Call</span>"
+            else:
+                strat_badge_html = ""
+
+            # CRV Balken (color-coded)
+            crv_capped = min(crv, 5.0)
+            crv_pct    = crv_capped / 5.0 * 100
+            crv_color  = "#22c55e" if crv >= 2.0 else ("#f59e0b" if crv >= 1.5 else "#ef4444")
+            crv_bar_html = f"""
+            <div style='margin-bottom:6px'>
+                <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:2px'>
+                    <span style='font-size:0.6rem;color:#555;font-family:sans-serif;text-transform:uppercase;letter-spacing:0.06em'>⚖️ Chancen/Risiko (CRV)</span>
+                    <span style='font-size:0.82rem;font-weight:700;color:{crv_color};font-family:sans-serif'>{crv:.1f}</span>
+                </div>
+                <div style='background:#1a1a1a;border-radius:4px;height:6px;overflow:hidden'>
+                    <div style='background:{crv_color};width:{crv_pct:.0f}%;height:100%;border-radius:4px;
+                                box-shadow:0 0 6px {crv_color}80'></div>
+                </div>
+            </div>"""
+
+            # TA-Kombinationssignal
+            _ta_score = 0
+            if "↑" in tech.get("trend_str", ""):   _ta_score += 1
+            elif "↓" in tech.get("trend_str", ""): _ta_score -= 1
+            _ms = tech.get("macd_str", "")
+            if "bull" in _ms.lower():   _ta_score += 1
+            elif "bear" in _ms.lower(): _ta_score -= 1
+            _ss = tech.get("stoch_str", "")
+            if "überverkauft" in _ss and "⚠️" not in _ss and "❌" not in _ss:
+                _ta_score += 1
+            elif "überkauft" in _ss:
+                _ta_score -= 1
+            if _ta_score >= 2:
+                ta_signal_html = "<span style='background:#0d2a1a;color:#22c55e;border-radius:4px;padding:2px 8px;font-size:0.68rem;font-weight:700'>🟢 Starkes Signal</span>"
+            elif _ta_score >= 0:
+                ta_signal_html = "<span style='background:#2a2500;color:#f59e0b;border-radius:4px;padding:2px 8px;font-size:0.68rem;font-weight:700'>🟡 Gemischt</span>"
+            else:
+                ta_signal_html = "<span style='background:#2a0d0d;color:#ef4444;border-radius:4px;padding:2px 8px;font-size:0.68rem;font-weight:700'>🔴 Kein Signal</span>"
+
             with col:
                 st.html(f"""
                 <div style='background:#111;border:1px solid #1e1e1e;border-radius:12px;
@@ -690,7 +789,7 @@ if cached_results is not None and not cached_results.empty:
                             <div>
                                 <span style='font-size:1.2rem;font-weight:700;color:#f0f0f0;
                                              font-family:sans-serif'>{rank_icon} {ticker}</span>
-                                {earn_badge}
+                                {strat_badge_html}{earn_badge}
                             </div>
                             <span style='font-size:0.65rem;color:#444;font-family:sans-serif;text-align:right'>{sektor}</span>
                         </div>
@@ -746,11 +845,17 @@ if cached_results is not None and not cached_results.empty:
                         </div>
                     </div>
 
-                    <!-- TA-Begründung -->
+                    <!-- CRV Balken (prominent) -->
+                    {crv_bar_html}
+
+                    <!-- TA-Signal + Begründung -->
                     <div style='background:#0c0f0c;border:1px solid #1a2a1a;border-radius:6px;
                                 padding:6px 10px;margin-bottom:6px;
                                 font-size:0.72rem;color:#999;font-family:sans-serif;line-height:1.6'>
-                        <span style='color:#444;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.07em'>📊 Technische Begründung</span><br>
+                        <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px'>
+                            <span style='color:#444;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.07em'>📊 TA-Signal</span>
+                            {ta_signal_html}
+                        </div>
                         {ta_html}
                     </div>
 
@@ -778,7 +883,6 @@ if cached_results is not None and not cached_results.empty:
 
                     <!-- Footer Badges -->
                     <div style='display:flex;flex-wrap:wrap;gap:4px;margin-top:2px'>
-                        <span style='background:#1a1a0a;color:{cfg["color"]};border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:sans-serif;font-weight:700'>⭐ CRV {crv:.0f}</span>
                         <span style='background:#0e0e0e;color:#60a5fa;border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:sans-serif'>TF {tf_align}</span>
                         <span style='background:#0e0e0e;color:#888;border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:sans-serif'>OTM {otm:.1f}%</span>
                         <span style='background:#0e0e0e;color:#888;border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:sans-serif'>IV {iv_pct:.0f}%  Rank {iv_rank}</span>
