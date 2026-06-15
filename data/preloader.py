@@ -22,7 +22,7 @@ _state = {
 }
 
 _UPDATE_INTERVAL = 15 * 60   # 15 Minuten in Sekunden
-_WORKERS = 8
+_WORKERS = 5
 
 
 def get_state() -> dict:

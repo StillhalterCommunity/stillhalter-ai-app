@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from data import _persistent_cache as _dc
 
 _META_KEY = "prefetch_meta"
-_WORKERS = 8
+_WORKERS = 5
 
 # ── Modul-Level State (überlebt Seitenwechsel) ────────────────────────────────
 _lock = threading.Lock()

@@ -350,10 +350,11 @@ if _preloader.needs_update():
 _pl = _preloader.get_state()
 
 # Täglicher Voll-Prefetch (Fundamentals + Value-Daten) — einmal pro Tag.
-# Erst starten wenn der 15-Min-Preloader nicht läuft, damit yfinance nicht
-# von 16 Threads gleichzeitig getroffen wird (Rate-Limit-Schutz).
+# SERIALISIERT: startet nur wenn weder Preloader NOCH Hintergrund-Scan läuft,
+# damit die Instanz nicht von 24 Threads gleichzeitig überlastet wird (502).
 import data.prefetch as _prefetch
 if (not _pl["running"]
+        and not bg_scan.is_running()
         and _prefetch.needs_prefetch_today()
         and not _prefetch.is_running()):
     _prefetch.start_prefetch(_PRELOAD_TICKERS)
@@ -405,11 +406,17 @@ def _cache_age_hours() -> float:
 
 _bg = bg_scan.get_state()
 
-# Einmal pro Session auto-triggern (session_state Flag verhindert Endlosschleife)
+# Auto-Scan SERIALISIERT: startet nur wenn weder Preloader noch Prefetch laufen,
+# damit die Instanz nicht überlastet wird (502). Bei Besetzung: Flag NICHT setzen
+# → nächster Rerun versucht es erneut, sobald die anderen Jobs fertig sind.
 if not st.session_state.get("_auto_scan_triggered"):
-    st.session_state._auto_scan_triggered = True   # nur einmal pro Session
     _age_h = _cache_age_hours()
-    if not _bg["running"] and _age_h > _AUTO_SCAN_INTERVAL_H:
+    _others_busy = _preloader.is_running() or _prefetch.is_running()
+    if _age_h <= _AUTO_SCAN_INTERVAL_H:
+        # Cache frisch genug → kein Auto-Scan nötig, nicht erneut versuchen
+        st.session_state._auto_scan_triggered = True
+    elif not _bg["running"] and not _others_busy:
+        st.session_state._auto_scan_triggered = True
         # Alle Watchlist-Ticker, Standardparameter für Cash Covered Put
         from data.watchlist import ALL_TICKERS as _AT
         _auto_tickers = ["SPY", "QQQ"] + [t for t in _AT if t not in ("SPY", "QQQ")]
