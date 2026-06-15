@@ -276,9 +276,14 @@ with st.expander("⚙️ System", expanded=False):
             _pf1, _pfpad = st.columns([2, 10])
             with _pf1:
                 if st.button("📦 Tagesdaten laden", use_container_width=True,
-                             help="Lädt Kurse, Fundamentals & Value-Daten für alle 225 Ticker in den Cache"):
-                    _pf.start_prefetch()
-                    st.rerun()
+                             help="Lädt Kurse, Fundamentals & Value-Daten für alle Ticker in den Cache"):
+                    # Überlast-Schutz: nicht starten während Scan/Preloader laufen
+                    if bg_scan.is_running() or _preloader.is_running():
+                        st.warning("⏳ Es läuft gerade ein Scan/Preload. Bitte kurz warten "
+                                   "und dann erneut starten — sonst überlastet die Instanz.")
+                    else:
+                        _pf.start_prefetch()
+                        st.rerun()
 
         # ── Speicher-Diagnose: aktiver Cache-Pfad (zeigt ob Volume greift) ─────
         try:
