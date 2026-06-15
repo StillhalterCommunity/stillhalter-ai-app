@@ -25,9 +25,15 @@ st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 render_sidebar(allow_public=True)
 
 # ── Konstanten ─────────────────────────────────────────────────────────────────
-MANUAL_TRADES_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
-)
+# Trades persistent ablegen: auf dem Volume (STILLHALTER_DATA_DIR), damit sie
+# Neustarts überleben und so lange verfolgbar bleiben, wie sie laufen.
+_TRADES_DIR = os.environ.get("STILLHALTER_DATA_DIR", "").strip()
+if _TRADES_DIR:
+    MANUAL_TRADES_PATH = os.path.join(_TRADES_DIR, "manual_trades.json")
+else:
+    MANUAL_TRADES_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
+    )
 
 STATUS_COLORS = {
     "AKTIV":      "#22c55e",

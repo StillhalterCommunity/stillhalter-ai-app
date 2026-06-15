@@ -34,9 +34,15 @@ from data.fetcher import fetch_stock_info, fetch_fundamentals, fetch_price_histo
 _CACHE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl"
 )
-MANUAL_TRADES_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
-)
+# Trades persistent ablegen: auf dem Volume (STILLHALTER_DATA_DIR), damit sie
+# Neustarts überleben und so lange verfolgbar bleiben, wie sie laufen.
+_TRADES_DIR = os.environ.get("STILLHALTER_DATA_DIR", "").strip()
+if _TRADES_DIR:
+    MANUAL_TRADES_PATH = os.path.join(_TRADES_DIR, "manual_trades.json")
+else:
+    MANUAL_TRADES_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
+    )
 
 _DISCLAIMER = """\
 Bitte bei höherem Risiko immer an Take Profit und Absicherung denken!
