@@ -16,8 +16,22 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-_CACHE_DIR = os.path.join(os.path.dirname(__file__), "_disk_cache")
-os.makedirs(_CACHE_DIR, exist_ok=True)
+# Cache-Verzeichnis:
+#   - Lokal: data/_disk_cache (im Repo)
+#   - Railway: STILLHALTER_DATA_DIR auf ein persistentes Volume zeigen lassen
+#     (z.B. /data), sonst wird der Cache bei jedem Neustart/Deploy gelöscht.
+_DATA_DIR = os.environ.get("STILLHALTER_DATA_DIR", "").strip()
+if _DATA_DIR:
+    _CACHE_DIR = os.path.join(_DATA_DIR, "_disk_cache")
+else:
+    _CACHE_DIR = os.path.join(os.path.dirname(__file__), "_disk_cache")
+
+try:
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+except Exception:
+    # Fallback auf lokales Verzeichnis wenn das Volume (noch) nicht gemountet ist
+    _CACHE_DIR = os.path.join(os.path.dirname(__file__), "_disk_cache")
+    os.makedirs(_CACHE_DIR, exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
