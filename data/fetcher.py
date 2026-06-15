@@ -15,7 +15,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Optional, Dict, List
 import pytz
 
@@ -499,11 +499,23 @@ def fetch_batch_prices(tickers: tuple) -> Dict[str, Optional[float]]:
         return {t: None for t in tickers}
 
 
-def calculate_dte(expiration_str: str) -> int:
-    """Berechnet Days to Expiration ab heute."""
+def calculate_dte(expiration) -> int:
+    """
+    Berechnet Days to Expiration ab heute.
+    Akzeptiert str ("YYYY-MM-DD"), datetime.date, datetime.datetime oder pd.Timestamp.
+    (yfinance liefert Strings, Polygon/Massive liefert date-Objekte.)
+    """
     try:
-        exp_date = datetime.strptime(expiration_str, "%Y-%m-%d").date()
         today = datetime.now().date()
+        if isinstance(expiration, str):
+            exp_date = datetime.strptime(expiration[:10], "%Y-%m-%d").date()
+        elif isinstance(expiration, datetime):
+            exp_date = expiration.date()
+        elif isinstance(expiration, date):
+            exp_date = expiration
+        else:
+            # pd.Timestamp o.ä.
+            exp_date = pd.to_datetime(expiration).date()
         return max(0, (exp_date - today).days)
     except Exception:
         return 0

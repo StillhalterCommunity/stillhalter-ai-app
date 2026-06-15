@@ -168,14 +168,14 @@ def get_options_chain(
       impliedVolatility, delta, gamma, theta, vega,
       openInterest, volume, contractSymbol
     """
-    right = "P" if option_type == "put" else "C"
+    # Polygon erwartet das ganze Wort "put"/"call", NICHT "P"/"C"
+    right = "put" if option_type == "put" else "call"
 
     params: dict = {
         "contract_type":           right,
         "limit":                   limit,
         "sort":                    "strike_price",
         "order":                   "asc",
-        "as_of":                   date.today().strftime("%Y-%m-%d"),
     }
     if expiration:
         params["expiration_date"] = _expiry_str_to_date(expiration)
@@ -231,25 +231,55 @@ def get_options_chain(
     return df.sort_values("strike").reset_index(drop=True)
 
 
-def get_available_expirations(ticker: str) -> list[str]:
-    """Gibt alle verfügbaren Verfallsdaten für einen Ticker zurück (YYYY-MM-DD)."""
+def get_available_expirations(ticker: str, max_pages: int = 4) -> list[str]:
+    """
+    Gibt alle verfügbaren Verfallsdaten für einen Ticker zurück (YYYY-MM-DD).
+
+    WICHTIG: Der /v3/reference/options/contracts-Endpoint liefert max. 1000
+    Kontrakte (Strike × Verfall) pro Seite. Bei liquiden Werten (MSFT, NVDA …)
+    verbrauchen allein die Near-Term-Strikes diese 1000 — die Monatsverfälle
+    (DTE 14–60) würden ohne Pagination NIE auftauchen.
+
+    Fix: Nur Calls anfordern (halbiert Kontrakte pro Verfall) UND über next_url
+    paginieren, bis alle Verfälle eingesammelt sind.
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return []
+
+    dates: set[str] = set()
+    url = f"{_BASE_URL}/v3/reference/options/contracts"
+    params: dict = {
+        "underlying_ticker": ticker.upper(),
+        "contract_type":     "call",   # Verfälle sind für Puts identisch → Hälfte der Daten
+        "expired":           "false",
+        "limit":             1000,
+        "sort":              "expiration_date",
+        "order":             "asc",
+        "apiKey":            api_key,
+    }
+
     try:
-        data = _get(
-            "/v3/reference/options/contracts",
-            params={
-                "underlying_ticker": ticker.upper(),
-                "expired": "false",
-                "limit": 1000,
-                "sort": "expiration_date",
-                "order": "asc",
-            },
-        )
-        results = data.get("results", [])
-        dates = sorted(set(r["expiration_date"] for r in results if "expiration_date" in r))
-        return dates
+        for _ in range(max_pages):
+            resp = requests.get(url, params=params, timeout=_TIMEOUT)
+            if resp.status_code == 429:
+                time.sleep(1.5)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            for r in data.get("results", []):
+                if "expiration_date" in r:
+                    dates.add(r["expiration_date"])
+            next_url = data.get("next_url")
+            if not next_url:
+                break
+            # next_url enthält bereits alle Filter + Cursor — nur apiKey anhängen
+            url = next_url
+            params = {"apiKey": api_key}
+        return sorted(dates)
     except Exception as e:
         logger.warning("Massive expirations(%s): %s", ticker, e)
-        return []
+        return sorted(dates)
 
 
 # ── Kompatibilitäts-Wrapper für bestehenden Code ──────────────────────────────
