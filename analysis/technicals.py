@@ -227,8 +227,9 @@ def calculate_stillhalter_macd(
     result.hist_colors = colors
 
     # ── Z-Score ───────────────────────────────────────────────────────────
+    # Pine ta.stdev = Populations-Standardabweichung (Divisor N) → ddof=0
     mean_h = hist.rolling(z_window).mean()
-    std_h  = hist.rolling(z_window).std()
+    std_h  = hist.rolling(z_window).std(ddof=0)
     z      = (hist - mean_h) / std_h.replace(0, 1e-10)
     result.z_score = z
 

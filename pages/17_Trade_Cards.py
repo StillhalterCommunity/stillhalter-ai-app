@@ -775,12 +775,25 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
                     "neutral": "→ Seitwärts",
                 }
                 result["trend_str"] = trend_map.get(tech.trend, "")
-                # Trend in Klartext (Aufwärts-/Seitwärts-/Abwärtstrend)
-                result["trend_simple"] = {
-                    "bullish": "Aufwärtstrend",
-                    "bearish": "Abwärtstrend",
-                    "neutral": "Seitwärtstrend",
-                }.get(tech.trend, "Seitwärtstrend")
+                # Stillhalter Trend Model (EMA 2/9 "Very Tight" — 1:1 wie Pine-Code).
+                # NICHT der generische SMA50/200-Trend aus tech.trend!
+                try:
+                    from analysis.technicals import calculate_ema as _cema
+                    _ef = _cema(hist["Close"], 2)
+                    _es = _cema(hist["Close"], 9)
+                    _efv = float(_ef.iloc[-1]); _esv = float(_es.iloc[-1])
+                    _gap = (_efv - _esv) / _esv * 100 if _esv else 0.0
+                    if _gap > 0.1:
+                        result["trend_simple"] = "Aufwärtstrend"
+                    elif _gap < -0.1:
+                        result["trend_simple"] = "Abwärtstrend"
+                    else:
+                        result["trend_simple"] = "Seitwärtstrend"
+                except Exception:
+                    result["trend_simple"] = {
+                        "bullish": "Aufwärtstrend", "bearish": "Abwärtstrend",
+                        "neutral": "Seitwärtstrend",
+                    }.get(tech.trend, "Seitwärtstrend")
                 if tech.above_sma50 and tech.above_sma200:
                     result["ema_str"] = "MA50 > MA200 (bullisch)"
                 elif tech.above_sma50:
