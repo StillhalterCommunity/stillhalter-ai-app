@@ -71,6 +71,14 @@ def _update_trade_status(trade_id: str, new_status: str, note: str = "") -> None
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _fetch_current_price(ticker: str) -> float:
+    # Über den gecachten Daten-Layer (yfinance + Disk-Cache) — zuverlässiger
+    try:
+        from data.fetcher import fetch_stock_info
+        p = fetch_stock_info(ticker).get("price")
+        if p:
+            return float(p)
+    except Exception:
+        pass
     try:
         import yfinance as yf
         info = yf.Ticker(ticker).info
@@ -84,7 +92,25 @@ def _fetch_current_price(ticker: str) -> float:
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _fetch_option_mid(ticker: str, expiry_str: str, strike: float, is_call: bool) -> float:
-    """Versucht den aktuellen Optionspreis (Mid) via yfinance abzurufen."""
+    """Aktueller Optionspreis (Mid). Bevorzugt Polygon/Massive, yfinance als Fallback."""
+    # 1. Polygon/Massive (funktioniert zuverlässig, echte Greeks/Quotes)
+    try:
+        from data.fetcher import _massive_enabled
+        if _massive_enabled():
+            from data.massive_fetcher import get_options_chain
+            df = get_options_chain(ticker, expiry_str, "call" if is_call else "put")
+            if not df.empty:
+                idx = (df["strike"].astype(float) - strike).abs().idxmin()
+                row = df.loc[idx]
+                mid = float(row.get("mid_price") or 0)
+                if mid > 0:
+                    return round(mid, 2)
+                last = float(row.get("lastPrice") or 0)
+                if last > 0:
+                    return round(last, 2)
+    except Exception:
+        pass
+    # 2. yfinance Fallback
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)

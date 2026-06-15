@@ -673,6 +673,76 @@ def _gen_trade_id(ticker: str, strategy: str) -> str:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
+                        call_strike: float = 0.0) -> dict | None:
+    """
+    Holt Prämie (Mid, sonst Last), Delta und IV für den exakten Kontrakt von Polygon.
+    Wählt das nächstliegende verfügbare Verfallsdatum und den nächstliegenden Strike.
+    Für Short Strangle: Put-Leg @ strike + Call-Leg @ call_strike (Prämien summiert).
+    Gibt None zurück wenn keine Daten verfügbar.
+    """
+    try:
+        from data.fetcher import _massive_enabled
+        if not _massive_enabled():
+            return None
+        from data.massive_fetcher import get_available_expirations, get_options_chain
+    except Exception:
+        return None
+
+    try:
+        target = pd.to_datetime(expiry).date()
+    except Exception:
+        return None
+
+    exp_dates = []
+    for e in get_available_expirations(ticker):
+        try:
+            exp_dates.append(pd.to_datetime(e).date())
+        except Exception:
+            pass
+    if not exp_dates:
+        return None
+    nearest = min(exp_dates, key=lambda d: abs((d - target).days))
+    exp_str = nearest.strftime("%Y-%m-%d")
+
+    def _leg(opt_type: str, k: float):
+        df = get_options_chain(ticker, exp_str, opt_type)
+        if df is None or df.empty:
+            return None
+        idx = (df["strike"].astype(float) - k).abs().idxmin()
+        row = df.loc[idx]
+        prem = float(row.get("mid_price") or 0) or float(row.get("lastPrice") or 0)
+        return {
+            "premium": round(prem, 2),
+            "delta":   round(float(row.get("delta") or 0), 2),
+            "iv_pct":  round(float(row.get("impliedVolatility") or 0) * 100),
+            "strike":  float(row["strike"]),
+        }
+
+    is_call     = "Call" in strategy
+    is_strangle = "Strangle" in strategy
+
+    if is_strangle:
+        put_leg  = _leg("put", strike)
+        call_leg = _leg("call", call_strike) if call_strike > 0 else None
+        if not put_leg:
+            return None
+        prem = put_leg["premium"] + (call_leg["premium"] if call_leg else 0)
+        return {
+            "premium": round(prem, 2), "delta": put_leg["delta"],
+            "iv_pct": put_leg["iv_pct"], "found_expiry": exp_str,
+            "found_strike": put_leg["strike"],
+        }
+
+    leg = _leg("call" if is_call else "put", strike)
+    if not leg:
+        return None
+    return {
+        "premium": leg["premium"], "delta": leg["delta"], "iv_pct": leg["iv_pct"],
+        "found_expiry": exp_str, "found_strike": leg["strike"],
+    }
+
+
 def _fetch_manual_ticker_data(ticker: str) -> dict:
     """Holt Kurs, TA-Signale, Fundamentals und News für manuellen Input."""
     result = {
@@ -787,7 +857,8 @@ def _build_whatsapp_short_manual(
     premium: float, delta: float, iv_pct: float, price_now: float,
     trend_str: str, macd_str: str, stoch_str: str,
     optionstrat_url: str, tracking_url: str, post_ts: str,
-    support_near=None,
+    support_near=None, ath_price_dist=None,
+    company_sentence: str = "", news_line: str = "",
 ) -> str:
     is_call = "Call" in strategy
     otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
@@ -798,45 +869,72 @@ def _build_whatsapp_short_manual(
     rend_lz = premium / capital_basis * 100
     rend_ann = rend_lz * 365 / max(dte, 1)
     class_header = {
-        "A": "🟢 Class A — Konservativ (Low IV)",
-        "B": "🟡 Class B — Ausgewogen (Mid IV)",
-        "C": "🔴 Class C — Aggressiv (High IV)",
+        "A": "🟢 Class A — Konservativ",
+        "B": "🟡 Class B — Ausgewogen",
+        "C": "🔴 Class C — Aggressiv",
     }.get(class_label, f"Class {class_label}")
-    ta_parts = []
-    if trend_str: ta_parts.append(trend_str)
-    if macd_str:  ta_parts.append(macd_str.split(" (")[0].strip())
-    if stoch_str: ta_parts.append(stoch_str)
-    ta_line = " · ".join(ta_parts) if ta_parts else "–"
-    sup_line = ""
-    if support_near and price_now > 0:
-        sup_dist = (price_now - support_near) / price_now * 100
-        sup_line = f"📐 Support bei ${support_near:.2f} ({sup_dist:.1f}% unter Kurs)\n"
-    # Zeile je Strategie anpassen
+
+    L = []
+    L.append(f"🔔 TRADING IDEE — {ticker}")
+    L.append(f"🏢 {company}")
+    L.append(f"{strategy}")
+    L.append("")
+    L.append(class_header)
+    L.append("")
+    # ── Eckdaten (alles untereinander) ────────────────────────────────────────
+    L.append(f"📅 Verfall: {expiry_display} ({dte} Tage)")
+    L.append(f"💵 Kurs: ${price_now:.2f}")
+    L.append(f"🎯 Strike: ${strike:.0f}")
+    L.append(f"📊 Volatilität (IV): {iv_pct:.0f}%")
+    L.append("")
+    # ── Prämie & Rendite ──────────────────────────────────────────────────────
     if is_call and price_now > 0:
-        risk_line = (
-            f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD\n"
-            f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
-            f"📈 Rendite auf Aktienpos.: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
-            f"⚡ Ausübungsrisiko: ~{assign_pct}% (Δ {delta:.2f})"
-        )
-    else:
-        risk_line = (
-            f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
-            f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
-            f"⚡ Einbuchungsrisiko: ~{assign_pct}% (Δ {delta:.2f})"
-        )
-    return (
-        f"🔔 Trading Idee | {ticker} | {strategy} | {expiry_display} @{strike:.0f}\n\n"
-        f"{class_header}\n"
-        f"🏢 {company}\n\n"
-        f"💵 Kurs: ${price_now:.2f}  ·  Strike ${strike:.0f} ({_fmt_num(otm_pct, 1)}% OTM)\n"
-        f"{risk_line}\n\n"
-        f"📊 {ta_line}\n"
-        f"{sup_line}\n"
-        f"📡 Live-Tracking: {tracking_url}\n"
-        f"📊 OptionStrat: {optionstrat_url}\n\n"
-        f"— Stillhalter AI | {post_ts}"
-    )
+        L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
+    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
+    L.append(f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. · {_fmt_num(rend_lz)}% Laufzeit")
+    _risk_label = "Ausübungsrisiko" if is_call else "Einbuchungsrisiko"
+    L.append(f"⚡ {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
+    L.append("")
+    # ── Absicherung ───────────────────────────────────────────────────────────
+    L.append("🛡️ Absicherung")
+    L.append(f"• {_fmt_num(otm_pct, 1)}% Out-of-the-Money")
+    if support_near and strike > 0:
+        if support_near >= strike:
+            _sd = (support_near - strike) / strike * 100
+            L.append(f"• Support ${support_near:.2f} liegt {_fmt_num(_sd, 1)}% über Strike (Puffer)")
+        else:
+            _sd = (strike - support_near) / strike * 100
+            L.append(f"• Support ${support_near:.2f} liegt {_fmt_num(_sd, 1)}% unter Strike")
+    if ath_price_dist is not None:
+        L.append(f"• {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
+    L.append("")
+    # ── Technik (klar benannt) ────────────────────────────────────────────────
+    L.append("📊 Technik")
+    if trend_str:
+        L.append(f"• Stillhalter Trendindikator: {trend_str}")
+    if macd_str:
+        L.append(f"• {macd_str.replace('MACD Pro:', 'MACD Pro:').split(' (')[0].strip()}")
+    if stoch_str:
+        L.append(f"• {stoch_str.replace('Dual Stoch:', 'Stochastik:')}")
+    if not (trend_str or macd_str or stoch_str):
+        L.append("• Keine eindeutigen Signale")
+    L.append("")
+    # ── Unternehmen & News ────────────────────────────────────────────────────
+    if company_sentence:
+        L.append(f"🏢 {company_sentence}")
+    if news_line:
+        L.append(f"📰 {news_line}")
+    if company_sentence or news_line:
+        L.append("")
+    # ── Links ─────────────────────────────────────────────────────────────────
+    L.append("📡 Live-Tracking:")
+    L.append(tracking_url)
+    L.append("")
+    L.append("📊 OptionStrat:")
+    L.append(optionstrat_url)
+    L.append("")
+    L.append(f"— Stillhalter AI | {post_ts}")
+    return "\n".join(L)
 
 
 def _build_circle_suffix(
@@ -896,6 +994,12 @@ with tab1:
         ("C", "🔴 Class C — Aggressiv",   "#ef4444", col_c),
     ]
 
+    # Defaults für Prämie/Delta/IV (damit Auto-Fill sie via Session State setzen kann)
+    for _c in ["A", "B", "C"]:
+        st.session_state.setdefault(f"m_{_c}_premium", 0.0)
+        st.session_state.setdefault(f"m_{_c}_delta", -0.20)
+        st.session_state.setdefault(f"m_{_c}_iv", 25.0)
+
     m_inputs: dict = {}
     for cls, cls_label, cls_color, col in _CLASS_DEFS:
         with col:
@@ -921,18 +1025,44 @@ with tab1:
                     "CALL Strike ($)", min_value=0.0, step=1.0, format="%.2f",
                     key=f"m_{cls}_call_strike",
                 )
+
+            # ── Auto-Fill aus Massive/Polygon ─────────────────────────────────
+            if st.button("🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
+                         use_container_width=True,
+                         help="Holt Prämie, Delta & IV automatisch von Massive/Polygon"):
+                if ticker_v and strike_v > 0:
+                    with st.spinner("⏳ Hole Optionsdaten…"):
+                        q = _fetch_option_quote(ticker_v, expiry_v, strike_v, strat_v, call_strike_v)
+                    if q:
+                        st.session_state[f"m_{cls}_premium"] = float(q["premium"])
+                        st.session_state[f"m_{cls}_delta"]   = float(q["delta"])
+                        st.session_state[f"m_{cls}_iv"]      = float(q["iv_pct"])
+                        st.session_state[f"m_{cls}_fill_msg"] = (
+                            f"✓ Strike ${q['found_strike']:.0f} · Verfall {q['found_expiry']}"
+                        )
+                    else:
+                        st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Keine Optionsdaten gefunden"
+                    st.rerun()
+                else:
+                    st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Erst Ticker + Strike eingeben"
+                    st.rerun()
+            _fill_msg = st.session_state.get(f"m_{cls}_fill_msg", "")
+            if _fill_msg:
+                _msg_color = "#22c55e" if _fill_msg.startswith("✓") else "#f59e0b"
+                st.html(f"<div style='font-size:0.7rem;color:{_msg_color};margin:-4px 0 4px'>{_fill_msg}</div>")
+
             premium_v = st.number_input(
                 "Prämie (USD)", min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
             )
             dc, dv = st.columns(2)
             with dc:
                 delta_v = st.number_input(
-                    "Delta", value=-0.20, min_value=-1.0, max_value=1.0,
+                    "Delta", min_value=-1.0, max_value=1.0,
                     step=0.01, format="%.2f", key=f"m_{cls}_delta",
                 )
             with dv:
                 iv_v = st.number_input(
-                    "IV %", min_value=0.0, value=25.0, step=1.0, format="%.0f",
+                    "IV %", min_value=0.0, step=1.0, format="%.0f",
                     key=f"m_{cls}_iv",
                 )
             m_inputs[cls] = {
@@ -1016,6 +1146,31 @@ with tab1:
                     "status": "AKTIV",
                 })
 
+                # ── Zusatzdaten für den Post: ATH-Distanz, Unternehmenssatz, News-Zeile
+                _ath_price_dist = None
+                try:
+                    _hist2 = fetch_price_history(ticker, period="2y")
+                    if _hist2 is not None and not _hist2.empty:
+                        _ath = float(_hist2["Close"].max())
+                        if _ath > 0 and price_now > 0:
+                            _ath_price_dist = (_ath - price_now) / _ath * 100
+                except Exception:
+                    pass
+
+                _desc = (tdata.get("description") or "").strip()
+                if _desc:
+                    _sentence = _translate_de(_desc.split(". ")[0].strip()[:180])
+                    _company_sentence = _sentence.rstrip(".") + "."
+                else:
+                    _company_sentence = ""
+
+                _news_items = tdata.get("news", []) or []
+                if _news_items:
+                    _nt = (_news_items[0].get("title") or "").strip()
+                    _news_line = _translate_de(_nt[:140]) if _nt else ""
+                else:
+                    _news_line = ""
+
                 # WhatsApp Short
                 wa_post = _build_whatsapp_short_manual(
                     class_label=cls, ticker=ticker, company=company,
@@ -1029,6 +1184,9 @@ with tab1:
                     tracking_url=tracking_url,
                     post_ts=post_ts,
                     support_near=tdata.get("support_near"),
+                    ath_price_dist=_ath_price_dist,
+                    company_sentence=_company_sentence,
+                    news_line=_news_line,
                 )
 
                 # Circle Detailpost
