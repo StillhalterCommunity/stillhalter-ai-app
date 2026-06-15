@@ -219,6 +219,32 @@ with st.expander("⚙️ System", expanded=False):
 
     st.divider()
 
+    # ── Wartungsmodus (nur Admin) ──────────────────────────────────────────────
+    from data.maintenance import is_maintenance, is_admin, enable as maint_on, disable as maint_off
+    if is_admin(st.session_state.get("auth_user", "")):
+        _maint_active = is_maintenance()
+        st.markdown(
+            f"<div style='font-size:0.75rem;color:#888;margin-bottom:6px'>"
+            f"🔧 Wartungsmodus: <b style='color:{\"#ef4444\" if _maint_active else \"#22c55e\"}'>"
+            f"{'AKTIV — alle anderen Nutzer sehen Wartungsseite' if _maint_active else 'INAKTIV'}</b>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        _m1, _m2, _mpad = st.columns([2, 2, 8])
+        with _m1:
+            if not _maint_active:
+                if st.button("🔧 Wartungsmodus AN", use_container_width=True,
+                             help="Alle anderen Nutzer sehen Wartungsseite"):
+                    maint_on()
+                    st.rerun()
+        with _m2:
+            if _maint_active:
+                if st.button("✅ Wartungsmodus AUS", use_container_width=True, type="primary",
+                             help="App wieder für alle freigeben"):
+                    maint_off()
+                    st.rerun()
+        st.divider()
+
     # ── App-Steuerung ─────────────────────────────────────────────────────────
     sc1, sc2, sc3, sc4, _ = st.columns([2, 2, 2, 2, 4])
     with sc1:

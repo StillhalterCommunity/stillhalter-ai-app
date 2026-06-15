@@ -7,9 +7,49 @@ import streamlit as st
 from ui.theme import get_logo_html
 
 
+def _show_maintenance_screen() -> None:
+    """Zeigt Wartungsseite und stoppt die App."""
+    st.set_page_config(page_title="Wartung · Stillhalter AI", page_icon="🔧", layout="centered")
+    from ui.theme import get_logo_html, get_css
+    st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+    st.html(f"""
+<div style='text-align:center;padding:80px 40px 40px'>
+    <div style='margin-bottom:32px'>{get_logo_html("white", 56)}</div>
+    <div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
+                border-radius:14px;padding:40px 48px;max-width:520px;margin:0 auto'>
+        <div style='font-size:2.5rem;margin-bottom:16px'>🔧</div>
+        <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.5rem;
+                    color:#f0f0f0;letter-spacing:0.05em;margin-bottom:8px'>
+            Wartung & Updates
+        </div>
+        <div style='font-family:RedRose,sans-serif;font-size:0.88rem;color:#888;
+                    line-height:1.7;margin-bottom:24px'>
+            Die Stillhalter AI App wird gerade weiterentwickelt und
+            verbessert. Bitte versuche es in Kürze erneut.
+        </div>
+        <div style='background:#1a1a1a;border:1px solid #333;border-radius:8px;
+                    padding:12px 18px;font-family:RedRose,sans-serif;
+                    font-size:0.78rem;color:#555'>
+            Bei Fragen wende dich an die<br>
+            <span style='color:#d4a843'>Stillhalter Community</span>
+        </div>
+    </div>
+</div>
+""")
+    st.stop()
+
+
 def render_sidebar():
     """Rendert die einheitliche Sidebar-Navigation auf jeder Seite."""
     from data.fetcher import is_market_open, market_status_text
+    from data.maintenance import is_maintenance, is_admin
+
+    # ── Wartungsmodus-Check ────────────────────────────────────────────────────
+    if is_maintenance():
+        current_user = st.session_state.get("auth_user", "")
+        if not is_admin(current_user):
+            _show_maintenance_screen()
+
     market_open = is_market_open()
     with st.sidebar:
         st.html(get_logo_html("white", 28))
