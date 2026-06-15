@@ -33,16 +33,20 @@ def _optionstrat_url(
 ) -> str:
     """
     Generiert den direkten OptionStrat-Link für eine Option.
-    Format: https://optionstrat.com/build/short-put/AAPL/-185p250718
+    Format: https://optionstrat.com/build/cash-secured-put/AAPL/-.AAPL260626P285
     """
     try:
         d = pd.to_datetime(expiry)
         exp_str  = d.strftime("%y%m%d")           # YYMMDD (OptionStrat-Format)
-        right    = "c" if is_call else "p"
-        strat_sl = "short-call" if is_call else "short-put"
+        t = ticker.upper()
+        if is_call:
+            return (
+                f"https://optionstrat.com/build/covered-call/{t}"
+                f"/+100{t},-.{t}{exp_str}C{strike:.0f}"
+            )
         return (
-            f"https://optionstrat.com/build/{strat_sl}/{ticker}"
-            f"/-{strike:.0f}{right}{exp_str}"
+            f"https://optionstrat.com/build/cash-secured-put/{t}"
+            f"/-.{t}{exp_str}P{strike:.0f}"
         )
     except Exception:
         return ""
@@ -58,9 +62,10 @@ def _optionstrat_url_strangle(
     try:
         d       = pd.to_datetime(expiry)
         exp_str = d.strftime("%y%m%d")
+        t       = ticker.upper()
         return (
-            f"https://optionstrat.com/build/short-strangle/{ticker}"
-            f"/-{put_strike:.0f}p{exp_str},-{call_strike:.0f}c{exp_str}"
+            f"https://optionstrat.com/build/short-strangle/{t}"
+            f"/-.{t}{exp_str}P{put_strike:.0f},-.{t}{exp_str}C{call_strike:.0f}"
         )
     except Exception:
         return ""

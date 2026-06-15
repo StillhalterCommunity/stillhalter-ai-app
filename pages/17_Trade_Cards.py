@@ -630,17 +630,18 @@ def _optionstrat_url_manual(
     try:
         d = pd.to_datetime(expiry)
         exp_str = d.strftime("%y%m%d")
+        t = ticker.upper()
         if is_strangle and call_strike > 0:
             return (
-                f"https://optionstrat.com/build/short-strangle/{ticker}"
-                f"/-{strike:.0f}p{exp_str},-{call_strike:.0f}c{exp_str}"
+                f"https://optionstrat.com/build/short-strangle/{t}"
+                f"/-.{t}{exp_str}P{strike:.0f},-.{t}{exp_str}C{call_strike:.0f}"
             )
         if is_call:
             return (
-                f"https://optionstrat.com/build/covered-call/{ticker}"
-                f"/+100{ticker},-{strike:.0f}c{exp_str}"
+                f"https://optionstrat.com/build/covered-call/{t}"
+                f"/+100{t},-.{t}{exp_str}C{strike:.0f}"
             )
-        return f"https://optionstrat.com/build/short-put/{ticker}/-{strike:.0f}p{exp_str}"
+        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{strike:.0f}"
     except Exception:
         return ""
 
@@ -848,7 +849,7 @@ tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
 # TAB 1 — MANUELL EINGEBEN
 # ════════════════════════════════════════════════════════════════════════════════
 with tab1:
-    st.markdown("Trage **Class A** (Konservativ), **Class B** (Ausgewogen) und **Class C** (Aggressiv) ein:")
+    st.markdown("Trage **Class A** (Konservativ), **Class B** (Ausgewogen) und/oder **Class C** (Aggressiv) ein — mindestens eine Klasse:")
 
     col_a, col_b, col_c = st.columns(3, gap="small")
     _CLASS_DEFS = [
@@ -915,16 +916,17 @@ with tab1:
 
     st.markdown("---")
 
-    if st.button("🚀 Posts für alle 3 Klassen generieren", type="primary",
+    if st.button("🚀 Posts generieren", type="primary",
                  use_container_width=True, key="btn_gen_manual"):
-        _valid = True
-        for cls in ["A", "B", "C"]:
-            if not m_inputs[cls]["ticker"] or m_inputs[cls]["strike"] <= 0 or m_inputs[cls]["premium"] <= 0:
-                st.error(f"⚠️ Class {cls}: Ticker, Strike und Prämie sind Pflichtfelder.")
-                _valid = False
-        if _valid:
+        _active_classes = [
+            cls for cls in ["A", "B", "C"]
+            if m_inputs[cls]["ticker"] and m_inputs[cls]["strike"] > 0 and m_inputs[cls]["premium"] > 0
+        ]
+        if not _active_classes:
+            st.error("⚠️ Mindestens eine Klasse (Ticker + Strike + Prämie) muss ausgefüllt sein.")
+        else:
             _generated: dict = {}
-            for cls in ["A", "B", "C"]:
+            for cls in _active_classes:
                 inp = m_inputs[cls]
                 with st.spinner(f"⏳ Marktdaten für {inp['ticker']} (Class {cls})…"):
                     tdata = _fetch_manual_ticker_data(inp["ticker"])
