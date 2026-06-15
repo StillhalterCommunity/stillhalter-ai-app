@@ -241,6 +241,42 @@ def _css_dark() -> str:
     [data-testid="stSlider"] [data-baseweb="slider"] [data-testid="stTickBar"] {{ color: #444; }}
 
     .gold-line {{ height: 2px; background: linear-gradient(90deg, #d4a843, transparent); margin: 12px 0; border: none; }}
+
+    /* ── Dropdown-Popups (werden außerhalb des normalen DOM gerendert) ──── */
+    [data-baseweb="popover"],
+    [data-baseweb="menu"] {{
+        background: #1a1a1a !important;
+        border: 1px solid #2a2a2a !important;
+        border-radius: 8px !important;
+    }}
+    [data-baseweb="menu"] [role="option"] {{
+        background: #1a1a1a !important;
+        color: #e0e0e0 !important;
+        font-family: 'RedRose', sans-serif !important;
+    }}
+    [data-baseweb="menu"] [role="option"]:hover,
+    [data-baseweb="menu"] [aria-selected="true"] {{
+        background: #252525 !important;
+        color: #d4a843 !important;
+    }}
+    [data-baseweb="select"] [data-testid="stSelectboxVirtualDropdown"] {{
+        background: #1a1a1a !important;
+    }}
+
+    /* ── Multiselect-Chips ─────────────────────────────────────────────── */
+    [data-baseweb="tag"] {{
+        background: #2a2a2a !important;
+        color: #e0e0e0 !important;
+        border-radius: 4px !important;
+    }}
+
+    /* ── Tooltips ──────────────────────────────────────────────────────── */
+    [data-baseweb="tooltip"] div {{
+        background: #252525 !important;
+        color: #e0e0e0 !important;
+        border: 1px solid #333 !important;
+        border-radius: 6px !important;
+    }}
     """
 
 
@@ -521,6 +557,38 @@ def _css_green() -> str:
 
     /* Trennlinie */
     .gold-line {{ height: 2px; background: linear-gradient(90deg, {g["600"]}, transparent); margin: 12px 0; border: none; }}
+
+    /* ── Dropdown-Popups (werden außerhalb des normalen DOM gerendert) ──── */
+    [data-baseweb="popover"],
+    [data-baseweb="menu"] {{
+        background: #ffffff !important;
+        border: 1px solid {g["200"]} !important;
+        border-radius: 8px !important;
+    }}
+    [data-baseweb="menu"] [role="option"] {{
+        background: #ffffff !important;
+        color: {_INK} !important;
+        font-family: 'RedRose', sans-serif !important;
+    }}
+    [data-baseweb="menu"] [role="option"]:hover,
+    [data-baseweb="menu"] [aria-selected="true"] {{
+        background: {g["50"]} !important;
+        color: {g["800"]} !important;
+    }}
+
+    /* ── Multiselect-Chips ─────────────────────────────────────────────── */
+    [data-baseweb="tag"] {{
+        background: {g["100"]} !important;
+        color: {g["800"]} !important;
+        border-radius: 4px !important;
+    }}
+
+    /* ── Tooltips ──────────────────────────────────────────────────────── */
+    [data-baseweb="tooltip"] div {{
+        background: {g["900"]} !important;
+        color: #ffffff !important;
+        border-radius: 6px !important;
+    }}
     """
 
 

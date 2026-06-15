@@ -13,7 +13,7 @@ env/
 # Cache-Dateien (große Pickle-Dateien, nicht in Git)
 *.pkl
 *.cache
-.streamlit/
+.streamlit/secrets.toml
 
 # Systemdateien
 .DS_Store
