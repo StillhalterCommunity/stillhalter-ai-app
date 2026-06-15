@@ -371,6 +371,51 @@ def fetch_options_chain_massive(
         return pd.DataFrame(), pd.DataFrame(), []
 
 
+def warm_option_chain(ticker: str) -> bool:
+    """
+    Holt eine BREITE Optionskette (Puts + Calls, ~0–90 DTE) und legt sie
+    persistent auf Disk ab (key opt_chain_<ticker>). Für den Tages-Prefetch —
+    danach liest fetch_options_chain daraus, ohne Live-API-Call.
+    """
+    if not _massive_enabled():
+        return False
+    try:
+        puts, calls, _exps = fetch_options_chain_massive(
+            ticker, dte_min=0, dte_max=90, max_expiries=10,
+            option_types=("put", "call"),
+        )
+        frames = [df for df in (puts, calls) if df is not None and not df.empty]
+        if not frames:
+            return False
+        combined = pd.concat(frames, ignore_index=True)
+        _dc.save(f"opt_chain_{ticker}", combined, ttl_hours=24)
+        return True
+    except Exception:
+        return False
+
+
+def _chain_from_disk(ticker, dte_min, dte_max, max_expiries, option_types):
+    """Lädt die breite Disk-Optionskette und filtert auf DTE-Fenster + Seite(n).
+    Gibt (puts_df, calls_df, expirations) oder None wenn kein frischer Cache."""
+    combined = _dc.load(f"opt_chain_{ticker}", max_age_hours=18)
+    if combined is None or getattr(combined, "empty", True):
+        return None
+    try:
+        df = combined.copy()
+        df["_dte"] = df["expiration"].apply(calculate_dte)
+        df = df[(df["_dte"] >= dte_min) & (df["_dte"] <= dte_max)]
+        if df.empty:
+            return None
+        exps = sorted(df["expiration"].unique())[:max_expiries]
+        df = df[df["expiration"].isin(exps)].drop(columns=["_dte"])
+        puts  = df[df["option_type"] == "put"].reset_index(drop=True)  if "put"  in option_types else pd.DataFrame()
+        calls = df[df["option_type"] == "call"].reset_index(drop=True) if "call" in option_types else pd.DataFrame()
+        exp_strs = [pd.to_datetime(e).strftime("%Y-%m-%d") for e in exps]
+        return puts, calls, exp_strs
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_options_chain(
     ticker: str,
@@ -383,11 +428,14 @@ def fetch_options_chain(
     Holt Options Chain — nur relevante Verfallsdaten im DTE-Fenster.
     Gibt zurück: (puts_df, calls_df, expirations_list)
 
-    option_types: ("put",)/("call",) holt nur eine Seite (spart ~50% Last).
-    Nutzt Massive.com wenn USE_MASSIVE=True und API-Key gesetzt,
-    sonst Yahoo Finance als Fallback.
+    Reihenfolge: Disk-Cache vom Tages-Prefetch (opt_chain_<ticker>) →
+    sonst Live von Massive/Polygon → sonst Yahoo Finance.
+    option_types: ("put",)/("call",) liefert nur eine Seite.
     """
     if _massive_enabled():
+        cached = _chain_from_disk(ticker, dte_min, dte_max, max_expiries, option_types)
+        if cached is not None:
+            return cached
         return fetch_options_chain_massive(ticker, dte_min, dte_max, max_expiries, option_types)
 
     try:

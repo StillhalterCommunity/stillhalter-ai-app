@@ -55,22 +55,51 @@ def last_prefetch() -> dict | None:
     return _dc.load_latest(_META_KEY)
 
 
+# Frische-Grenze: Ticker gilt als "heute schon gezogen" wenn jünger als …
+_FRESH_HOURS = 18
+
+
 def needs_prefetch_today() -> bool:
-    """True wenn heute noch kein erfolgreicher Prefetch gelaufen ist."""
+    """
+    True wenn der heutige Voll-Prefetch noch nicht VOLLSTÄNDIG ist.
+    Bei unvollständigem Lauf (z.B. Neustart mittendrin) → True, damit
+    fortgesetzt wird; bereits gezogene Ticker werden dann übersprungen.
+    """
     if is_running():
         return False
     meta = last_prefetch()
-    if not meta or "date" not in meta:
-        return True
     today = datetime.now().strftime("%Y-%m-%d")
-    return meta["date"] != today
+    if not meta or meta.get("date") != today:
+        return True
+    return not meta.get("complete", False)
+
+
+def _is_ticker_warm(ticker: str) -> bool:
+    """True wenn Value-Daten UND Optionskette für den Ticker frisch gecacht sind."""
+    try:
+        va = _dc.age_hours(f"value_data_{ticker}")
+        oa = _dc.age_hours(f"opt_chain_{ticker}")
+        return (va is not None and va < _FRESH_HOURS
+                and oa is not None and oa < _FRESH_HOURS)
+    except Exception:
+        return False
 
 
 def _warm_one(ticker: str) -> dict:
-    """Wärmt alle Datenquellen für einen Ticker. Fehler werden geschluckt."""
-    ok = {"info": False, "fund": False, "hist": False, "value": False}
+    """Wärmt alle Datenquellen für einen Ticker (inkl. Optionskette Puts+Calls).
+    Bereits frisch gecachte Ticker werden übersprungen (Resume)."""
+    ok = {"info": False, "fund": False, "hist": False, "value": False,
+          "opt": False, "skipped": False}
+
+    # Resume: heute schon vollständig gezogen → überspringen
+    if _is_ticker_warm(ticker):
+        ok.update({"info": True, "fund": True, "hist": True,
+                   "value": True, "opt": True, "skipped": True})
+        return ok
+
     try:
-        from data.fetcher import fetch_stock_info, fetch_fundamentals, fetch_price_history
+        from data.fetcher import (fetch_stock_info, fetch_fundamentals,
+                                   fetch_price_history, warm_option_chain)
         from data.value_screener import warm_value_data
     except Exception:
         return ok
@@ -94,13 +123,19 @@ def _warm_one(ticker: str) -> dict:
         ok["value"] = warm_value_data(ticker)
     except Exception:
         pass
+    try:
+        # Optionsketten (Puts + Calls) persistent cachen → Scanner liest daraus
+        ok["opt"] = warm_option_chain(ticker)
+    except Exception:
+        pass
     return ok
 
 
 def _prefetch_worker(tickers: list) -> None:
     total = len(tickers)
     done = 0
-    counts = {"info": 0, "fund": 0, "hist": 0, "value": 0}
+    counts = {"info": 0, "fund": 0, "hist": 0, "value": 0, "opt": 0, "skipped": 0}
+    completed_all = False
 
     try:
         with ThreadPoolExecutor(max_workers=_WORKERS, thread_name_prefix="prefetch") as ex:
@@ -117,18 +152,20 @@ def _prefetch_worker(tickers: list) -> None:
                 with _lock:
                     _state["done"] = done
                     _state["progress"] = done / max(total, 1)
+        completed_all = True   # Schleife vollständig durchlaufen (nicht abgebrochen)
     finally:
         meta = {
             "date":        datetime.now().strftime("%Y-%m-%d"),
             "finished_at": datetime.now().strftime("%d.%m.%Y %H:%M"),
             "total":       total,
             "counts":      counts,
+            "complete":    completed_all,
         }
         _dc.save(_META_KEY, meta, ttl_hours=72)
         with _lock:
             _state["running"] = False
-            _state["progress"] = 1.0
-            _state["done"] = total
+            _state["progress"] = 1.0 if completed_all else _state.get("progress", 0.0)
+            _state["done"] = done
 
 
 def start_prefetch(tickers: list | None = None) -> bool:

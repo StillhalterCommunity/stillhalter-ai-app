@@ -261,10 +261,17 @@ with st.expander("⚙️ System", expanded=False):
         else:
             if _pf_meta:
                 _pfc = _pf_meta.get("counts", {})
+                _pf_total = _pf_meta.get("total", 0)
+                _pf_complete = _pf_meta.get("complete", False)
+                _pf_state_lbl = ("✅ vollständig" if _pf_complete
+                                 else "⏳ unvollständig — wird beim nächsten Lauf fortgesetzt")
+                _pf_state_col = "#22c55e" if _pf_complete else "#f59e0b"
                 st.markdown(
                     f"<div style='font-size:0.75rem;color:#888;margin:8px 0 6px'>"
                     f"📦 Letzter Prefetch: <b style='color:#22c55e'>{_pf_meta.get('finished_at','?')}</b> "
-                    f"· Value-Daten {_pfc.get('value',0)}/{_pf_meta.get('total',0)} geladen</div>",
+                    f"<span style='color:{_pf_state_col}'>({_pf_state_lbl})</span><br>"
+                    f"Value-Daten {_pfc.get('value',0)}/{_pf_total} · "
+                    f"Optionsketten {_pfc.get('opt',0)}/{_pf_total}</div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -393,56 +400,12 @@ elif _pl["last_update"]:
 st.html("<div style='margin-bottom:8px'></div>")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AUTO-SCAN beim App-Start — startet einmal pro Session wenn Cache veraltet
+# HINWEIS: Kein automatischer Watchlist-Scan mehr beim App-Start.
+# Die Optionsdaten (Puts+Calls je Ticker) kommen aus dem täglichen Prefetch-Cache;
+# der Scanner liest daraus. So gibt es kein wiederholtes Laden bei jedem Start.
+# Ein Scan wird nur noch manuell im Watchlist Scanner gestartet (liest aus Cache).
 # ══════════════════════════════════════════════════════════════════════════════
-import pickle as _pickle, os as _os
-
-_AUTO_SCAN_INTERVAL_H = 2          # Scan starten wenn Cache älter als 2 Stunden
-_AUTO_CACHE_PATH = _os.path.join(_os.path.dirname(__file__), "data", "last_scan_cache.pkl")
-
-def _cache_age_hours() -> float:
-    """Wie alt ist der letzte Scan-Cache in Stunden? 9999 wenn nicht vorhanden."""
-    try:
-        with open(_AUTO_CACHE_PATH, "rb") as _f:
-            _d = _pickle.load(_f)
-        return (datetime.now() - _d["timestamp"]).total_seconds() / 3600
-    except Exception:
-        return 9999.0
-
 _bg = bg_scan.get_state()
-
-# Auto-Scan SERIALISIERT: startet nur wenn weder Preloader noch Prefetch laufen,
-# damit die Instanz nicht überlastet wird (502). Bei Besetzung: Flag NICHT setzen
-# → nächster Rerun versucht es erneut, sobald die anderen Jobs fertig sind.
-if not st.session_state.get("_auto_scan_triggered"):
-    _age_h = _cache_age_hours()
-    _others_busy = _preloader.is_running() or _prefetch.is_running()
-    if _age_h <= _AUTO_SCAN_INTERVAL_H:
-        # Cache frisch genug → kein Auto-Scan nötig, nicht erneut versuchen
-        st.session_state._auto_scan_triggered = True
-    elif not _bg["running"] and not _others_busy:
-        st.session_state._auto_scan_triggered = True
-        # Alle Watchlist-Ticker, Standardparameter für Cash Covered Put
-        from data.watchlist import ALL_TICKERS as _AT
-        _auto_tickers = ["SPY", "QQQ"] + [t for t in _AT if t not in ("SPY", "QQQ")]
-        _started = bg_scan.start_scan(
-            tickers        = _auto_tickers,
-            strategy       = "Cash Covered Put",
-            delta_min      = -0.35,
-            delta_max      = -0.05,
-            dte_min        = 14,
-            dte_max        = 60,
-            iv_min         = 0.15,
-            premium_min    = 0.05,
-            min_oi         = 5,
-            otm_min        = 3.0,
-            otm_max        = 50.0,
-            max_spread_pct = 40.0,
-            require_valid_market = False,   # Off-Hours: Last Price verwenden
-            exclude_earnings     = True,
-        )
-        if _started:
-            _bg = bg_scan.get_state()   # State nach Start aktualisieren
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HINTERGRUND-SCAN STATUS — zeigt laufenden Scan auf der Startseite
