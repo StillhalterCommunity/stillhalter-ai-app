@@ -748,6 +748,7 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
     result = {
         "price": 0.0, "company": ticker,
         "trend_str": "", "macd_str": "", "stoch_str": "", "ema_str": "",
+        "trend_simple": "", "macd_desc": "", "stoch_desc": "",
         "rsi": None, "support_near": None, "resistance_near": None,
         "fund": {}, "news": [], "description": "",
     }
@@ -774,6 +775,12 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
                     "neutral": "→ Seitwärts",
                 }
                 result["trend_str"] = trend_map.get(tech.trend, "")
+                # Trend in Klartext (Aufwärts-/Seitwärts-/Abwärtstrend)
+                result["trend_simple"] = {
+                    "bullish": "Aufwärtstrend",
+                    "bearish": "Abwärtstrend",
+                    "neutral": "Seitwärtstrend",
+                }.get(tech.trend, "Seitwärtstrend")
                 if tech.above_sma50 and tech.above_sma200:
                     result["ema_str"] = "MA50 > MA200 (bullisch)"
                 elif tech.above_sma50:
@@ -791,6 +798,22 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
                         "strong_bear": "MACD Pro: STARK bearisch ⬇⬇",
                     }
                     result["macd_str"] = macd_map.get(tech.sc_macd.signal_strength, "")
+                    # Detaillierte Histogramm-Beschreibung: Farbe + Richtung + verdeckte Stärke/Schwäche
+                    _h = tech.sc_macd.hist
+                    if _h is not None and len(_h) >= 2:
+                        _h_now  = float(_h.iloc[-1])
+                        _h_prev = float(_h.iloc[-2])
+                        _inc = _h_now > _h_prev
+                        if _h_now >= 0:
+                            if _inc:
+                                result["macd_desc"] = "grünes Histogramm, zunehmend → verdeckte Stärke"
+                            else:
+                                result["macd_desc"] = "grünes Histogramm, abnehmend → verdeckte Schwäche"
+                        else:
+                            if _inc:
+                                result["macd_desc"] = "rotes Histogramm, erholend → noch Schwäche"
+                            else:
+                                result["macd_desc"] = "rotes Histogramm, abnehmend → verdeckte Schwäche"
                 if tech.dual_stoch:
                     stoch_map = {
                         "strong_buy":  "Dual Stoch: stark überverkauft ✅✅",
@@ -800,6 +823,15 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
                         "strong_sell": "Dual Stoch: stark überkauft ❌",
                     }
                     result["stoch_str"] = stoch_map.get(tech.dual_stoch.signal_strength, "")
+                    # Schnelle + langsame Stochastik einzeln (überverkauft / neutral / überkauft)
+                    def _stoch_stat(k: float) -> str:
+                        if k < 20:  return "überverkauft"
+                        if k > 80:  return "überkauft"
+                        return "neutral"
+                    _ds = tech.dual_stoch
+                    result["stoch_desc"] = (
+                        f"schnelle {_stoch_stat(_ds.fast_k)}, langsame {_stoch_stat(_ds.slow_k)}"
+                    )
                 if tech.support_levels:
                     below = [s for s in tech.support_levels if s < result["price"]]
                     if below:
@@ -853,9 +885,9 @@ def _build_tracking_url(
 
 def _build_whatsapp_short_manual(
     class_label: str, ticker: str, company: str, strategy: str,
-    strike: float, expiry_display: str, dte: int,
+    strike: float, german_exp: str, dte: int,
     premium: float, delta: float, iv_pct: float, price_now: float,
-    trend_str: str, macd_str: str, stoch_str: str,
+    trend_simple: str, macd_desc: str, stoch_desc: str,
     optionstrat_url: str, tracking_url: str, post_ts: str,
     support_near=None, ath_price_dist=None,
     company_sentence: str = "", news_line: str = "",
@@ -867,33 +899,39 @@ def _build_whatsapp_short_manual(
     # Covered Call: Renditebasis = Aktienkurs (nicht Strike)
     capital_basis = price_now if is_call and price_now > 0 else (strike if strike > 0 else 1)
     rend_lz = premium / capital_basis * 100
-    rend_ann = rend_lz * 365 / max(dte, 1)
-    class_header = {
-        "A": "🟢 Class A — Konservativ",
-        "B": "🟡 Class B — Ausgewogen",
-        "C": "🔴 Class C — Aggressiv",
+    # Klasse + Volatilitäts-Einordnung (mit farbigem Punkt)
+    class_tag = {
+        "A": "🟢 Konservativ (Low Volatility)",
+        "B": "🟡 Ausgewogen (Mid Volatility)",
+        "C": "🔴 Aggressiv (High Volatility)",
     }.get(class_label, f"Class {class_label}")
+    _risk_label = "Ausübungsrisiko" if is_call else "Einbuchungsrisiko"
 
     L = []
-    L.append(f"🔔 TRADING IDEE — {ticker}")
-    L.append(f"🏢 {company}")
-    L.append(f"{strategy}")
+    # ── Zeile 1: Trading-Idee + komplette Optionsbezeichnung ──────────────────
+    L.append(
+        f"🔔 Trading-Idee: {ticker} · {strategy} · {german_exp} · "
+        f"Strike ${strike:.0f} · Prämie {_fmt_num(premium)} USD"
+    )
     L.append("")
-    L.append(class_header)
+    # ── Unternehmen + Klasse/Volatilität ──────────────────────────────────────
+    if company_sentence:
+        L.append(f"🏢 {company} — {company_sentence}")
+    else:
+        L.append(f"🏢 {company}")
+    L.append(class_tag)
     L.append("")
     # ── Eckdaten (alles untereinander) ────────────────────────────────────────
-    L.append(f"📅 Verfall: {expiry_display} ({dte} Tage)")
     L.append(f"💵 Kurs: ${price_now:.2f}")
     L.append(f"🎯 Strike: ${strike:.0f}")
+    L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
     L.append(f"📊 Volatilität (IV): {iv_pct:.0f}%")
     L.append("")
-    # ── Prämie & Rendite ──────────────────────────────────────────────────────
+    # ── Prämie & Rendite (Rendite auf Laufzeit, Risiko in Klammern) ───────────
     if is_call and price_now > 0:
         L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
     L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
-    L.append(f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. · {_fmt_num(rend_lz)}% Laufzeit")
-    _risk_label = "Ausübungsrisiko" if is_call else "Einbuchungsrisiko"
-    L.append(f"⚡ {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
+    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% Laufzeit ({_risk_label} ~{assign_pct}%)")
     L.append("")
     # ── Absicherung ───────────────────────────────────────────────────────────
     L.append("🛡️ Absicherung")
@@ -908,23 +946,15 @@ def _build_whatsapp_short_manual(
     if ath_price_dist is not None:
         L.append(f"• {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
     L.append("")
-    # ── Technik (klar benannt) ────────────────────────────────────────────────
+    # ── Technik (alle drei Stillhalter-Indikatoren) ───────────────────────────
     L.append("📊 Technik")
-    if trend_str:
-        L.append(f"• Stillhalter Trendindikator: {trend_str}")
-    if macd_str:
-        L.append(f"• {macd_str.replace('MACD Pro:', 'MACD Pro:').split(' (')[0].strip()}")
-    if stoch_str:
-        L.append(f"• {stoch_str.replace('Dual Stoch:', 'Stochastik:')}")
-    if not (trend_str or macd_str or stoch_str):
-        L.append("• Keine eindeutigen Signale")
+    L.append(f"• Stillhalter Trend: {trend_simple or 'neutral'}")
+    L.append(f"• Stillhalter MACD: {macd_desc or 'neutral'}")
+    L.append(f"• Stillhalter Dual Stochastik: {stoch_desc or 'neutral'}")
     L.append("")
-    # ── Unternehmen & News ────────────────────────────────────────────────────
-    if company_sentence:
-        L.append(f"🏢 {company_sentence}")
+    # ── News ──────────────────────────────────────────────────────────────────
     if news_line:
         L.append(f"📰 {news_line}")
-    if company_sentence or news_line:
         L.append("")
     # ── Links ─────────────────────────────────────────────────────────────────
     L.append("📡 Live-Tracking:")
@@ -933,6 +963,8 @@ def _build_whatsapp_short_manual(
     L.append("📊 OptionStrat:")
     L.append(optionstrat_url)
     L.append("")
+    # ── Disclaimer ────────────────────────────────────────────────────────────
+    L.append("⚠️ Keine Finanzberatung — reine Finanzbildung und meine eigenen Trades.")
     L.append(f"— Stillhalter AI | {post_ts}")
     return "\n".join(L)
 
@@ -1174,12 +1206,12 @@ with tab1:
                 # WhatsApp Short
                 wa_post = _build_whatsapp_short_manual(
                     class_label=cls, ticker=ticker, company=company,
-                    strategy=strategy, strike=strike, expiry_display=expiry_display,
+                    strategy=strategy, strike=strike, german_exp=german_exp,
                     dte=dte, premium=premium, delta=delta, iv_pct=iv_pct,
                     price_now=price_now,
-                    trend_str=tdata.get("trend_str", ""),
-                    macd_str=tdata.get("macd_str", ""),
-                    stoch_str=tdata.get("stoch_str", ""),
+                    trend_simple=tdata.get("trend_simple", ""),
+                    macd_desc=tdata.get("macd_desc", ""),
+                    stoch_desc=tdata.get("stoch_desc", ""),
                     optionstrat_url=optionstrat_url,
                     tracking_url=tracking_url,
                     post_ts=post_ts,
