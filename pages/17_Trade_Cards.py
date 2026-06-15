@@ -14,6 +14,7 @@ import requests
 import xml.etree.ElementTree as ET
 import email.utils as _eutils
 from datetime import datetime, timedelta, date
+from urllib.parse import urlencode
 
 st.set_page_config(
     page_title="Trade Cards · Stillhalter AI App",
@@ -758,6 +759,28 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
     return result
 
 
+def _build_tracking_url(
+    app_url: str, trade_id: str, ticker: str, strategy: str,
+    strike: float, expiry, premium: float, delta: float,
+    iv_pct: float, cls: str, company: str, price_now: float,
+) -> str:
+    """Baut Tracking-URL mit allen Trade-Parametern — funktioniert ohne JSON-Lookup."""
+    params = {
+        "trade_id": trade_id,
+        "t": ticker,
+        "s": f"{strike:.2f}",
+        "e": str(expiry),
+        "strat": strategy,
+        "p": f"{premium:.2f}",
+        "d": f"{delta:.2f}",
+        "iv": f"{iv_pct:.0f}",
+        "cls": cls,
+        "co": company[:40],
+        "px": f"{price_now:.2f}",
+    }
+    return f"{app_url}/20_Trade_Monitor?{urlencode(params)}"
+
+
 def _build_whatsapp_short_manual(
     class_label: str, ticker: str, company: str, strategy: str,
     strike: float, expiry_display: str, dte: int,
@@ -766,10 +789,13 @@ def _build_whatsapp_short_manual(
     optionstrat_url: str, tracking_url: str, post_ts: str,
     support_near=None,
 ) -> str:
+    is_call = "Call" in strategy
     otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
     praemie_usd = round(premium * 100)
     assign_pct = round(abs(delta) * 100)
-    rend_lz = premium / strike * 100 if strike > 0 else 0
+    # Covered Call: Renditebasis = Aktienkurs (nicht Strike)
+    capital_basis = price_now if is_call and price_now > 0 else (strike if strike > 0 else 1)
+    rend_lz = premium / capital_basis * 100
     rend_ann = rend_lz * 365 / max(dte, 1)
     class_header = {
         "A": "🟢 Class A — Konservativ (Low IV)",
@@ -785,14 +811,26 @@ def _build_whatsapp_short_manual(
     if support_near and price_now > 0:
         sup_dist = (price_now - support_near) / price_now * 100
         sup_line = f"📐 Support bei ${support_near:.2f} ({sup_dist:.1f}% unter Kurs)\n"
+    # Zeile je Strategie anpassen
+    if is_call and price_now > 0:
+        risk_line = (
+            f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD\n"
+            f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
+            f"📈 Rendite auf Aktienpos.: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
+            f"⚡ Ausübungsrisiko: ~{assign_pct}% (Δ {delta:.2f})"
+        )
+    else:
+        risk_line = (
+            f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
+            f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
+            f"⚡ Einbuchungsrisiko: ~{assign_pct}% (Δ {delta:.2f})"
+        )
     return (
         f"🔔 Trading Idee | {ticker} | {strategy} | {expiry_display} @{strike:.0f}\n\n"
         f"{class_header}\n"
         f"🏢 {company}\n\n"
         f"💵 Kurs: ${price_now:.2f}  ·  Strike ${strike:.0f} ({_fmt_num(otm_pct, 1)}% OTM)\n"
-        f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
-        f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
-        f"⚡ Einbuchungsrisiko: ~{assign_pct}% (Δ {delta:.2f})\n\n"
+        f"{risk_line}\n\n"
         f"📊 {ta_line}\n"
         f"{sup_line}\n"
         f"📡 Live-Tracking: {tracking_url}\n"
@@ -958,7 +996,10 @@ with tab1:
                     ticker, strike, expiry, is_call, is_strangle, call_strike
                 )
                 trade_id     = _gen_trade_id(ticker, strategy)
-                tracking_url = f"{_eff_app_url}/20_Trade_Monitor?trade_id={trade_id}"
+                tracking_url = _build_tracking_url(
+                    _eff_app_url, trade_id, ticker, strategy, strike,
+                    expiry, premium, delta, iv_pct, cls, company, price_now,
+                )
                 post_ts      = datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
 
                 _save_manual_trade({

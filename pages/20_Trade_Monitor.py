@@ -141,11 +141,42 @@ with col_title:
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
-# ── Query-Param: einzelnen Trade hervorheben ───────────────────────────────────
-highlight_id = st.query_params.get("trade_id", "")
+# ── URL-Parameter lesen: alle Trade-Daten aus dem Link ────────────────────────
+_qp = dict(st.query_params)
+highlight_id = _qp.get("trade_id", "")
 
 # ── Trades laden ───────────────────────────────────────────────────────────────
 all_trades = _load_trades()
+
+# Wenn Trade-Daten vollständig in URL kodiert sind und Trade nicht lokal gespeichert
+if "t" in _qp and "s" in _qp and "e" in _qp:
+    _url_trade_id = _qp.get("trade_id", "")
+    _in_local = any(t.get("trade_id") == _url_trade_id for t in all_trades)
+    if not _in_local:
+        try:
+            _url_trade = {
+                "trade_id":       _url_trade_id,
+                "class":          _qp.get("cls", "A"),
+                "ticker":         _qp.get("t", ""),
+                "company":        _qp.get("co", _qp.get("t", "")),
+                "strategy":       _qp.get("strat", "Short PUT"),
+                "strike":         float(_qp.get("s", 0)),
+                "call_strike":    0.0,
+                "expiry":         _qp.get("e", ""),
+                "premium":        float(_qp.get("p", 0)),
+                "delta":          float(_qp.get("d", -0.2)),
+                "iv_pct":         float(_qp.get("iv", 25)),
+                "price_at_entry": float(_qp.get("px", 0)),
+                "created_at":     "",
+                "post_ts":        "–",
+                "optionstrat_url": "",
+                "tracking_url":   "",
+                "status":         "AKTIV",
+            }
+            all_trades = [_url_trade] + all_trades
+            highlight_id = _url_trade_id
+        except Exception:
+            pass
 
 if not all_trades:
     st.html("""
@@ -396,19 +427,95 @@ for trade in visible_trades:
 
             with d3:
                 tp50 = premium * 0.50
-                tp70 = premium * 0.70
+                tp70 = premium * 0.30  # 70% Gewinn → Option noch 30% des Preises wert
+                capital_basis = entry_px if is_call and entry_px > 0 else (strike if strike > 0 else premium)
+                rend_lz_pct = premium / capital_basis * 100 if capital_basis > 0 else 0
+                basis_label = "Aktienkurs" if is_call else "Strike/Cash"
                 st.html(f"""
                 <div style='background:#0a120a;border:1px solid #1a2a1a;border-radius:6px;padding:8px 12px'>
                     <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
                         Take Profit Ziele</div>
                     <div style='font-size:0.82rem;color:#4ade80;font-family:sans-serif'>
-                        50% → ${tp50:.2f} schließen</div>
+                        50% → Prämie &lt; ${tp50:.2f} → schließen</div>
                     <div style='font-size:0.82rem;color:#22c55e;font-family:sans-serif'>
-                        70% → ${tp70:.2f} schließen</div>
-                    <div style='font-size:0.7rem;color:#555;margin-top:4px;font-family:sans-serif'>
+                        70% → Prämie &lt; ${tp70:.2f} → schließen</div>
+                    <div style='font-size:0.72rem;color:#4ade80;margin-top:4px;font-family:sans-serif'>
+                        Rendite: {rend_lz_pct:.2f}% ({basis_label})</div>
+                    <div style='font-size:0.7rem;color:#555;margin-top:2px;font-family:sans-serif'>
                         Post: {post_ts}</div>
                 </div>
                 """)
+
+            # ── Trade Management Empfehlungen ────────────────────────────────
+            st.markdown("---")
+            st.markdown("**🎯 Trade Management**")
+            _mgmt_items = []
+
+            # P/L basierte Empfehlungen
+            if pnl_pct >= 70:
+                _mgmt_items.append(("🏆", "#22c55e",
+                    f"**70% Take Profit erreicht!** → Position jetzt schließen "
+                    f"(Prämie < ${premium * 0.30:.2f})"))
+            elif pnl_pct >= 50:
+                _mgmt_items.append(("✅", "#4ade80",
+                    f"**50% Take Profit erreicht** → Schließen empfohlen "
+                    f"(Prämie < ${premium * 0.50:.2f})"))
+            elif pnl_pct >= 25:
+                _mgmt_items.append(("📈", "#86efac",
+                    f"Position läuft gut ({pnl_pct:.0f}% der Prämie verdient) — weiter halten"))
+            elif pnl_pct < -50:
+                _mgmt_items.append(("🚨", "#ef4444",
+                    f"**Verlust > 50%** → Position sofort schließen oder rollen! "
+                    f"Prämie verdoppelt sich — keine weiteren Verluste riskieren"))
+            elif pnl_pct < -20:
+                _mgmt_items.append(("⚠️", "#f59e0b",
+                    f"Position im Minus ({pnl_pct:.0f}%) → Engmaschig beobachten"))
+            else:
+                _mgmt_items.append(("⏳", "#888",
+                    f"Position neutral ({pnl_pct:.0f}%) — weiter laufen lassen"))
+
+            # DTE-basierte Empfehlungen
+            if dte == 0:
+                _mgmt_items.append(("⏰", "#ef4444",
+                    "**Verfall heute!** → Option verfällt wertlos oder wird ausgeübt"))
+            elif dte <= 3:
+                _mgmt_items.append(("⏰", "#ef4444",
+                    f"**Nur noch {dte} Tage bis Verfall** → "
+                    f"Position schließen oder auf nächsten Monat rollen"))
+            elif dte <= 7:
+                _mgmt_items.append(("📅", "#f59e0b",
+                    f"{dte} Tage verbleibend — Rollen prüfen wenn Strike unter Druck"))
+
+            # Strike-Abstand / ITM-Warnung
+            if current_price > 0 and strike > 0:
+                dist_abs = current_price - strike if not is_call else strike - current_price
+                if dist_abs < 0:
+                    _mgmt_items.append(("🔴", "#ef4444",
+                        f"**Strike ITM!** Kurs ${current_price:.2f} hat Strike ${strike:.0f} "
+                        f"{'unterschritten' if not is_call else 'überschritten'} → "
+                        f"Rollen auf niedrigeren Strike oder schließen"))
+                elif dist_abs < strike * 0.03:
+                    _mgmt_items.append(("🟡", "#f59e0b",
+                        f"Strike nahe am Geld (nur {dist_abs:.2f} USD Puffer) → "
+                        f"Erhöhte Aufmerksamkeit, Rollen vorbereiten"))
+
+            # Covered Call: Aufwertung / Rückkauf bei Kursrückgang
+            if is_call and current_price > 0 and entry_px > 0:
+                cc_chg = (current_price - entry_px) / entry_px * 100
+                if cc_chg < -10:
+                    _mgmt_items.append(("📉", "#a78bfa",
+                        f"Aktie {cc_chg:.1f}% gefallen → CALL günstig zurückzukaufen, "
+                        f"Strike nach unten rollen für mehr Prämie"))
+
+            for icon, color, text in _mgmt_items:
+                st.html(
+                    f"<div style='display:flex;gap:10px;align-items:flex-start;"
+                    f"background:#111;border-left:3px solid {color};border-radius:0 6px 6px 0;"
+                    f"padding:8px 12px;margin:4px 0;font-family:sans-serif'>"
+                    f"<span style='font-size:1.1rem'>{icon}</span>"
+                    f"<span style='font-size:0.82rem;color:#ccc;line-height:1.5'>{text}</span>"
+                    f"</div>"
+                )
 
             # ── Links ────────────────────────────────────────────────────────
             if opt_url or track_url:
