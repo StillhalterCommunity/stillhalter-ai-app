@@ -381,8 +381,11 @@ def scan_ticker(
         )
 
     try:
+        # Nur die benötigte Optionsseite holen (CSP=put, CC=call) → halbe Last
+        _needed = ("call",) if strategy == "Covered Call" else ("put",)
         puts_df, calls_df, expirations = fetch_options_chain(
-            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=6
+            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=6,
+            option_types=_needed,
         )
 
         if not expirations:
@@ -634,7 +637,8 @@ def scan_ticker(
 
 
 # ── Rate-Limiter für parallele Anfragen ───────────────────────────────────────
-_PARALLEL_WORKERS = 8        # Gleichzeitige Anfragen (Yahoo Finance verträgt ~10)
+_PARALLEL_WORKERS = 4        # Gleichzeitige Anfragen — niedrig halten, damit die
+                             # Railway-Instanz beim Hintergrund-Scan nicht überlastet (502)
 _RATE_LIMITER     = threading.Semaphore(_PARALLEL_WORKERS)
 _REQUEST_DELAY    = 0.05     # Sekunden zwischen Anfragen pro Thread (war 0.15)
 

@@ -325,11 +325,15 @@ def fetch_options_chain_massive(
     dte_min: int = 0,
     dte_max: int = 120,
     max_expiries: int = 6,
+    option_types: tuple = ("put", "call"),
 ) -> tuple:
     """
     Holt Options Chain von Massive.com/Polygon.io.
     Gibt zurück: (puts_df, calls_df, expirations_list)
     Greeks sind direkt enthalten — kein enrich_options_with_greeks() nötig.
+
+    option_types: ("put",) oder ("call",) holt nur EINE Seite — halbiert
+    API-Calls + Speicher für einseitige Strategien (CSP=put, CC=call).
     """
     from data.massive_fetcher import get_available_expirations, get_options_chain
 
@@ -346,14 +350,16 @@ def fetch_options_chain_massive(
 
         all_puts, all_calls = [], []
         for exp in relevant:
-            puts = get_options_chain(ticker, exp, "put")
-            if not puts.empty:
-                puts["option_type"] = "put"
-                all_puts.append(puts)
-            calls = get_options_chain(ticker, exp, "call")
-            if not calls.empty:
-                calls["option_type"] = "call"
-                all_calls.append(calls)
+            if "put" in option_types:
+                puts = get_options_chain(ticker, exp, "put")
+                if not puts.empty:
+                    puts["option_type"] = "put"
+                    all_puts.append(puts)
+            if "call" in option_types:
+                calls = get_options_chain(ticker, exp, "call")
+                if not calls.empty:
+                    calls["option_type"] = "call"
+                    all_calls.append(calls)
 
         puts_df  = pd.concat(all_puts,  ignore_index=True) if all_puts  else pd.DataFrame()
         calls_df = pd.concat(all_calls, ignore_index=True) if all_calls else pd.DataFrame()
@@ -371,16 +377,18 @@ def fetch_options_chain(
     dte_min: int = 0,
     dte_max: int = 120,
     max_expiries: int = 6,
+    option_types: tuple = ("put", "call"),
 ) -> tuple:
     """
     Holt Options Chain — nur relevante Verfallsdaten im DTE-Fenster.
     Gibt zurück: (puts_df, calls_df, expirations_list)
 
+    option_types: ("put",)/("call",) holt nur eine Seite (spart ~50% Last).
     Nutzt Massive.com wenn USE_MASSIVE=True und API-Key gesetzt,
     sonst Yahoo Finance als Fallback.
     """
     if _massive_enabled():
-        return fetch_options_chain_massive(ticker, dte_min, dte_max, max_expiries)
+        return fetch_options_chain_massive(ticker, dte_min, dte_max, max_expiries, option_types)
 
     try:
         stock = yf.Ticker(ticker)

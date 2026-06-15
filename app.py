@@ -474,9 +474,10 @@ if _bg["running"]:
 </div>
 """)
     st.progress(pct)
-    # Auto-Refresh alle 3 Sekunden solange Scan läuft
+    # Auto-Refresh solange Scan läuft — bewusst langsam (6s), damit der
+    # Haupt-Thread während des Scans nicht zusätzlich unter Last gerät (502-Schutz)
     import time as _time
-    _time.sleep(3)
+    _time.sleep(6)
     st.rerun()
 elif _bg["finished_at"] and _bg["results"] is not None:
     res = _bg["results"]
