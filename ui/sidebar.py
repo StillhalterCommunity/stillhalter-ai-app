@@ -39,13 +39,19 @@ def _show_maintenance_screen() -> None:
     st.stop()
 
 
-def render_sidebar():
-    """Rendert die einheitliche Sidebar-Navigation auf jeder Seite."""
+def render_sidebar(allow_public: bool = False):
+    """
+    Rendert die einheitliche Sidebar-Navigation auf jeder Seite.
+
+    allow_public=True: Seite ist absichtlich ohne Login erreichbar (z.B. der
+    öffentliche Trade-Monitor-Tracking-Link). Der Wartungsmodus-Block wird dann
+    übersprungen, damit geteilte Links jederzeit funktionieren.
+    """
     from data.fetcher import is_market_open, market_status_text
     from data.maintenance import is_maintenance, is_admin
 
-    # ── Wartungsmodus-Check ────────────────────────────────────────────────────
-    if is_maintenance():
+    # ── Wartungsmodus-Check (öffentliche Seiten ausgenommen) ───────────────────
+    if not allow_public and is_maintenance():
         current_user = st.session_state.get("auth_user", "")
         if not is_admin(current_user):
             _show_maintenance_screen()

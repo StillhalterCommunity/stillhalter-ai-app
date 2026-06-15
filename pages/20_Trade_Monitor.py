@@ -20,7 +20,9 @@ st.set_page_config(
 from ui.theme import get_css, get_logo_html
 from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
-render_sidebar()
+# Trade Monitor ist die öffentliche Tracking-Seite: geteilte Live-Tracking-Links
+# (aus den Trade Cards) müssen ohne Login funktionieren — auch im Wartungsmodus.
+render_sidebar(allow_public=True)
 
 # ── Konstanten ─────────────────────────────────────────────────────────────────
 MANUAL_TRADES_PATH = os.path.join(
