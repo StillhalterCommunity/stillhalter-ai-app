@@ -131,6 +131,26 @@ def _warm_one(ticker: str) -> dict:
     return ok
 
 
+def _run_default_scan(tickers: list) -> None:
+    """Führt den Standard-Watchlist-Scan (CSP) aus und legt das Ergebnis
+    persistent ab — der Scanner zeigt es dann sofort ohne erneuten Scan."""
+    try:
+        from analysis.batch_screener import scan_watchlist
+        results = scan_watchlist(
+            tickers, strategy="Cash Covered Put",
+            delta_min=-0.35, delta_max=-0.05, dte_min=14, dte_max=60,
+            iv_min=0.15, premium_min=0.05, min_oi=5, otm_min=3.0, otm_max=50.0,
+            max_spread_pct=40.0, require_valid_market=False, exclude_earnings=True,
+        )
+        _dc.save("scan_default", {
+            "results":   results,
+            "timestamp": datetime.now(),
+            "strategy":  "Cash Covered Put",
+        }, ttl_hours=24)
+    except Exception:
+        pass
+
+
 def _prefetch_worker(tickers: list) -> None:
     total = len(tickers)
     done = 0
@@ -153,6 +173,9 @@ def _prefetch_worker(tickers: list) -> None:
                     _state["done"] = done
                     _state["progress"] = done / max(total, 1)
         completed_all = True   # Schleife vollständig durchlaufen (nicht abgebrochen)
+        # Standard-Scan (Cash Covered Put) einmal mitlaufen lassen und cachen,
+        # damit der Watchlist Scanner die Ergebnisse sofort zeigt (kein Neu-Scan).
+        _run_default_scan(tickers)
     finally:
         meta = {
             "date":        datetime.now().strftime("%Y-%m-%d"),

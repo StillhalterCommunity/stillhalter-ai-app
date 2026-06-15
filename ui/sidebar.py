@@ -39,35 +39,6 @@ def _show_maintenance_screen() -> None:
     st.stop()
 
 
-def _show_login_required() -> None:
-    """Zeigt Login-Hinweis mit Button zur Startseite und stoppt die Seite."""
-    from ui.theme import get_logo_html, get_css
-    st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
-    st.html(f"""
-<div style='text-align:center;padding:80px 40px 24px'>
-    <div style='margin-bottom:32px'>{get_logo_html("white", 56)}</div>
-    <div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
-                border-radius:14px;padding:40px 48px;max-width:520px;margin:0 auto'>
-        <div style='font-size:2.5rem;margin-bottom:16px'>🔒</div>
-        <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.5rem;
-                    color:#f0f0f0;letter-spacing:0.05em;margin-bottom:8px'>
-            Login erforderlich
-        </div>
-        <div style='font-family:RedRose,sans-serif;font-size:0.88rem;color:#888;
-                    line-height:1.7;margin-bottom:8px'>
-            Diese Seite ist nur für eingeloggte Mitglieder zugänglich.
-            Bitte melde dich auf der Startseite an.
-        </div>
-    </div>
-</div>
-""")
-    # Button zur Startseite (zentriert)
-    _c1, _c2, _c3 = st.columns([3, 2, 3])
-    with _c2:
-        st.page_link("app.py", label="→ Zur Anmeldung", icon="🏠", use_container_width=True)
-    st.stop()
-
-
 def render_sidebar(allow_public: bool = False):
     """
     Rendert die einheitliche Sidebar-Navigation auf jeder Seite.
@@ -82,15 +53,13 @@ def render_sidebar(allow_public: bool = False):
     authenticated = bool(st.session_state.get("authenticated", False))
 
     if allow_public:
-        # Öffentliche Seite (z.B. Trade-Monitor-Tracking-Link): kein Login, kein
+        # Öffentliche Seite (Trade-Monitor-Tracking-Link): kein Login, kein
         # Wartungs-Block. Navigation NUR für eingeloggte Nutzer — ein anonymer
         # Besucher bleibt auf dieser Seite (keine Links in den Rest der App).
         show_nav = authenticated
     else:
-        # Geschützte Seite: Login erzwingen (Gate sass bisher nur in app.py).
-        if not authenticated:
-            _show_login_required()
-        # Wartungsmodus für Nicht-Admins
+        # Normale Seite: Login wird wie immer NUR auf der Startseite (app.py)
+        # erzwungen. Eingeloggte Nutzer navigieren hier frei (kein Login-Popup).
         if is_maintenance() and not is_admin(st.session_state.get("auth_user", "")):
             _show_maintenance_screen()
         show_nav = True
@@ -130,6 +99,8 @@ def render_sidebar(allow_public: bool = False):
         st.page_link("pages/16_Sentiment_Analyse.py",        label="16 · Sentiment Analyse",   icon="🧭")
         st.page_link("pages/17_Trade_Cards.py",              label="17 · Trade Cards",          icon="📤")
         st.page_link("pages/18_Markt_Newsletter.py",         label="18 · Markt Newsletter",     icon="📰")
+        st.page_link("pages/19_Signal_Pipeline.py",          label="19 · Signal Pipeline",      icon="🛰️")
+        st.page_link("pages/20_Trade_Monitor.py",            label="20 · Trade Monitor",        icon="📡")
         st.html("<div style='border-top:1px solid #1e1e1e;margin:10px 0 4px 0'></div>")
         # Markt-Status Badge
         if market_open:

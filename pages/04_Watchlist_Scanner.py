@@ -556,8 +556,19 @@ with st.expander("📊 **TECHNISCHE FILTER** — RSI · Dual Stochastik · MACD 
 
 # ── Ticker Liste ──────────────────────────────────────────────────────────────
 scan_tickers = scan_tickers_universe   # aus Universe-Selector oben
-mins = max(1, len(scan_tickers) * 2 // 60)
-maxs = max(2, len(scan_tickers) * 4 // 60)
+try:
+    from data.fetcher import USE_MASSIVE as _USE_MASSIVE
+except Exception:
+    _USE_MASSIVE = False
+if _USE_MASSIVE:
+    # Optionsketten kommen aus dem Tagescache → deutlich schneller
+    mins = 1
+    maxs = max(2, len(scan_tickers) // 60)
+    _cache_note = " · liest aus Tagescache"
+else:
+    mins = max(1, len(scan_tickers) * 2 // 60)
+    maxs = max(2, len(scan_tickers) * 4 // 60)
+    _cache_note = ""
 
 tech_filter_note = " + Technische Vorab-Filterung" if use_tech_filter else ""
 off_hours_mode = use_last_price and not market_open
@@ -568,7 +579,7 @@ else:
 strat_note = " · ⚡ Short Strangle" if scan_strategy == "Short Strangle" else ""
 st.info(
     f"**{len(scan_tickers)} Aktien** aus *{scan_universe.split('—')[-1].strip().split('(')[0].strip()}* "
-    f"· Dauer: **~{mins}–{maxs} Min.**{tech_filter_note}{strat_note} · {price_mode_str}"
+    f"· Dauer: **~{mins}–{maxs} Min.**{_cache_note}{tech_filter_note}{strat_note} · {price_mode_str}"
 )
 
 # ── Session State früh initialisieren (vor Hintergrund-Scan-Check) ───────────
@@ -577,24 +588,45 @@ for _k in ["scan_results", "scan_meta", "tf_results", "scan_running"]:
         st.session_state[_k] = None
 
 # ── Letzten Scan aus Cache wiederherstellen (nach Browser-Refresh) ────────────
+# Quelle 1: persistenter Tages-Prefetch-Scan (Volume), Quelle 2: lokaler pkl-Cache
 if st.session_state.scan_results is None and not st.session_state.get("scan_running"):
+    import datetime as _dt
+    _restored = False
+    # 1) Standard-Scan aus dem Tages-Prefetch (überlebt Neustarts via Volume)
     try:
-        import pickle as _pickle, datetime as _dt
-        _cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl")
-        if os.path.exists(_cache_path):
-            with open(_cache_path, "rb") as _f:
-                _cached = _pickle.load(_f)
-            _age_h = (_dt.datetime.now() - _cached["timestamp"]).total_seconds() / 3600
-            if _age_h < 24:
-                st.session_state.scan_results = _cached["results"]
-                st.session_state.scan_meta = {
-                    "strategy": _cached.get("strategy", ""),
-                    "source": "cache",
-                    "cached_at": _cached["timestamp"].strftime("%d.%m. %H:%M"),
-                    "age_h": round(_age_h, 1),
-                }
+        from data import _persistent_cache as _dc
+        _pf_scan = _dc.load("scan_default", max_age_hours=24)
+        if _pf_scan and _pf_scan.get("results") is not None and not _pf_scan["results"].empty:
+            _age_h = (_dt.datetime.now() - _pf_scan["timestamp"]).total_seconds() / 3600
+            st.session_state.scan_results = _pf_scan["results"]
+            st.session_state.scan_meta = {
+                "strategy": _pf_scan.get("strategy", ""),
+                "source": "tagescache",
+                "cached_at": _pf_scan["timestamp"].strftime("%d.%m. %H:%M"),
+                "age_h": round(_age_h, 1),
+            }
+            _restored = True
     except Exception:
         pass
+    # 2) Fallback: lokaler pkl-Cache vom letzten manuellen Scan
+    if not _restored:
+        try:
+            import pickle as _pickle
+            _cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl")
+            if os.path.exists(_cache_path):
+                with open(_cache_path, "rb") as _f:
+                    _cached = _pickle.load(_f)
+                _age_h = (_dt.datetime.now() - _cached["timestamp"]).total_seconds() / 3600
+                if _age_h < 24:
+                    st.session_state.scan_results = _cached["results"]
+                    st.session_state.scan_meta = {
+                        "strategy": _cached.get("strategy", ""),
+                        "source": "cache",
+                        "cached_at": _cached["timestamp"].strftime("%d.%m. %H:%M"),
+                        "age_h": round(_age_h, 1),
+                    }
+        except Exception:
+            pass
 
 # ── Unterbrochenen Scan aufräumen ─────────────────────────────────────────────
 # Wenn scan_running=True aber der Button nicht geklickt wurde, wurde der
