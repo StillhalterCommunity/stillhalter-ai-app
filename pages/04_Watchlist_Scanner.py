@@ -59,15 +59,40 @@ with h2:
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
+# ── Notfall-Cache-Reset (global erreichbar) ───────────────────────────────────
+with st.expander("⚙️ Keine Daten? Cache komplett zurücksetzen", expanded=False):
+    st.markdown(
+        "Wenn **nirgends** Daten erscheinen (Scanner, Aktienanalyse, Fundamentalanalyse) "
+        "liegt es meist an gespeicherten leeren Ergebnissen im Cache. "
+        "Hier alles auf einmal zurücksetzen:"
+    )
+    _rc1, _rc2 = st.columns(2)
+    with _rc1:
+        if st.button("🗑️ Alle Caches leeren (App + Disk)", type="primary", use_container_width=True,
+                      key="btn_global_cache_clear"):
+            st.cache_data.clear()
+            try:
+                from data import _persistent_cache as _pc2
+                _n = _pc2.clear_all()
+                st.success(f"✅ In-Memory + Disk-Cache geleert ({_n} Dateien). Daten werden neu geladen.")
+            except Exception:
+                st.success("✅ In-Memory-Cache geleert. Daten werden neu geladen.")
+            for _k in ["scan_results", "scan_meta", "tf_results", "scan_running"]:
+                if _k in st.session_state:
+                    del st.session_state[_k]
+            st.rerun()
+    with _rc2:
+        st.caption(
+            "Danach einen neuen Scan starten oder die Seite neu laden. "
+            "Alle Daten werden frisch von Yahoo Finance abgerufen."
+        )
+
 # ── Off-Hours Hinweis ─────────────────────────────────────────────────────────
 if not market_open:
-    st.warning(
-        "⏰ **Markt geschlossen** — Bid/Ask ist nicht verfügbar. "
-        "Aktiviere **'Last Price verwenden'** → der Scanner nutzt dann den letzten Handelskurs "
-        "und lockert automatisch die Prämien- & OI-Filter (Prämie min. $0.01 · OI ≥ 0), "
-        "damit auch wenig gehandelte Optionen angezeigt werden. "
-        "Prämien können leicht von den nächsten Live-Kursen abweichen.",
-        icon="⚠️"
+    st.info(
+        "⏰ **Markt geschlossen** — Last Price Modus ist automatisch aktiviert. "
+        "Der Scanner nutzt den letzten Handelskurs. Prämien können leicht von Live-Kursen abweichen.",
+        icon="💡",
     )
 
 # ── Benutzerdefinierte Presets (gespeichert in data/user_presets.json) ─────────
@@ -284,11 +309,15 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
     with row1[3]:
         top_n = st.number_input("Top N Ergebnisse", 5, 500, 40, step=5)
     with row1[4]:
+        # Markt geschlossen → Last Price immer aktiv (kann deaktiviert werden)
+        _last_price_default = (not market_open) or st.session_state.get("use_last_price_override", False)
         use_last_price = st.checkbox(
             "Last Price verwenden",
-            value=not market_open,
-            help="Außerhalb der Börsenzeiten: Last Price statt Bid/Ask nutzen"
+            value=_last_price_default,
+            help="Außerhalb der Börsenzeiten automatisch aktiv — nutzt letzten Handelspreis statt Bid/Ask",
         )
+        if not market_open and not use_last_price:
+            st.caption("⚠️ Markt geschlossen — aktiviere Last Price für Ergebnisse")
 
     st.markdown('<div style="height:6px"></div>', unsafe_allow_html=True)
     row2 = st.columns(8)
@@ -1012,15 +1041,65 @@ if results is None:
     """, unsafe_allow_html=True)
 
 elif results.empty:
-    st.warning(
-        "**Keine Optionen gefunden.**\n\n"
-        "Empfehlungen:\n"
-        "- OTM min % senken (z.B. 0%)\n"
-        "- Mind. Prämie auf $0.01 setzen\n"
-        "- Open Interest auf 0 setzen\n"
-        "- Tech-Filter deaktivieren oder lockern\n"
-        "- Markt geschlossen: Last Price Modus aktivieren"
-    )
+    # ── Auto-Diagnose: Warum 0 Ergebnisse? ──────────────────────────────────
+    from data.fetcher import is_market_open as _is_mkt_open
+    _mkt = _is_mkt_open()
+    _diagnose = []
+    if not _mkt and not use_last_price:
+        _diagnose.append(("🔴", "Markt geschlossen + 'Last Price verwenden' ist DEAKTIVIERT",
+                          "Aktiviere 'Last Price verwenden' im Filter-Bereich"))
+    if iv_min > 20:
+        _diagnose.append(("🟡", f"IV-Minimum zu hoch: {iv_min}% filtert viele Aktien raus",
+                          "Setze IV-Min auf 10% oder niedriger"))
+    if float(otm_min) > 5:
+        _diagnose.append(("🟡", f"OTM-Minimum {otm_min}% zu restriktiv",
+                          "Setze OTM-Min auf 0–3%"))
+    if int(oi_min) > 50:
+        _diagnose.append(("🟡", f"Open Interest-Minimum {oi_min} filtert illiquide Optionen heraus",
+                          "Setze OI-Min auf 0–10"))
+
+    st.html("""
+    <div style='background:#1a0a0a;border:1px solid #ef444440;border-radius:10px;padding:20px;margin:12px 0'>
+        <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1rem;color:#ef4444;
+                    margin-bottom:12px'>⚠️ Keine Optionen gefunden — Diagnose</div>
+    """)
+    if _diagnose:
+        for icon, prob, fix in _diagnose:
+            st.html(f"""
+            <div style='display:flex;gap:10px;margin-bottom:8px;font-family:sans-serif'>
+                <span style='font-size:1rem'>{icon}</span>
+                <div>
+                    <div style='color:#f0f0f0;font-size:0.84rem;font-weight:600'>{prob}</div>
+                    <div style='color:#888;font-size:0.78rem;margin-top:2px'>→ {fix}</div>
+                </div>
+            </div>""")
+    else:
+        st.html("""<div style='color:#888;font-size:0.84rem;font-family:sans-serif'>
+            Keine offensichtlichen Filter-Probleme — möglicherweise temporärer Datenfehler.</div>""")
+    st.html("</div>")
+
+    # Schnell-Fix Buttons
+    _fix1, _fix2, _fix3 = st.columns(3)
+    with _fix1:
+        if st.button("🔄 Cache leeren + neu scannen", use_container_width=True, type="primary"):
+            st.cache_data.clear()
+            from data import _persistent_cache as _pc
+            _pc.clear_all()
+            st.session_state.scan_results = None
+            st.session_state.scan_running = False
+            st.rerun()
+    with _fix2:
+        if st.button("📉 Filter lockern (Standard)", use_container_width=True):
+            st.session_state.preset = None
+            for k in ["dte_min", "dte_max", "d_min", "d_max", "iv_min", "prem_min",
+                       "oi_min", "otm_min", "otm_max"]:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.rerun()
+    with _fix3:
+        if st.button("📡 Last Price aktivieren", use_container_width=True):
+            st.session_state["use_last_price_override"] = True
+            st.rerun()
 
 else:
     # Cache-Hinweis anzeigen

@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import pytz
 
+from data import _persistent_cache as _dc
+
 # ── Datenquelle ───────────────────────────────────────────────────────────────
 # Auf True setzen sobald MASSIVE_API_KEY konfiguriert ist
 USE_MASSIVE: bool = False
@@ -153,9 +155,8 @@ def fetch_extended_hours_price(ticker: str) -> dict:
 
 # ── Kurshistorie ─────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_price_history(ticker: str, period: str = "1y") -> pd.DataFrame:
-    """Holt OHLCV-Daten für technische Analyse."""
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_price_history_inner(ticker: str, period: str = "1y") -> pd.DataFrame:
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period)
@@ -167,16 +168,27 @@ def fetch_price_history(ticker: str, period: str = "1y") -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch_stock_info(ticker: str) -> dict:
-    """Holt aktuellen Kurs + Basisinfos."""
+def fetch_price_history(ticker: str, period: str = "1y") -> pd.DataFrame:
+    """Holt OHLCV-Daten. Disk-Cache als Fallback bei leerem Ergebnis."""
+    key = f"price_history_{ticker}_{period}"
+    df = _fetch_price_history_inner(ticker, period)
+    if not df.empty:
+        _dc.save(key, df, ttl_hours=8)
+        return df
+    # Fallback: Disk-Cache
+    cached = _dc.load(key, max_age_hours=48)
+    return cached if cached is not None else pd.DataFrame()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_stock_info_inner(ticker: str) -> dict:
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         hist = stock.history(period="2d")
         current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
         prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else info.get("previousClose")
-        return {
+        result = {
             "ticker": ticker,
             "name": info.get("longName", info.get("shortName", ticker)),
             "price": current_price,
@@ -190,13 +202,24 @@ def fetch_stock_info(ticker: str) -> dict:
             "website": info.get("website", ""),
             "description": info.get("longBusinessSummary", ""),
         }
+        return result
     except Exception:
         return {"ticker": ticker, "name": ticker, "price": None}
 
 
+def fetch_stock_info(ticker: str) -> dict:
+    """Holt Kurs + Basisinfos. Disk-Cache als Fallback."""
+    key = f"stock_info_{ticker}"
+    result = _fetch_stock_info_inner(ticker)
+    if result.get("price"):
+        _dc.save(key, result, ttl_hours=6)
+        return result
+    cached = _dc.load(key, max_age_hours=24)
+    return cached if cached is not None else result
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_fundamentals(ticker: str) -> dict:
-    """Holt Fundamentaldaten: P/E, EPS, Wachstum, PEG, Dividende, Earnings, News."""
+def _fetch_fundamentals_inner(ticker: str) -> dict:
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -274,6 +297,17 @@ def fetch_fundamentals(ticker: str) -> dict:
         }
     except Exception as e:
         return {"news": [], "earnings_date": None}
+
+
+def fetch_fundamentals(ticker: str) -> dict:
+    """Holt Fundamentaldaten. Disk-Cache als Fallback."""
+    key = f"fundamentals_{ticker}"
+    result = _fetch_fundamentals_inner(ticker)
+    if result.get("pe_trailing") or result.get("target_price") or result.get("news"):
+        _dc.save(key, result, ttl_hours=12)
+        return result
+    cached = _dc.load(key, max_age_hours=48)
+    return cached if cached is not None else result
 
 
 # ── Options Chain ─────────────────────────────────────────────────────────────
