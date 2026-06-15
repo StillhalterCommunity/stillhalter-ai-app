@@ -1036,11 +1036,16 @@ with h2:
     )
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
+# Live-Tracking-Link zeigt auf die Railway-App (dort liegt Seite 20_Trade_Monitor).
+# Reihenfolge: APP_URL-Secret > Railway-Standard-URL.
+_DEFAULT_APP_URL = "https://stillhalter-ai.up.railway.app"
 _APP_URL = ""
 try:
-    _APP_URL = st.secrets.get("APP_URL", "")
+    _APP_URL = (st.secrets.get("APP_URL", "") or "").strip()
 except Exception:
     pass
+if not _APP_URL:
+    _APP_URL = _DEFAULT_APP_URL
 
 tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
 
@@ -1166,16 +1171,14 @@ with tab1:
                 "premium": premium_v, "delta": delta_v, "iv_pct": iv_v,
             }
 
-    if not _APP_URL:
-        st.markdown("---")
-        _eff_app_url = st.text_input(
-            "🔗 App-URL (für Live-Tracking Link)",
-            value="https://stillhalter.community",
-            key="m_app_url",
-            help="Base-URL der Stillhalter AI App — erscheint im Post als Tracking-Link",
-        )
-    else:
-        _eff_app_url = _APP_URL
+    st.markdown("---")
+    _eff_app_url = st.text_input(
+        "🔗 App-URL (für Live-Tracking Link)",
+        value=_APP_URL,
+        key="m_app_url",
+        help="Base-URL der Stillhalter AI App — der Tracking-Link öffnet dort Seite "
+             "20_Trade_Monitor. Standard: Railway-App. Später ggf. eigene Domain eintragen.",
+    ).strip().rstrip("/") or _APP_URL
 
     st.markdown("---")
 
