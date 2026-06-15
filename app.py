@@ -244,6 +244,41 @@ with st.expander("⚙️ System", expanded=False):
                              help="App wieder für alle freigeben"):
                     maint_off()
                     st.rerun()
+
+        # ── Tagesdaten-Prefetch (nur Admin) ────────────────────────────────────
+        import data.prefetch as _pf
+        _pf_state = _pf.get_state()
+        _pf_meta  = _pf.last_prefetch()
+        if _pf_state["running"]:
+            _pf_pct = int(_pf_state["progress"] * 100)
+            st.markdown(
+                f"<div style='font-size:0.75rem;color:#888;margin:8px 0 6px'>"
+                f"📦 Tagesdaten-Prefetch läuft: <b style='color:#d4a843'>{_pf_pct}%</b> "
+                f"· {_pf_state['done']}/{_pf_state['total']} Ticker</div>",
+                unsafe_allow_html=True,
+            )
+            st.progress(_pf_state["progress"])
+        else:
+            if _pf_meta:
+                _pfc = _pf_meta.get("counts", {})
+                st.markdown(
+                    f"<div style='font-size:0.75rem;color:#888;margin:8px 0 6px'>"
+                    f"📦 Letzter Prefetch: <b style='color:#22c55e'>{_pf_meta.get('finished_at','?')}</b> "
+                    f"· Value-Daten {_pfc.get('value',0)}/{_pf_meta.get('total',0)} geladen</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<div style='font-size:0.75rem;color:#888;margin:8px 0 6px'>"
+                    "📦 Noch kein Prefetch gelaufen</div>",
+                    unsafe_allow_html=True,
+                )
+            _pf1, _pfpad = st.columns([2, 10])
+            with _pf1:
+                if st.button("📦 Tagesdaten laden", use_container_width=True,
+                             help="Lädt Kurse, Fundamentals & Value-Daten für alle 225 Ticker in den Cache"):
+                    _pf.start_prefetch()
+                    st.rerun()
         st.divider()
 
     # ── App-Steuerung ─────────────────────────────────────────────────────────
@@ -295,6 +330,15 @@ if _preloader.needs_update():
 
 # Status anzeigen
 _pl = _preloader.get_state()
+
+# Täglicher Voll-Prefetch (Fundamentals + Value-Daten) — einmal pro Tag.
+# Erst starten wenn der 15-Min-Preloader nicht läuft, damit yfinance nicht
+# von 16 Threads gleichzeitig getroffen wird (Rate-Limit-Schutz).
+import data.prefetch as _prefetch
+if (not _pl["running"]
+        and _prefetch.needs_prefetch_today()
+        and not _prefetch.is_running()):
+    _prefetch.start_prefetch(_PRELOAD_TICKERS)
 if _pl["running"]:
     pct_int  = int(_pl["progress"] * 100)
     done     = _pl["done"]
