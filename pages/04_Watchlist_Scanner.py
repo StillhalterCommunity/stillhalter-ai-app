@@ -547,6 +547,26 @@ for _k in ["scan_results", "scan_meta", "tf_results", "scan_running"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
+# ── Letzten Scan aus Cache wiederherstellen (nach Browser-Refresh) ────────────
+if st.session_state.scan_results is None and not st.session_state.get("scan_running"):
+    try:
+        import pickle as _pickle, datetime as _dt
+        _cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl")
+        if os.path.exists(_cache_path):
+            with open(_cache_path, "rb") as _f:
+                _cached = _pickle.load(_f)
+            _age_h = (_dt.datetime.now() - _cached["timestamp"]).total_seconds() / 3600
+            if _age_h < 24:
+                st.session_state.scan_results = _cached["results"]
+                st.session_state.scan_meta = {
+                    "strategy": _cached.get("strategy", ""),
+                    "source": "cache",
+                    "cached_at": _cached["timestamp"].strftime("%d.%m. %H:%M"),
+                    "age_h": round(_age_h, 1),
+                }
+    except Exception:
+        pass
+
 # ── Unterbrochenen Scan aufräumen ─────────────────────────────────────────────
 # Wenn scan_running=True aber der Button nicht geklickt wurde, wurde der
 # Scan durch eine Filteränderung unterbrochen → State zurücksetzen damit
@@ -631,6 +651,25 @@ if start_scan_bg:
         st.warning("Ein Scan läuft bereits. Bitte warten.")
 
 start_scan = start_scan_fg
+
+# ── Scan-Verlauf anzeigen ────────────────────────────────────────────────────
+try:
+    import json as _json_hist, datetime as _dt_hist
+    _hist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "scan_history.json")
+    if os.path.exists(_hist_path):
+        with open(_hist_path, "r", encoding="utf-8") as _hf_r:
+            _scan_hist = _json_hist.load(_hf_r)
+        if _scan_hist:
+            with st.expander(f"📋 Scan-Verlauf ({len(_scan_hist)} Einträge)", expanded=False):
+                for _he in _scan_hist[:10]:
+                    _he_ts = _dt_hist.datetime.fromisoformat(_he["ts"]).strftime("%d.%m. %H:%M")
+                    st.caption(
+                        f"**{_he_ts}** — {_he.get('strategy','?')} · "
+                        f"{_he.get('sector','?')} · "
+                        f"{_he.get('n_results',0)} Treffer aus {_he.get('n_tickers',0)} Aktien"
+                    )
+except Exception:
+    pass
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
@@ -930,6 +969,27 @@ if start_scan:
             "sector": scan_sector, "strategy": scan_strategy,
             "n_tickers": len(scan_tickers), "n_filtered": len(filtered_tickers),
         }
+
+        # Scan-Verlauf in JSON schreiben (max. 50 Einträge)
+        try:
+            import json as _json, datetime as _dt2
+            _history_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "scan_history.json")
+            _history = []
+            if os.path.exists(_history_path):
+                with open(_history_path, "r", encoding="utf-8") as _hf:
+                    _history = _json.load(_hf)
+            _history.insert(0, {
+                "ts": _dt2.datetime.now().isoformat(),
+                "strategy": scan_strategy,
+                "sector": scan_sector,
+                "n_tickers": len(scan_tickers),
+                "n_results": n_found,
+            })
+            _history = _history[:50]
+            with open(_history_path, "w", encoding="utf-8") as _hf:
+                _json.dump(_history, _hf, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
         # P2: Memory-Lean — nur Ticker im Ergebnis cachen (nicht alle 225)
         result_keys = set(results["Ticker"].unique()) if not results.empty else set()
         st.session_state.tf_results = {k: v for k, v in tf_cache.items() if k in result_keys}
@@ -963,6 +1023,17 @@ elif results.empty:
     )
 
 else:
+    # Cache-Hinweis anzeigen
+    if meta.get("source") == "cache":
+        _cache_age = meta.get("age_h", 0)
+        _cache_ts = meta.get("cached_at", "")
+        _age_str = f"{int(_cache_age * 60)} Min." if _cache_age < 1 else f"{_cache_age:.1f}h"
+        st.info(
+            f"💾 **Ergebnisse aus letztem Scan** (vom {_cache_ts}, vor {_age_str}) — "
+            f"starte einen neuen Scan um aktuelle Daten zu laden.",
+            icon=None,
+        )
+
     # ── Konvergenz-Score nachladen falls nicht vorhanden (z.B. Hintergrund-Scan) ──
     if "Konvergenz" not in results.columns and "Ticker" in results.columns:
         _cached_tf = st.session_state.get("tf_results") or {}
