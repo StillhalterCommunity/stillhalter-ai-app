@@ -1,0 +1,457 @@
+"""
+Stillhalter AI App — Trade Monitor
+Live-Ticker für gespeicherte Trades — verfolgt jede Option bis zum Verfall.
+"""
+
+import streamlit as st
+import pandas as pd
+import json
+import os
+import math
+from datetime import datetime, date
+
+st.set_page_config(
+    page_title="Trade Monitor · Stillhalter AI App",
+    page_icon="📡",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+from ui.theme import get_css, get_logo_html
+from ui.sidebar import render_sidebar
+st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
+render_sidebar()
+
+# ── Konstanten ─────────────────────────────────────────────────────────────────
+MANUAL_TRADES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
+)
+
+STATUS_COLORS = {
+    "AKTIV":      "#22c55e",
+    "WATCH":      "#f59e0b",
+    "WARNING":    "#ef4444",
+    "ROLL":       "#a78bfa",
+    "CLOSE":      "#888",
+    "EXPIRED":    "#555",
+    "CANCELLED":  "#555",
+}
+
+# ── Hilfsfunktionen ────────────────────────────────────────────────────────────
+
+def _load_trades() -> list:
+    if not os.path.exists(MANUAL_TRADES_PATH):
+        return []
+    try:
+        with open(MANUAL_TRADES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_trades(trades: list) -> None:
+    with open(MANUAL_TRADES_PATH, "w", encoding="utf-8") as f:
+        json.dump(trades, f, ensure_ascii=False, indent=2)
+
+
+def _update_trade_status(trade_id: str, new_status: str, note: str = "") -> None:
+    trades = _load_trades()
+    for t in trades:
+        if t.get("trade_id") == trade_id:
+            t["status"] = new_status
+            if "status_log" not in t:
+                t["status_log"] = []
+            t["status_log"].append({
+                "ts": datetime.now().isoformat(),
+                "status": new_status,
+                "note": note,
+            })
+    _save_trades(trades)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _fetch_current_price(ticker: str) -> float:
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        return float(
+            info.get("currentPrice") or info.get("regularMarketPrice")
+            or info.get("previousClose") or 0
+        )
+    except Exception:
+        return 0.0
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _fetch_option_mid(ticker: str, expiry_str: str, strike: float, is_call: bool) -> float:
+    """Versucht den aktuellen Optionspreis (Mid) via yfinance abzurufen."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        chain = t.option_chain(expiry_str)
+        df = chain.calls if is_call else chain.puts
+        row = df[abs(df["strike"] - strike) < 0.01]
+        if row.empty:
+            row = df.iloc[(df["strike"] - strike).abs().argsort()[:1]]
+        if row.empty:
+            return 0.0
+        bid = float(row["bid"].iloc[0])
+        ask = float(row["ask"].iloc[0])
+        if bid > 0 and ask > 0:
+            return round((bid + ask) / 2, 2)
+        return float(row["lastPrice"].iloc[0])
+    except Exception:
+        return 0.0
+
+
+def _fmt_num(val: float, dec: int = 2) -> str:
+    return f"{{:.{dec}f}}".format(val).replace(".", ",")
+
+
+def _dte_from_expiry(expiry_str: str) -> int:
+    try:
+        d = pd.to_datetime(expiry_str).date()
+        return max(0, (d - date.today()).days)
+    except Exception:
+        return 0
+
+
+def _pnl_color(pnl_pct: float) -> str:
+    if pnl_pct >= 30:  return "#22c55e"
+    if pnl_pct >= 0:   return "#4ade80"
+    if pnl_pct >= -30: return "#f59e0b"
+    return "#ef4444"
+
+
+# ── Header ─────────────────────────────────────────────────────────────────────
+col_logo, col_title = st.columns([1, 6])
+with col_logo:
+    st.markdown(get_logo_html("white", 40), unsafe_allow_html=True)
+with col_title:
+    st.markdown("""
+    <div style='padding-top:4px'>
+        <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.8rem;
+                    color:#f0f0f0;letter-spacing:0.04em'>📡 TRADE MONITOR</div>
+        <div style='font-family:RedRose,sans-serif;font-weight:300;font-size:0.8rem;
+                    color:#666;text-transform:uppercase;letter-spacing:0.12em;margin-top:2px'>
+            Live-Tracking · Optionen verfolgen bis zum Verfall
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ── Query-Param: einzelnen Trade hervorheben ───────────────────────────────────
+highlight_id = st.query_params.get("trade_id", "")
+
+# ── Trades laden ───────────────────────────────────────────────────────────────
+all_trades = _load_trades()
+
+if not all_trades:
+    st.html("""
+    <div style='background:#111;border:1px dashed #222;border-radius:12px;
+                padding:40px;text-align:center;margin-top:24px'>
+        <div style='font-size:3rem;margin-bottom:12px'>📡</div>
+        <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.1rem;
+                    color:#555;letter-spacing:0.05em;margin-bottom:8px'>
+            Noch keine Trades gespeichert
+        </div>
+        <div style='font-family:RedRose,sans-serif;font-size:0.88rem;color:#333;line-height:1.7'>
+            Gehe zu <b style='color:#d4a843'>Trade Cards → Manuell eingeben</b>,
+            trage deine Optionen ein und generiere Posts —<br>
+            die Trades werden dann hier automatisch zum Live-Tracking gespeichert.
+        </div>
+    </div>
+    """)
+    st.stop()
+
+# ── Filter-Controls ────────────────────────────────────────────────────────────
+fc1, fc2, fc3 = st.columns([2, 2, 3])
+with fc1:
+    status_filter = st.multiselect(
+        "Status-Filter",
+        ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"],
+        default=["AKTIV", "WATCH", "WARNING", "ROLL"],
+        key="tm_status",
+    )
+with fc2:
+    class_filter = st.multiselect(
+        "Klasse",
+        ["A", "B", "C"],
+        default=["A", "B", "C"],
+        key="tm_class",
+    )
+with fc3:
+    st.caption(f"📡 {len(all_trades)} Trades gespeichert · Live-Preise werden alle 60s aktualisiert")
+
+# Filtern
+visible_trades = [
+    t for t in all_trades
+    if t.get("status", "AKTIV") in status_filter
+    and t.get("class", "A") in class_filter
+]
+
+# Hervorgehobenen Trade zuerst zeigen
+if highlight_id:
+    visible_trades = sorted(
+        visible_trades,
+        key=lambda t: 0 if t.get("trade_id") == highlight_id else 1,
+    )
+
+if not visible_trades:
+    st.info("Keine Trades mit den gewählten Filtern gefunden.")
+    st.stop()
+
+# ── Zusammenfassung ────────────────────────────────────────────────────────────
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+st.markdown(f"### 📊 {len(visible_trades)} aktive Trades")
+
+# Übersichtstabelle
+summary_rows = []
+for t in visible_trades:
+    dte = _dte_from_expiry(t.get("expiry", ""))
+    summary_rows.append({
+        "Klasse": t.get("class", "–"),
+        "Ticker": t.get("ticker", "–"),
+        "Strategie": t.get("strategy", "–"),
+        "Strike": f"${t.get('strike', 0):.0f}",
+        "Verfall": t.get("expiry", "–"),
+        "DTE": dte,
+        "Einstiegsprämie": f"{t.get('premium', 0):.2f} USD",
+        "Status": t.get("status", "AKTIV"),
+        "Einstieg": t.get("created_at", "")[:10],
+    })
+
+if summary_rows:
+    st.dataframe(
+        pd.DataFrame(summary_rows),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+# ── Live-Karten ────────────────────────────────────────────────────────────────
+for trade in visible_trades:
+    trade_id  = trade.get("trade_id", "")
+    cls       = trade.get("class", "–")
+    ticker    = trade.get("ticker", "–")
+    company   = trade.get("company", ticker)
+    strategy  = trade.get("strategy", "–")
+    strike    = float(trade.get("strike", 0))
+    expiry    = trade.get("expiry", "")
+    premium   = float(trade.get("premium", 0))
+    delta     = float(trade.get("delta", 0))
+    iv_pct    = float(trade.get("iv_pct", 0))
+    entry_px  = float(trade.get("price_at_entry", 0))
+    status    = trade.get("status", "AKTIV")
+    post_ts   = trade.get("post_ts", "–")
+    opt_url   = trade.get("optionstrat_url", "")
+    track_url = trade.get("tracking_url", "")
+    is_call   = "Call" in strategy
+
+    is_highlighted = (trade_id == highlight_id)
+    cls_colors = {"A": "#22c55e", "B": "#d4a843", "C": "#ef4444"}
+    cls_color  = cls_colors.get(cls, "#888")
+    stat_color = STATUS_COLORS.get(status, "#888")
+
+    dte = _dte_from_expiry(expiry)
+    dte_color = "#ef4444" if dte <= 7 else ("#f59e0b" if dte <= 21 else "#22c55e")
+    dte_icon  = "🔴" if dte <= 7 else ("🟡" if dte <= 21 else "🟢")
+
+    border_extra = "box-shadow:0 0 12px #d4a84366;" if is_highlighted else ""
+
+    with st.container():
+        header_exp = st.expander(
+            f"{'⭐ ' if is_highlighted else ''}"
+            f"Class {cls} · **{ticker}** · {strategy} · Strike ${strike:.0f} · "
+            f"{dte_icon} {dte}T bis Verfall · Status: {status}",
+            expanded=is_highlighted,
+        )
+        with header_exp:
+            # ── Live-Daten laden ────────────────────────────────────────────
+            with st.spinner(f"⏳ Live-Daten für {ticker}…"):
+                current_price = _fetch_current_price(ticker)
+                try:
+                    d_exp = pd.to_datetime(expiry)
+                    expiry_chain = d_exp.strftime("%Y-%m-%d")
+                except Exception:
+                    expiry_chain = expiry
+                current_opt_mid = _fetch_option_mid(ticker, expiry_chain, strike, is_call)
+
+            # ── P/L-Berechnung ──────────────────────────────────────────────
+            pnl_usd = 0.0
+            pnl_pct = 0.0
+            if premium > 0:
+                if current_opt_mid > 0:
+                    pnl_usd = (premium - current_opt_mid) * 100
+                    pnl_pct = (premium - current_opt_mid) / premium * 100
+                elif current_price > 0 and entry_px > 0:
+                    # Grobe Schätzung wenn keine Option gefunden
+                    px_chg = (current_price - entry_px) / entry_px
+                    pnl_pct = -px_chg * abs(delta) * 100 * (-1 if is_call else 1) + 10
+                    pnl_usd = pnl_pct / 100 * premium * 100
+
+            pl_color = _pnl_color(pnl_pct)
+
+            # ── Layout ──────────────────────────────────────────────────────
+            c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
+
+            with c1:
+                st.html(f"""
+                <div style='background:#111;border:1px solid {cls_color}40;border-left:3px solid {cls_color};
+                            border-radius:8px;padding:10px 14px;{border_extra}'>
+                    <div style='font-size:0.6rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        Class {cls} · {company}</div>
+                    <div style='font-size:1.4rem;font-weight:700;color:#f0f0f0;font-family:sans-serif;
+                                margin:4px 0'>{ticker}</div>
+                    <div style='font-size:0.78rem;color:#888;font-family:sans-serif'>{strategy}</div>
+                    <div style='margin-top:6px'>
+                        <span style='background:{stat_color}22;color:{stat_color};border-radius:4px;
+                                     padding:2px 8px;font-size:0.7rem;font-weight:700'>{status}</span>
+                    </div>
+                </div>
+                """)
+
+            with c2:
+                st.html(f"""
+                <div style='background:#0e0e0e;border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        Aktueller Kurs</div>
+                    <div style='font-size:1.2rem;font-weight:700;color:#e0e0e0;font-family:sans-serif'>
+                        ${current_price:.2f}</div>
+                    <div style='margin-top:6px;font-size:0.58rem;color:#555;text-transform:uppercase;
+                                font-family:sans-serif'>Einstieg</div>
+                    <div style='font-size:0.88rem;color:#888;font-family:sans-serif'>
+                        ${entry_px:.2f}</div>
+                </div>
+                """)
+
+            with c3:
+                opt_price_str = f"${current_opt_mid:.2f}" if current_opt_mid > 0 else "–"
+                st.html(f"""
+                <div style='background:#0a120a;border:1px solid #1a2a1a;border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        Option aktuell (Mid)</div>
+                    <div style='font-size:1.2rem;font-weight:700;color:#4ade80;font-family:sans-serif'>
+                        {opt_price_str}</div>
+                    <div style='margin-top:6px;font-size:0.58rem;color:#555;text-transform:uppercase;
+                                font-family:sans-serif'>Einstiegsprämie</div>
+                    <div style='font-size:0.88rem;color:#888;font-family:sans-serif'>
+                        ${premium:.2f}</div>
+                </div>
+                """)
+
+            with c4:
+                pnl_sign = "+" if pnl_usd >= 0 else ""
+                st.html(f"""
+                <div style='background:#0e0e0e;border:1px solid {pl_color}40;border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        P/L (1 Kontrakt)</div>
+                    <div style='font-size:1.4rem;font-weight:700;color:{pl_color};font-family:sans-serif'>
+                        {pnl_sign}{pnl_usd:.0f} USD</div>
+                    <div style='font-size:0.9rem;color:{pl_color};font-family:sans-serif'>
+                        {pnl_sign}{pnl_pct:.1f}% der Prämie</div>
+                    <div style='margin-top:4px;font-size:0.7rem;color:#555;font-family:sans-serif'>
+                        {'💡 TP bei 50%' if pnl_pct >= 50 else '⏳ Läuft noch' if pnl_pct >= 0 else '⚠️ Im Minus'}</div>
+                </div>
+                """)
+
+            # ── DTE + Strike-Abstand ─────────────────────────────────────────
+            st.markdown("---")
+            d1, d2, d3 = st.columns(3)
+            with d1:
+                try:
+                    exp_fmt = pd.to_datetime(expiry).strftime("%d. %b %Y")
+                except Exception:
+                    exp_fmt = expiry
+                st.html(f"""
+                <div style='background:#0e0c0a;border:1px solid #2a2010;border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        📅 Verfall</div>
+                    <div style='font-size:1rem;font-weight:700;color:#d4a843;font-family:sans-serif'>
+                        {exp_fmt}</div>
+                    <div style='font-size:1.8rem;font-weight:900;color:{dte_color};font-family:sans-serif'>
+                        {dte_icon} {dte} <span style='font-size:0.7rem;color:#888'>Tage</span></div>
+                </div>
+                """)
+
+            with d2:
+                if current_price > 0 and strike > 0:
+                    dist_pct = (current_price - strike) / current_price * 100
+                    dist_label = f"{'OTM' if (dist_pct > 0 and not is_call) or (dist_pct < 0 and is_call) else '⚠️ ITM'}"
+                    dist_color = "#22c55e" if "OTM" in dist_label else "#ef4444"
+                else:
+                    dist_pct, dist_label, dist_color = 0.0, "–", "#888"
+                st.html(f"""
+                <div style='background:#0e0e0e;border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        Strike-Abstand</div>
+                    <div style='font-size:1rem;font-weight:700;color:{dist_color};font-family:sans-serif'>
+                        {_fmt_num(abs(dist_pct), 1)}% {dist_label}</div>
+                    <div style='font-size:0.78rem;color:#888;font-family:sans-serif'>
+                        Strike ${strike:.0f} · Delta {delta:.2f}</div>
+                </div>
+                """)
+
+            with d3:
+                tp50 = premium * 0.50
+                tp70 = premium * 0.70
+                st.html(f"""
+                <div style='background:#0a120a;border:1px solid #1a2a1a;border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                        Take Profit Ziele</div>
+                    <div style='font-size:0.82rem;color:#4ade80;font-family:sans-serif'>
+                        50% → ${tp50:.2f} schließen</div>
+                    <div style='font-size:0.82rem;color:#22c55e;font-family:sans-serif'>
+                        70% → ${tp70:.2f} schließen</div>
+                    <div style='font-size:0.7rem;color:#555;margin-top:4px;font-family:sans-serif'>
+                        Post: {post_ts}</div>
+                </div>
+                """)
+
+            # ── Links ────────────────────────────────────────────────────────
+            if opt_url or track_url:
+                st.markdown("**🔗 Links**")
+                lc1, lc2 = st.columns(2)
+                with lc1:
+                    if opt_url:
+                        st.markdown(f"[📊 OptionStrat öffnen]({opt_url})")
+                with lc2:
+                    if track_url:
+                        st.markdown(f"[📡 Dieser Trade (Link für Post)]({track_url})")
+
+            # ── Status-Steuerung ─────────────────────────────────────────────
+            st.markdown("**⚙️ Status aktualisieren**")
+            sc1, sc2, sc3 = st.columns([2, 2, 3])
+            with sc1:
+                new_status = st.selectbox(
+                    "Neuer Status",
+                    ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"],
+                    index=["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"].index(status)
+                    if status in ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"] else 0,
+                    key=f"ns_{trade_id}",
+                    label_visibility="collapsed",
+                )
+            with sc2:
+                status_note = st.text_input(
+                    "Notiz", placeholder="z.B. Strike bedroht, rollen…",
+                    key=f"note_{trade_id}", label_visibility="collapsed",
+                )
+            with sc3:
+                if st.button(
+                    f"💾 Status speichern", key=f"save_{trade_id}", use_container_width=True,
+                ):
+                    _update_trade_status(trade_id, new_status, status_note)
+                    st.success(f"Status auf **{new_status}** gesetzt.")
+                    st.rerun()
+
+    st.html("<div style='height:8px'></div>")
+
+# ── Footer ─────────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("""
+<div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.76rem;color:#333;letter-spacing:0.08em'>
+    STILLHALTER COMMUNITY · Live-Preise: Yahoo Finance · Nicht als Finanzberatung zu verstehen
+</div>
+""", unsafe_allow_html=True)

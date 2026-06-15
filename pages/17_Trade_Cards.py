@@ -8,6 +8,8 @@ import pandas as pd
 import pickle
 import os
 import re
+import json
+import uuid
 import requests
 import xml.etree.ElementTree as ET
 import email.utils as _eutils
@@ -30,6 +32,9 @@ from data.fetcher import fetch_stock_info, fetch_fundamentals, fetch_price_histo
 # ── Konstanten ─────────────────────────────────────────────────────────────────
 _CACHE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl"
+)
+MANUAL_TRADES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "manual_trades.json"
 )
 
 _DISCLAIMER = """\
@@ -615,6 +620,207 @@ def _build_card_text(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MANUELLER TRADE-EINTRAG — Hilfsfunktionen
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _optionstrat_url_manual(
+    ticker: str, strike: float, expiry, is_call: bool,
+    is_strangle: bool = False, call_strike: float = 0.0,
+) -> str:
+    try:
+        d = pd.to_datetime(expiry)
+        exp_str = d.strftime("%y%m%d")
+        if is_strangle and call_strike > 0:
+            return (
+                f"https://optionstrat.com/build/short-strangle/{ticker}"
+                f"/-{strike:.0f}p{exp_str},-{call_strike:.0f}c{exp_str}"
+            )
+        if is_call:
+            return (
+                f"https://optionstrat.com/build/covered-call/{ticker}"
+                f"/+100{ticker},-{strike:.0f}c{exp_str}"
+            )
+        return f"https://optionstrat.com/build/short-put/{ticker}/-{strike:.0f}p{exp_str}"
+    except Exception:
+        return ""
+
+
+def _load_manual_trades() -> list:
+    if not os.path.exists(MANUAL_TRADES_PATH):
+        return []
+    try:
+        with open(MANUAL_TRADES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_manual_trade(trade: dict) -> None:
+    trades = _load_manual_trades()
+    trades = [t for t in trades if t.get("trade_id") != trade.get("trade_id")]
+    trades.append(trade)
+    with open(MANUAL_TRADES_PATH, "w", encoding="utf-8") as f:
+        json.dump(trades, f, ensure_ascii=False, indent=2)
+
+
+def _gen_trade_id(ticker: str, strategy: str) -> str:
+    date_str = datetime.now().strftime("%Y%m%d")
+    strat_short = "CC" if "Call" in strategy else "STR" if "Strangle" in strategy else "CSP"
+    uid = re.sub(r"[^A-Z0-9]", "", str(uuid.uuid4()).upper())[:4]
+    return f"{ticker}-{date_str}-{strat_short}-{uid}"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_manual_ticker_data(ticker: str) -> dict:
+    """Holt Kurs, TA-Signale, Fundamentals und News für manuellen Input."""
+    result = {
+        "price": 0.0, "company": ticker,
+        "trend_str": "", "macd_str": "", "stoch_str": "", "ema_str": "",
+        "rsi": None, "support_near": None, "resistance_near": None,
+        "fund": {}, "news": [], "description": "",
+    }
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        result["price"] = float(
+            info.get("currentPrice") or info.get("regularMarketPrice")
+            or info.get("previousClose") or 0
+        )
+        result["company"] = info.get("shortName") or info.get("longName") or ticker
+        result["description"] = (info.get("longBusinessSummary") or "").strip()
+    except Exception:
+        pass
+    try:
+        from analysis.technicals import analyze_technicals
+        hist = fetch_price_history(ticker, period="6mo")
+        if hist is not None and not hist.empty:
+            tech = analyze_technicals(hist)
+            if tech:
+                trend_map = {
+                    "bullish": "↑ Aufwärtstrend",
+                    "bearish": "↓ Abwärtstrend",
+                    "neutral": "→ Seitwärts",
+                }
+                result["trend_str"] = trend_map.get(tech.trend, "")
+                if tech.above_sma50 and tech.above_sma200:
+                    result["ema_str"] = "MA50 > MA200 (bullisch)"
+                elif tech.above_sma50:
+                    result["ema_str"] = "Über MA50, unter MA200"
+                elif tech.above_sma200:
+                    result["ema_str"] = "Unter MA50, über MA200"
+                else:
+                    result["ema_str"] = "Unter MA50 & MA200 (bärisch)"
+                if tech.sc_macd:
+                    macd_map = {
+                        "strong_bull": "MACD Pro: STARK bullisch ⬆⬆",
+                        "bull":        "MACD Pro: bullisch ⬆",
+                        "neutral":     "MACD Pro: neutral",
+                        "bear":        "MACD Pro: bearisch ⬇",
+                        "strong_bear": "MACD Pro: STARK bearisch ⬇⬇",
+                    }
+                    result["macd_str"] = macd_map.get(tech.sc_macd.signal_strength, "")
+                if tech.dual_stoch:
+                    stoch_map = {
+                        "strong_buy":  "Dual Stoch: stark überverkauft ✅✅",
+                        "buy":         "Dual Stoch: überverkauft ✅",
+                        "neutral":     "",
+                        "sell":        "Dual Stoch: überkauft ⚠️",
+                        "strong_sell": "Dual Stoch: stark überkauft ❌",
+                    }
+                    result["stoch_str"] = stoch_map.get(tech.dual_stoch.signal_strength, "")
+                if tech.support_levels:
+                    below = [s for s in tech.support_levels if s < result["price"]]
+                    if below:
+                        result["support_near"] = max(below)
+                if tech.resistance_levels:
+                    above = [r for r in tech.resistance_levels if r > result["price"]]
+                    if above:
+                        result["resistance_near"] = min(above)
+                close = hist["Close"]
+                dc = close.diff()
+                g = dc.clip(lower=0)
+                lo = (-dc).clip(lower=0)
+                ag = g.ewm(alpha=1 / 14, adjust=False).mean()
+                al = lo.ewm(alpha=1 / 14, adjust=False).mean()
+                rs = ag / al.replace(0, 1e-10)
+                result["rsi"] = float((100 - (100 / (1 + rs))).iloc[-1])
+    except Exception:
+        pass
+    try:
+        result["fund"] = fetch_fundamentals(ticker) or {}
+    except Exception:
+        pass
+    try:
+        result["news"] = _fetch_ticker_news_rss(ticker, n=3)
+    except Exception:
+        pass
+    return result
+
+
+def _build_whatsapp_short_manual(
+    class_label: str, ticker: str, company: str, strategy: str,
+    strike: float, expiry_display: str, dte: int,
+    premium: float, delta: float, iv_pct: float, price_now: float,
+    trend_str: str, macd_str: str, stoch_str: str,
+    optionstrat_url: str, tracking_url: str, post_ts: str,
+    support_near=None,
+) -> str:
+    otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
+    praemie_usd = round(premium * 100)
+    assign_pct = round(abs(delta) * 100)
+    rend_lz = premium / strike * 100 if strike > 0 else 0
+    rend_ann = rend_lz * 365 / max(dte, 1)
+    class_header = {
+        "A": "🟢 Class A — Konservativ (Low IV)",
+        "B": "🟡 Class B — Ausgewogen (Mid IV)",
+        "C": "🔴 Class C — Aggressiv (High IV)",
+    }.get(class_label, f"Class {class_label}")
+    ta_parts = []
+    if trend_str: ta_parts.append(trend_str)
+    if macd_str:  ta_parts.append(macd_str.split(" (")[0].strip())
+    if stoch_str: ta_parts.append(stoch_str)
+    ta_line = " · ".join(ta_parts) if ta_parts else "–"
+    sup_line = ""
+    if support_near and price_now > 0:
+        sup_dist = (price_now - support_near) / price_now * 100
+        sup_line = f"📐 Support bei ${support_near:.2f} ({sup_dist:.1f}% unter Kurs)\n"
+    return (
+        f"🔔 Trading Idee | {ticker} | {strategy} | {expiry_display} @{strike:.0f}\n\n"
+        f"{class_header}\n"
+        f"🏢 {company}\n\n"
+        f"💵 Kurs: ${price_now:.2f}  ·  Strike ${strike:.0f} ({_fmt_num(otm_pct, 1)}% OTM)\n"
+        f"💰 Prämie: {_fmt_num(premium)} USD | {praemie_usd} USD gesamt\n"
+        f"📈 Rendite: ~{_fmt_num(rend_ann, 1)}% p.a. | {_fmt_num(rend_lz)}% LZ ({dte}T)\n"
+        f"⚡ Einbuchungsrisiko: ~{assign_pct}% (Δ {delta:.2f})\n\n"
+        f"📊 {ta_line}\n"
+        f"{sup_line}\n"
+        f"📡 Live-Tracking: {tracking_url}\n"
+        f"📊 OptionStrat: {optionstrat_url}\n\n"
+        f"— Stillhalter AI | {post_ts}"
+    )
+
+
+def _build_circle_suffix(
+    optionstrat_url: str, tracking_url: str, post_ts: str, class_label: str,
+) -> str:
+    class_header = {
+        "A": "🟢 CLASS A — Konservativ (Low IV)",
+        "B": "🟡 CLASS B — Ausgewogen (Mid IV)",
+        "C": "🔴 CLASS C — Aggressiv (High IV)",
+    }.get(class_label, f"Class {class_label}")
+    return (
+        f"\n\n{'─' * 32}\n"
+        f"🔗 Links & Tracking\n\n"
+        f"  📡 Live-Tracking (bis Verfall):\n"
+        f"     {tracking_url}\n\n"
+        f"  📊 OptionStrat-Analyse:\n"
+        f"     {optionstrat_url}\n\n"
+        f"  ⏱️ Post erstellt: {post_ts}\n"
+        f"  {class_header}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # UI
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -625,177 +831,378 @@ with h2:
     st.markdown(
         '<div class="sc-page-title">📤 Trade Cards</div>'
         '<div class="sc-page-subtitle">'
-        'WhatsApp-fertige Trading-Ideen — 1 Klick zum Kopieren</div>',
+        'Option eingeben → WhatsApp + Circle Post · Live-Tracking bis Verfall</div>',
         unsafe_allow_html=True,
     )
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 
-# ── Cache laden ────────────────────────────────────────────────────────────────
-cached = _load_scan_cache()
+_APP_URL = ""
+try:
+    _APP_URL = st.secrets.get("APP_URL", "")
+except Exception:
+    pass
 
-if cached is None or cached.get("results") is None or cached["results"].empty:
-    st.warning(
-        "**Kein Scan-Ergebnis vorhanden.**\n\n"
-        "Bitte zuerst im **Watchlist Scanner** oder **Top 9 Trading Ideen** einen Scan durchführen. "
-        "Die besten Ergebnisse werden hier automatisch geladen.",
-        icon="⚠️",
-    )
-    if st.button("➜ Zum Watchlist Scanner", type="primary"):
-        st.switch_page("pages/04_Watchlist_Scanner.py")
-    st.stop()
+tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
 
-df_all: pd.DataFrame = cached["results"].copy()
-scan_strategy = cached.get("strategy", "Cash Covered Put")
-scan_ts = cached.get("timestamp")
-scan_age = ""
-if scan_ts:
-    age_min = int((datetime.now() - scan_ts).total_seconds() / 60)
-    scan_age = f" · vor {age_min} Min." if age_min < 60 else f" · {scan_ts.strftime('%d.%m. %H:%M')}"
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 1 — MANUELL EINGEBEN
+# ════════════════════════════════════════════════════════════════════════════════
+with tab1:
+    st.markdown("Trage **Class A** (Konservativ), **Class B** (Ausgewogen) und **Class C** (Aggressiv) ein:")
 
-st.info(
-    f"📊 **{len(df_all)} Optionen** aus letztem Scan — Strategie: **{scan_strategy}**{scan_age}  \n"
-    f"Die besten Ergebnisse nach CRV Score werden unten als Trade Card aufbereitet.",
-    icon="✅",
-)
+    col_a, col_b, col_c = st.columns(3, gap="small")
+    _CLASS_DEFS = [
+        ("A", "🟢 Class A — Konservativ", "#22c55e", col_a),
+        ("B", "🟡 Class B — Ausgewogen",  "#d4a843", col_b),
+        ("C", "🔴 Class C — Aggressiv",   "#ef4444", col_c),
+    ]
 
-# ── Einstellungen ──────────────────────────────────────────────────────────────
-with st.expander("⚙️ **Einstellungen**", expanded=False):
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        n_cards = st.number_input("Anzahl Trade Cards", 1, 5, 3)
-    with s2:
-        sort_col = st.selectbox(
-            "Sortierung",
-            [c for c in ["CRV Score", "Konvergenz", "Rendite % Laufzeit", "Rendite %/Tag"] if c in df_all.columns],
+    m_inputs: dict = {}
+    for cls, cls_label, cls_color, col in _CLASS_DEFS:
+        with col:
+            st.html(
+                f"<div style='font-weight:700;color:{cls_color};font-family:RedRose,sans-serif;"
+                f"font-size:0.9rem;margin-bottom:6px'>{cls_label}</div>"
+            )
+            ticker_v  = st.text_input("Ticker", key=f"m_{cls}_ticker", placeholder="AAPL").upper().strip()
+            strat_v   = st.selectbox(
+                "Strategie", ["Short PUT", "Covered Call", "Short Strangle"],
+                key=f"m_{cls}_strategy",
+            )
+            strike_v  = st.number_input(
+                "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
+            )
+            expiry_v  = st.date_input(
+                "Verfall", value=date.today() + timedelta(days=30),
+                min_value=date.today(), key=f"m_{cls}_expiry",
+            )
+            call_strike_v = 0.0
+            if "Strangle" in strat_v:
+                call_strike_v = st.number_input(
+                    "CALL Strike ($)", min_value=0.0, step=1.0, format="%.2f",
+                    key=f"m_{cls}_call_strike",
+                )
+            premium_v = st.number_input(
+                "Prämie (USD)", min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
+            )
+            dc, dv = st.columns(2)
+            with dc:
+                delta_v = st.number_input(
+                    "Delta", value=-0.20, min_value=-1.0, max_value=1.0,
+                    step=0.01, format="%.2f", key=f"m_{cls}_delta",
+                )
+            with dv:
+                iv_v = st.number_input(
+                    "IV %", min_value=0.0, value=25.0, step=1.0, format="%.0f",
+                    key=f"m_{cls}_iv",
+                )
+            m_inputs[cls] = {
+                "ticker": ticker_v, "strategy": strat_v, "strike": strike_v,
+                "expiry": expiry_v, "call_strike": call_strike_v,
+                "premium": premium_v, "delta": delta_v, "iv_pct": iv_v,
+            }
+
+    if not _APP_URL:
+        st.markdown("---")
+        _eff_app_url = st.text_input(
+            "🔗 App-URL (für Live-Tracking Link)",
+            value="https://stillhalter.community",
+            key="m_app_url",
+            help="Base-URL der Stillhalter AI App — erscheint im Post als Tracking-Link",
         )
-    with s3:
-        news_count = st.number_input("News-Zeilen pro Trade", 1, 6, 3)
+    else:
+        _eff_app_url = _APP_URL
 
-# Top N nach gewählter Sortierung — nur Optionen mit sinnvollem Delta
-_df_sorted = df_all.sort_values(sort_col, ascending=False).drop_duplicates(subset=["Ticker"])
-if "Delta" in _df_sorted.columns:
-    _df_sorted = _df_sorted[_df_sorted["Delta"].abs() >= 0.10]
-top_df = _df_sorted.head(int(n_cards)).reset_index(drop=True)
+    st.markdown("---")
 
-st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+    if st.button("🚀 Posts für alle 3 Klassen generieren", type="primary",
+                 use_container_width=True, key="btn_gen_manual"):
+        _valid = True
+        for cls in ["A", "B", "C"]:
+            if not m_inputs[cls]["ticker"] or m_inputs[cls]["strike"] <= 0 or m_inputs[cls]["premium"] <= 0:
+                st.error(f"⚠️ Class {cls}: Ticker, Strike und Prämie sind Pflichtfelder.")
+                _valid = False
+        if _valid:
+            _generated: dict = {}
+            for cls in ["A", "B", "C"]:
+                inp = m_inputs[cls]
+                with st.spinner(f"⏳ Marktdaten für {inp['ticker']} (Class {cls})…"):
+                    tdata = _fetch_manual_ticker_data(inp["ticker"])
 
-# ── Karten ────────────────────────────────────────────────────────────────────
-all_card_texts: list[str] = []
+                ticker   = inp["ticker"]
+                strategy = inp["strategy"]
+                strike   = inp["strike"]
+                expiry   = inp["expiry"]
+                premium  = inp["premium"]
+                delta    = inp["delta"]
+                iv_pct   = inp["iv_pct"]
+                is_call     = "Call" in strategy
+                is_strangle = "Strangle" in strategy
+                call_strike = inp.get("call_strike", 0.0)
+                price_now   = tdata.get("price", 0.0)
+                company     = tdata.get("company", ticker)
 
-for idx, row in top_df.iterrows():
-    ticker   = row.get("Ticker", "")
-    strike   = float(row.get("Strike", 0))
-    expiry   = row.get("Verfall", "")
-    premium  = float(row.get("Prämie", 0))
-    rendite  = float(row.get("Rendite % Laufzeit", 0))
-    otm_pct  = float(row.get("OTM %", 0))
-    crv      = float(row.get("CRV Score", 0)) if "CRV Score" in row else 0.0
-
-    option_type, strategie       = _get_strategy_type(row)
-    trade_exp, german_exp, dte   = _fmt_expiry_trade(expiry)
-    sr_note                      = _get_sr_level(ticker, option_type, strike)
-    trend_note_auto              = _build_trend_note(row, otm_pct, sr_note)
-
-    rank_icon = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][idx]
-
-    with st.expander(
-        f"{rank_icon} **{ticker}** — {trade_exp} @{strike:.0f} {option_type} · "
-        f"Prämie {_fmt_num(premium)} USD · {dte} Tage · CRV {crv:.0f}",
-        expanded=(idx == 0),
-    ):
-        # ── Stock-Daten + News laden ───────────────────────────────────────
-        with st.spinner(f"Lade Daten & News für {ticker}…"):
-            stock_data  = _cached_stock_data(ticker)
-            info        = stock_data["info"]
-            rss_items   = _fetch_ticker_news_rss(ticker, n=int(news_count))
-
-        company_name = info.get("name", ticker)
-        eng_desc     = (info.get("description") or "").strip()
-        fund_data    = stock_data["fund"]
-        news_auto    = _format_news_text(rss_items)
-        ath_pct_val  = _ath_pct(ticker, strike)
-
-        # ── Zusätzliche Felder aus der Scan-Row ───────────────────────────
-        delta_raw   = float(row.get("Delta", 0.0))
-        iv_raw      = float(row.get("IV %", 0.0))
-        sektor_raw  = str(row.get("Sektor", ""))
-        # Kurs-Schätzung: aus Info-Objekt oder OTM-Back-Rechnung
-        price_now_raw = float(info.get("price") or info.get("currentPrice") or 0.0)
-        if price_now_raw <= 0 and otm_pct > 0:
-            price_now_raw = strike / (1 - otm_pct / 100)
-        ta_lines_built    = _ta_zeilen(row)
-        covered_call_text = _covered_call_reco(row, price_now_raw, dte, iv_raw)
-
-        # ── Editierbare Felder ─────────────────────────────────────────────
-        col_left, col_right = st.columns([3, 2])
-
-        with col_left:
-            st.markdown(f"**📋 {company_name} ({ticker})**")
-
-            st.markdown(
-                "<div style='font-size:0.78rem;color:#666;margin-bottom:2px'>"
-                "Hintergrund-Text (bearbeiten → auf Deutsch, 2–3 Sätze)</div>",
-                unsafe_allow_html=True,
-            )
-            # Englischen Text übersetzen, bearbeitbar
-            if eng_desc:
-                default_bg = _translate_de(eng_desc[:400])
-            else:
-                default_bg = f"{company_name} ist ein börsennotiertes Unternehmen."
-            background = st.text_area(
-                "Hintergrund",
-                value=default_bg,
-                height=110,
-                key=f"bg_{ticker}_{idx}",
-                label_visibility="collapsed",
-            )
-
-            st.markdown(
-                "<div style='font-size:0.78rem;color:#666;margin-top:8px;margin-bottom:2px'>"
-                "News (bearbeiten)</div>",
-                unsafe_allow_html=True,
-            )
-            news_text = st.text_area(
-                "News",
-                value=news_auto,
-                height=90,
-                key=f"news_{ticker}_{idx}",
-                label_visibility="collapsed",
-            )
-
-            st.markdown(
-                "<div style='font-size:0.78rem;color:#666;margin-top:8px;margin-bottom:2px'>"
-                "Absicherungs-Zeile (bearbeiten)</div>",
-                unsafe_allow_html=True,
-            )
-            trend_note = st.text_input(
-                "Absicherung",
-                value=trend_note_auto,
-                key=f"trend_{ticker}_{idx}",
-                label_visibility="collapsed",
-            )
-
-        with col_right:
-            st.markdown("**📊 Trade-Details**")
-            ath_label = f"{_fmt_num(ath_pct_val, 0)}% unter ATH" if ath_pct_val else "–"
-            ann_r = rendite * 365 / max(dte, 1)
-
-            # Fundamental-Werte für Tabelle
-            def _fd(key, dec=1, mul=1.0, prefix="", suffix=""):
-                v = fund_data.get(key)
                 try:
-                    return f"{prefix}{_fmt_num(float(v) * mul, dec)}{suffix}"
+                    d_exp = pd.to_datetime(expiry)
+                    expiry_display = d_exp.strftime("%b") + str(d_exp.day) + " '" + d_exp.strftime("%y")
+                    german_exp     = d_exp.strftime("%d.%m.%Y")
+                    dte            = max(0, (d_exp.date() - date.today()).days)
                 except Exception:
-                    return "–"
+                    expiry_display = str(expiry)
+                    german_exp     = str(expiry)
+                    dte            = 0
 
-            pe_t_disp  = _fd("pe_trailing",  1)
-            pe_f_disp  = _fd("pe_forward",   1)
-            peg_disp   = _fd("peg_ratio",    2)
-            eps_t_disp = _fd("eps_trailing", 2, prefix="$")
-            g_yoy_disp = _fd("earnings_growth_yoy", 1, mul=100, suffix="%")
-            tgt_disp   = _fd("target_price", 0, prefix="$")
+                optionstrat_url = _optionstrat_url_manual(
+                    ticker, strike, expiry, is_call, is_strangle, call_strike
+                )
+                trade_id     = _gen_trade_id(ticker, strategy)
+                tracking_url = f"{_eff_app_url}/20_Trade_Monitor?trade_id={trade_id}"
+                post_ts      = datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
 
-            st.markdown(f"""
+                _save_manual_trade({
+                    "trade_id": trade_id, "class": cls, "ticker": ticker,
+                    "company": company, "strategy": strategy,
+                    "strike": strike, "call_strike": call_strike,
+                    "expiry": str(expiry), "premium": premium,
+                    "delta": delta, "iv_pct": iv_pct,
+                    "price_at_entry": price_now,
+                    "created_at": datetime.now().isoformat(),
+                    "post_ts": post_ts,
+                    "optionstrat_url": optionstrat_url,
+                    "tracking_url": tracking_url,
+                    "status": "AKTIV",
+                })
+
+                # WhatsApp Short
+                wa_post = _build_whatsapp_short_manual(
+                    class_label=cls, ticker=ticker, company=company,
+                    strategy=strategy, strike=strike, expiry_display=expiry_display,
+                    dte=dte, premium=premium, delta=delta, iv_pct=iv_pct,
+                    price_now=price_now,
+                    trend_str=tdata.get("trend_str", ""),
+                    macd_str=tdata.get("macd_str", ""),
+                    stoch_str=tdata.get("stoch_str", ""),
+                    optionstrat_url=optionstrat_url,
+                    tracking_url=tracking_url,
+                    post_ts=post_ts,
+                    support_near=tdata.get("support_near"),
+                )
+
+                # Circle Detailpost
+                mock_row = pd.Series({
+                    "SC Trend(1D)": tdata.get("trend_str", ""),
+                    "MACD(1D)":     tdata.get("macd_str", ""),
+                    "Stoch(1D)":    "",
+                    "RSI(1D)":      f"{tdata['rsi']:.0f}" if tdata.get("rsi") else "",
+                    "⚠️ Earnings":  "",
+                })
+                ta_lines_built = _ta_zeilen(mock_row)
+                sr_note        = _get_sr_level(ticker, "PUT" if not is_call else "CALL", strike)
+                otm_pct_val    = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
+                trend_note_txt = (
+                    tdata.get("trend_str", "") +
+                    f" · Strike {_fmt_num(otm_pct_val, 1)}% OTM" +
+                    (f" · {sr_note}" if sr_note else "")
+                )
+                bg_desc  = tdata.get("description", "")
+                bg_text  = _translate_de(bg_desc[:400]) if bg_desc else f"{company} ist ein börsennotiertes Unternehmen."
+                news_txt = _format_news_text(tdata.get("news", []))
+                rend_lz_val = premium / strike * 100 if strike > 0 else 0
+
+                circle_base = _build_card_text(
+                    ticker=ticker, trade_exp=expiry_display, strike=strike,
+                    option_type="PUT" if not is_call else "CALL",
+                    premium=premium, rendite_lz=rend_lz_val, strategie=strategy,
+                    ath_dist=_ath_pct(ticker, strike), german_exp=german_exp,
+                    dte=dte, trend_note=trend_note_txt, background=bg_text,
+                    news_text=news_txt, delta=delta, iv=iv_pct, crv=0.0,
+                    sektor="", company_name=company, ta_lines=ta_lines_built,
+                    price_now=price_now, fund=tdata.get("fund", {}), covered_call="",
+                )
+                circle_post = circle_base + _build_circle_suffix(
+                    optionstrat_url, tracking_url, post_ts, cls
+                )
+
+                _generated[cls] = {
+                    "ticker": ticker, "wa": wa_post, "circle": circle_post,
+                    "trade_id": trade_id,
+                }
+
+            st.session_state["m_generated"] = _generated
+            st.success("✅ Posts generiert — Trades für Live-Tracking gespeichert")
+
+    # Display generated posts
+    if "m_generated" in st.session_state and st.session_state["m_generated"]:
+        gen = st.session_state["m_generated"]
+
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+        st.markdown("## 📱 WhatsApp Posts (kurz)")
+        wa_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
+        for (cls, d), wtab in zip(gen.items(), wa_tabs):
+            with wtab:
+                st.code(d["wa"], language="text")
+
+        st.markdown("### 📤 Alle 3 zusammen (WhatsApp)")
+        combined_wa = f"\n\n{'─' * 30}\n\n".join(d["wa"] for d in gen.values())
+        st.code(combined_wa, language="text")
+
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+        st.markdown("## 🌐 Circle Posts (detailliert)")
+        circle_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
+        for (cls, d), ctab in zip(gen.items(), circle_tabs):
+            with ctab:
+                st.code(d["circle"], language="text")
+
+        st.markdown("### 📤 Alle 3 + Disclaimer (Circle — komplette Nachricht)")
+        combined_circle = f"\n\n{'═' * 30}\n\n".join(d["circle"] for d in gen.values())
+        combined_circle += f"\n\n{'─' * 30}\n\n{_DISCLAIMER}"
+        st.code(combined_circle, language="text")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 2 — AUS SCANNER
+# ════════════════════════════════════════════════════════════════════════════════
+with tab2:
+    # ── Cache laden ──────────────────────────────────────────────────────────
+    cached = _load_scan_cache()
+
+    if cached is None or cached.get("results") is None or cached["results"].empty:
+        st.warning(
+            "**Kein Scan-Ergebnis vorhanden.**\n\n"
+            "Bitte zuerst im **Watchlist Scanner** oder **Top 9 Trading Ideen** einen Scan durchführen. "
+            "Die besten Ergebnisse werden hier automatisch geladen.",
+            icon="⚠️",
+        )
+        if st.button("➜ Zum Watchlist Scanner", type="primary", key="btn_to_scanner_t2"):
+            st.switch_page("pages/04_Watchlist_Scanner.py")
+    else:
+        df_all: pd.DataFrame = cached["results"].copy()
+        scan_strategy = cached.get("strategy", "Cash Covered Put")
+        scan_ts = cached.get("timestamp")
+        scan_age = ""
+        if scan_ts:
+            age_min = int((datetime.now() - scan_ts).total_seconds() / 60)
+            scan_age = f" · vor {age_min} Min." if age_min < 60 else f" · {scan_ts.strftime('%d.%m. %H:%M')}"
+
+        st.info(
+            f"📊 **{len(df_all)} Optionen** aus letztem Scan — Strategie: **{scan_strategy}**{scan_age}  \n"
+            f"Die besten Ergebnisse nach CRV Score werden unten als Trade Card aufbereitet.",
+            icon="✅",
+        )
+
+        # ── Einstellungen ────────────────────────────────────────────────────
+        with st.expander("⚙️ **Einstellungen**", expanded=False):
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                n_cards = st.number_input("Anzahl Trade Cards", 1, 5, 3, key="t2_n_cards")
+            with s2:
+                sort_col = st.selectbox(
+                    "Sortierung",
+                    [c for c in ["CRV Score", "Konvergenz", "Rendite % Laufzeit", "Rendite %/Tag"]
+                     if c in df_all.columns],
+                    key="t2_sort",
+                )
+            with s3:
+                news_count = st.number_input("News-Zeilen pro Trade", 1, 6, 3, key="t2_news")
+
+        # Top N nach gewählter Sortierung
+        _df_sorted = df_all.sort_values(sort_col, ascending=False).drop_duplicates(subset=["Ticker"])
+        if "Delta" in _df_sorted.columns:
+            _df_sorted = _df_sorted[_df_sorted["Delta"].abs() >= 0.10]
+        top_df = _df_sorted.head(int(n_cards)).reset_index(drop=True)
+
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+
+        # ── Karten ───────────────────────────────────────────────────────────
+        all_card_texts: list = []
+
+        for idx, row in top_df.iterrows():
+            ticker   = row.get("Ticker", "")
+            strike   = float(row.get("Strike", 0))
+            expiry   = row.get("Verfall", "")
+            premium  = float(row.get("Prämie", 0))
+            rendite  = float(row.get("Rendite % Laufzeit", 0))
+            otm_pct  = float(row.get("OTM %", 0))
+            crv      = float(row.get("CRV Score", 0)) if "CRV Score" in row else 0.0
+
+            option_type, strategie     = _get_strategy_type(row)
+            trade_exp, german_exp, dte = _fmt_expiry_trade(expiry)
+            sr_note                    = _get_sr_level(ticker, option_type, strike)
+            trend_note_auto            = _build_trend_note(row, otm_pct, sr_note)
+
+            rank_icon = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"][idx]
+
+            with st.expander(
+                f"{rank_icon} **{ticker}** — {trade_exp} @{strike:.0f} {option_type} · "
+                f"Prämie {_fmt_num(premium)} USD · {dte} Tage · CRV {crv:.0f}",
+                expanded=(idx == 0),
+            ):
+                with st.spinner(f"Lade Daten & News für {ticker}…"):
+                    stock_data  = _cached_stock_data(ticker)
+                    info        = stock_data["info"]
+                    rss_items   = _fetch_ticker_news_rss(ticker, n=int(news_count))
+
+                company_name = info.get("name", ticker)
+                eng_desc     = (info.get("description") or "").strip()
+                fund_data    = stock_data["fund"]
+                news_auto    = _format_news_text(rss_items)
+                ath_pct_val  = _ath_pct(ticker, strike)
+
+                delta_raw   = float(row.get("Delta", 0.0))
+                iv_raw      = float(row.get("IV %", 0.0))
+                sektor_raw  = str(row.get("Sektor", ""))
+                price_now_raw = float(info.get("price") or info.get("currentPrice") or 0.0)
+                if price_now_raw <= 0 and otm_pct > 0:
+                    price_now_raw = strike / (1 - otm_pct / 100)
+                ta_lines_built    = _ta_zeilen(row)
+                covered_call_text = _covered_call_reco(row, price_now_raw, dte, iv_raw)
+
+                col_left, col_right = st.columns([3, 2])
+
+                with col_left:
+                    st.markdown(f"**📋 {company_name} ({ticker})**")
+                    st.markdown(
+                        "<div style='font-size:0.78rem;color:#666;margin-bottom:2px'>"
+                        "Hintergrund-Text (bearbeiten → auf Deutsch, 2–3 Sätze)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    default_bg = _translate_de(eng_desc[:400]) if eng_desc else f"{company_name} ist ein börsennotiertes Unternehmen."
+                    background = st.text_area(
+                        "Hintergrund", value=default_bg, height=110,
+                        key=f"bg_{ticker}_{idx}", label_visibility="collapsed",
+                    )
+                    st.markdown(
+                        "<div style='font-size:0.78rem;color:#666;margin-top:8px;margin-bottom:2px'>"
+                        "News (bearbeiten)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    news_text = st.text_area(
+                        "News", value=news_auto, height=90,
+                        key=f"news_{ticker}_{idx}", label_visibility="collapsed",
+                    )
+                    st.markdown(
+                        "<div style='font-size:0.78rem;color:#666;margin-top:8px;margin-bottom:2px'>"
+                        "Absicherungs-Zeile (bearbeiten)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    trend_note = st.text_input(
+                        "Absicherung", value=trend_note_auto,
+                        key=f"trend_{ticker}_{idx}", label_visibility="collapsed",
+                    )
+
+                with col_right:
+                    st.markdown("**📊 Trade-Details**")
+                    ath_label = f"{_fmt_num(ath_pct_val, 0)}% unter ATH" if ath_pct_val else "–"
+                    ann_r = rendite * 365 / max(dte, 1)
+
+                    def _fd(key, dec=1, mul=1.0, prefix="", suffix="", _fd=fund_data):
+                        v = _fd.get(key)
+                        try:
+                            return f"{prefix}{_fmt_num(float(v) * mul, dec)}{suffix}"
+                        except Exception:
+                            return "–"
+
+                    st.markdown(f"""
 | | |
 |---|---|
 | **Strategie** | {strategie} |
@@ -811,57 +1218,35 @@ for idx, row in top_df.iterrows():
 | **ATH-Abstand** | {ath_label} |
 | **CRV Score** | {crv:.0f} |
 | | |
-| **EPS (TTM)** | {eps_t_disp} |
-| **EPS-Wachstum** | {g_yoy_disp} |
-| **KGV / Fwd** | {pe_t_disp} / {pe_f_disp} |
-| **PEG Ratio** | {peg_disp} |
-| **Analystenziel** | {tgt_disp} |
+| **EPS (TTM)** | {_fd("eps_trailing", 2, prefix="$")} |
+| **EPS-Wachstum** | {_fd("earnings_growth_yoy", 1, mul=100, suffix="%")} |
+| **KGV / Fwd** | {_fd("pe_trailing", 1)} / {_fd("pe_forward", 1)} |
+| **PEG Ratio** | {_fd("peg_ratio", 2)} |
+| **Analystenziel** | {_fd("target_price", 0, prefix="$")} |
 """)
 
-        # ── Generierter Text ───────────────────────────────────────────────
-        card_text = _build_card_text(
-            ticker=ticker,
-            trade_exp=trade_exp,
-            strike=strike,
-            option_type=option_type,
-            premium=premium,
-            rendite_lz=rendite,
-            strategie=strategie,
-            ath_dist=ath_pct_val,
-            german_exp=german_exp,
-            dte=dte,
-            trend_note=trend_note,
-            background=background,
-            news_text=news_text,
-            delta=delta_raw,
-            iv=iv_raw,
-            crv=crv,
-            sektor=sektor_raw,
-            company_name=company_name,
-            ta_lines=ta_lines_built,
-            price_now=price_now_raw,
-            fund=fund_data,
-            covered_call=covered_call_text,
-        )
+                card_text = _build_card_text(
+                    ticker=ticker, trade_exp=trade_exp, strike=strike,
+                    option_type=option_type, premium=premium, rendite_lz=rendite,
+                    strategie=strategie, ath_dist=ath_pct_val, german_exp=german_exp,
+                    dte=dte, trend_note=trend_note, background=background,
+                    news_text=news_text, delta=delta_raw, iv=iv_raw, crv=crv,
+                    sektor=sektor_raw, company_name=company_name,
+                    ta_lines=ta_lines_built, price_now=price_now_raw,
+                    fund=fund_data, covered_call=covered_call_text,
+                )
+                all_card_texts.append(card_text)
+                st.markdown("---")
+                st.markdown("**📱 WhatsApp Text — direkt kopieren:**")
+                st.code(card_text, language="text")
 
-        all_card_texts.append(card_text)
-
-        st.markdown("---")
-        st.markdown("**📱 WhatsApp Text — direkt kopieren:**")
-        st.code(card_text, language="text")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# ALLE KARTEN + DISCLAIMER ZUSAMMEN
-# ══════════════════════════════════════════════════════════════════════════════
-if all_card_texts:
-    st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-    st.markdown("### 📤 Alle Trade Cards + Disclaimer (eine Nachricht)")
-    st.caption(
-        "Diesen Block als eine komplette WhatsApp-Nachricht senden — "
-        "alle Trade Ideas + Standard-Disclaimer am Ende."
-    )
-
-    combined = "\n\n" + ("─" * 30 + "\n\n").join(all_card_texts)
-    combined += "\n\n" + "─" * 30 + "\n\n" + _DISCLAIMER
-
-    st.code(combined, language="text")
+        if all_card_texts:
+            st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+            st.markdown("### 📤 Alle Trade Cards + Disclaimer (eine Nachricht)")
+            st.caption(
+                "Diesen Block als eine komplette WhatsApp-Nachricht senden — "
+                "alle Trade Ideas + Standard-Disclaimer am Ende."
+            )
+            combined = "\n\n" + ("─" * 30 + "\n\n").join(all_card_texts)
+            combined += "\n\n" + "─" * 30 + "\n\n" + _DISCLAIMER
+            st.code(combined, language="text")
