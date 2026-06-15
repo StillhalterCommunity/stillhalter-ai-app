@@ -915,7 +915,7 @@ def _build_whatsapp_short_manual(
     trend_simple: str, macd_desc: str, stoch_desc: str,
     optionstrat_url: str, tracking_url: str, post_ts: str,
     support_near=None, ath_price_dist=None,
-    company_sentence: str = "", news_line: str = "",
+    company_sentence: str = "", news_line: str = "", funda_line: str = "",
 ) -> str:
     is_call = "Call" in strategy
     otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
@@ -923,7 +923,8 @@ def _build_whatsapp_short_manual(
     assign_pct = round(abs(delta) * 100)
     # Covered Call: Renditebasis = Aktienkurs (nicht Strike)
     capital_basis = price_now if is_call and price_now > 0 else (strike if strike > 0 else 1)
-    rend_lz = premium / capital_basis * 100
+    rend_lz  = premium / capital_basis * 100
+    rend_ann = rend_lz * 365 / max(dte, 1)   # annualisiert
     # Klasse + Volatilitäts-Einordnung (mit farbigem Punkt)
     class_tag = {
         "A": "🟢 Konservativ (Low Volatility)",
@@ -939,37 +940,37 @@ def _build_whatsapp_short_manual(
         f"Strike ${strike:.0f} · Prämie {_fmt_num(premium)} USD"
     )
     L.append("")
-    # ── Unternehmen + Klasse/Volatilität ──────────────────────────────────────
-    if company_sentence:
-        L.append(f"🏢 {company} — {company_sentence}")
-    else:
-        L.append(f"🏢 {company}")
+    # ── Unternehmen (nur Name) + Klasse/Volatilität ───────────────────────────
+    L.append(f"🏢 {company}")
     L.append(class_tag)
     L.append("")
-    # ── Eckdaten (alles untereinander) ────────────────────────────────────────
+    # ── Optionsparameter ──────────────────────────────────────────────────────
+    L.append("📋 Optionsparameter")
     L.append(f"💵 Kurs: ${price_now:.2f}")
     L.append(f"🎯 Strike: ${strike:.0f}")
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
-    L.append(f"📊 Volatilität (IV): {iv_pct:.0f}%")
+    L.append(f"🌡️ Volatilität (IV): {iv_pct:.0f}%")
     L.append("")
-    # ── Prämie & Rendite (Rendite auf Laufzeit, Risiko in Klammern) ───────────
+    # ── Cashflow-Parameter ────────────────────────────────────────────────────
+    L.append("💰 Cashflow-Parameter")
     if is_call and price_now > 0:
         L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
-    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
-    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% Laufzeit ({_risk_label} ~{assign_pct}%)")
+    L.append(f"💵 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
+    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% auf {dte} Tage Laufzeit (~{_fmt_num(rend_ann, 1)}% p.a.)")
     L.append("")
-    # ── Absicherung ───────────────────────────────────────────────────────────
+    # ── Absicherung (inkl. Ausübungs-/Einbuchungsrisiko) ──────────────────────
     L.append("🛡️ Absicherung")
-    L.append(f"• {_fmt_num(otm_pct, 1)}% Out-of-the-Money")
+    L.append(f"• OTM: {_fmt_num(otm_pct, 1)}% Out-of-the-Money")
     if support_near and strike > 0:
         if support_near >= strike:
             _sd = (support_near - strike) / strike * 100
-            L.append(f"• Support ${support_near:.2f} liegt {_fmt_num(_sd, 1)}% über Strike (Puffer)")
+            L.append(f"• Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% über Strike, Puffer)")
         else:
             _sd = (strike - support_near) / strike * 100
-            L.append(f"• Support ${support_near:.2f} liegt {_fmt_num(_sd, 1)}% unter Strike")
+            L.append(f"• Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
     if ath_price_dist is not None:
-        L.append(f"• {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
+        L.append(f"• ATH: {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
+    L.append(f"• {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
     L.append("")
     # ── Technik (alle drei Stillhalter-Indikatoren) ───────────────────────────
     L.append("📊 Technik")
@@ -977,9 +978,14 @@ def _build_whatsapp_short_manual(
     L.append(f"• Stillhalter MACD: {macd_desc or 'neutral'}")
     L.append(f"• Stillhalter Dual Stochastik: {stoch_desc or 'neutral'}")
     L.append("")
-    # ── News ──────────────────────────────────────────────────────────────────
+    # ── Unternehmen unten: News · was die Firma macht · Fundamentalkennzahlen ──
     if news_line:
         L.append(f"📰 {news_line}")
+    if company_sentence:
+        L.append(f"🏢 {company_sentence}")
+    if funda_line:
+        L.append(f"💎 {funda_line}")
+    if news_line or company_sentence or funda_line:
         L.append("")
     # ── Links ─────────────────────────────────────────────────────────────────
     L.append("📡 Live-Tracking:")
@@ -1261,6 +1267,26 @@ with tab1:
                 else:
                     _news_line = ""
 
+                # Fundamental-Kennzahlen-Zeile: Gewinnwachstum + KGV
+                _fund = tdata.get("fund", {}) or {}
+                _funda_parts = []
+                _eg = _fund.get("earnings_growth_yoy")
+                try:
+                    if _eg is not None:
+                        _funda_parts.append(f"Gewinnwachstum {_fmt_num(float(_eg) * 100, 1)}%")
+                except Exception:
+                    pass
+                _pe = _fund.get("pe_trailing")
+                _pef = _fund.get("pe_forward")
+                try:
+                    if _pe is not None:
+                        _funda_parts.append(f"KGV {_fmt_num(float(_pe), 1)}")
+                    elif _pef is not None:
+                        _funda_parts.append(f"KGV (fwd) {_fmt_num(float(_pef), 1)}")
+                except Exception:
+                    pass
+                _funda_line = " · ".join(_funda_parts)
+
                 # WhatsApp Short
                 wa_post = _build_whatsapp_short_manual(
                     class_label=cls, ticker=ticker, company=company,
@@ -1277,6 +1303,7 @@ with tab1:
                     ath_price_dist=_ath_price_dist,
                     company_sentence=_company_sentence,
                     news_line=_news_line,
+                    funda_line=_funda_line,
                 )
 
                 # Circle Detailpost
