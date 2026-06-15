@@ -223,10 +223,11 @@ with st.expander("⚙️ System", expanded=False):
     from data.maintenance import is_maintenance, is_admin, enable as maint_on, disable as maint_off
     if is_admin(st.session_state.get("auth_user", "")):
         _maint_active = is_maintenance()
+        _maint_color = "#ef4444" if _maint_active else "#22c55e"
+        _maint_label = "AKTIV — alle anderen Nutzer sehen Wartungsseite" if _maint_active else "INAKTIV"
         st.markdown(
             f"<div style='font-size:0.75rem;color:#888;margin-bottom:6px'>"
-            f"🔧 Wartungsmodus: <b style='color:{\"#ef4444\" if _maint_active else \"#22c55e\"}'>"
-            f"{'AKTIV — alle anderen Nutzer sehen Wartungsseite' if _maint_active else 'INAKTIV'}</b>"
+            f"🔧 Wartungsmodus: <b style='color:{_maint_color}'>{_maint_label}</b>"
             f"</div>",
             unsafe_allow_html=True,
         )
