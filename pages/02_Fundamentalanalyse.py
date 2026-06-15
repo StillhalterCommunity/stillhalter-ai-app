@@ -435,6 +435,17 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
         min_growth = st.number_input("Mind. Earnings Growth %", -50, 100, 0, 5,
             help="Mindest-Gewinnwachstum (YoY)")
 
+    t1, t2, t3, _t4, _t5, _t6 = st.columns(6)
+    with t1:
+        min_mktcap = st.number_input("Mind. Market Cap (Mrd. $)", 0.0, 5000.0, 0.0, 5.0,
+            format="%.0f", help="0 = kein Filter. Z.B. 10 = nur Aktien ab 10 Mrd. $ Marktkapitalisierung")
+    with t2:
+        max_pe = st.number_input("Max. KGV", 0.0, 500.0, 0.0, 5.0, format="%.0f",
+            help="0 = kein Filter. Trailing P/E (KGV aktuell)")
+    with t3:
+        max_pe_fwd = st.number_input("Max. KGV (fwd)", 0.0, 500.0, 0.0, 5.0, format="%.0f",
+            help="0 = kein Filter. Forward P/E (KGV erwartet)")
+
 # Ticker-Universum bestimmen (Index-Ticker in Session State cachen — kein st.spinner im Hauptfluss)
 _univ_warn = ""
 if "Dow Jones" in universe:
@@ -525,6 +536,7 @@ if start_scan:
                         "Kursziel ∅":     data["analyst_target"],
                         "Upside %":       data["upside_pct"],
                         "Kurs":           data["price"],
+                        "Market Cap":     (data["mktcap"] / 1e9) if data.get("mktcap") else None,
                         # Rohwerte für Filter
                         "_peg_raw":       data["peg_ratio"],
                         "_grade":         data["grade"],
@@ -533,6 +545,7 @@ if start_scan:
                         "_growth_raw":    data["earnings_growth_pct"],
                         "_pe_fwd_raw":    data["pe_forward"],
                         "_pe_trail_raw":  data["pe_trailing"],
+                        "_mktcap_raw":    data.get("mktcap"),
                     })
             except Exception:
                 pass
@@ -609,6 +622,18 @@ else:
         # Wachstums-Filter: Tickers ohne Daten behalten
         growth_col = pd.to_numeric(view["_growth_raw"], errors="coerce")
         view = view[growth_col.isna() | (growth_col >= min_growth)]
+    if min_mktcap > 0:
+        # Market-Cap-Filter (in Mrd. $). Tickers ohne Daten ausschließen.
+        mc_col = pd.to_numeric(view["_mktcap_raw"], errors="coerce")
+        view = view[mc_col.notna() & (mc_col >= min_mktcap * 1e9)]
+    if max_pe > 0:
+        # Max. KGV (trailing). Nur positive Werte <= max_pe; Tickers ohne KGV behalten.
+        pe_col = pd.to_numeric(view["_pe_trail_raw"], errors="coerce")
+        view = view[pe_col.isna() | ((pe_col > 0) & (pe_col <= max_pe))]
+    if max_pe_fwd > 0:
+        # Max. Forward-KGV. Nur positive Werte <= max_pe_fwd; Tickers ohne KGV behalten.
+        pef_col = pd.to_numeric(view["_pe_fwd_raw"], errors="coerce")
+        view = view[pef_col.isna() | ((pef_col > 0) & (pef_col <= max_pe_fwd))]
 
     # ── KPI-Kacheln ───────────────────────────────────────────────────────
     n_a    = len(df[df["_grade"] == "A"])
@@ -733,11 +758,12 @@ else:
 
         show_cols = [c for c in [
             "Rang", "Ticker", "Name", "Sektor",
+            "Kurs", "Market Cap",
             "⭐ Value Score", "Klasse", "IV %", "IV Klasse",
             "PEG", "KGV aktuell", "KGV erwartet",
             "EPS Wachstum %", "Umsatz-Wachs. %",
             "ROE %", "Op. Marge %", "Schulden/EK",
-            "FCF", "Analyst", "Kursziel ∅", "Upside %", "Kurs"
+            "FCF", "Analyst", "Kursziel ∅", "Upside %"
         ] if c in view.columns]
 
         # Max-Wert-Highlighting
@@ -801,6 +827,8 @@ else:
                 "Kursziel ∅":      st.column_config.NumberColumn("Kursziel ∅", format="$%.2f"),
                 "Upside %":        st.column_config.NumberColumn("Upside %", format="%.1f%%"),
                 "Kurs":            st.column_config.NumberColumn("Kurs", format="$%.2f"),
+                "Market Cap":      st.column_config.NumberColumn("Market Cap", format="$%.1fB",
+                                       help="Marktkapitalisierung in Mrd. USD"),
             },
         )
 
