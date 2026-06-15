@@ -155,8 +155,28 @@ def fetch_extended_hours_price(ticker: str) -> dict:
 
 # ── Kurshistorie ─────────────────────────────────────────────────────────────
 
+def _period_to_days(period: str) -> int:
+    """Konvertiert yfinance-Period-String in Anzahl Tage."""
+    mapping = {
+        "1d": 1, "5d": 5, "1mo": 30, "3mo": 90,
+        "6mo": 180, "1y": 365, "2y": 730, "5y": 1825,
+        "10y": 3650, "ytd": 365, "max": 3650,
+    }
+    return mapping.get(period, 365)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_price_history_inner(ticker: str, period: str = "1y") -> pd.DataFrame:
+    if _massive_enabled():
+        try:
+            from data.massive_fetcher import get_price_history as _mget
+            df = _mget(ticker, days=_period_to_days(period))
+            if not df.empty:
+                df.columns = [c.capitalize() for c in df.columns]
+                df.index = pd.to_datetime(df.index)
+                return df
+        except Exception:
+            pass
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period)
@@ -185,9 +205,21 @@ def _fetch_stock_info_inner(ticker: str) -> dict:
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        hist = stock.history(period="2d")
-        current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
-        prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else info.get("previousClose")
+        # Aktuellen Kurs bevorzugt über Polygon (schneller, zuverlässiger)
+        if _massive_enabled():
+            try:
+                from data.massive_fetcher import get_current_price as _mprice
+                current_price = _mprice(ticker)
+                hist = stock.history(period="2d")
+                prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else info.get("previousClose")
+            except Exception:
+                hist = stock.history(period="2d")
+                current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
+                prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else info.get("previousClose")
+        else:
+            hist = stock.history(period="2d")
+            current_price = float(hist["Close"].iloc[-1]) if not hist.empty else None
+            prev_close = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else info.get("previousClose")
         result = {
             "ticker": ticker,
             "name": info.get("longName", info.get("shortName", ticker)),
