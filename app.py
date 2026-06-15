@@ -279,6 +279,24 @@ with st.expander("⚙️ System", expanded=False):
                              help="Lädt Kurse, Fundamentals & Value-Daten für alle 225 Ticker in den Cache"):
                     _pf.start_prefetch()
                     st.rerun()
+
+        # ── Speicher-Diagnose: aktiver Cache-Pfad (zeigt ob Volume greift) ─────
+        try:
+            from data import _persistent_cache as _pc
+            import os as _os
+            _cdir = _pc._CACHE_DIR
+            _persistent = _cdir.startswith("/data")
+            _n_files = len([f for f in _os.listdir(_cdir) if f.endswith(".pkl")]) if _os.path.isdir(_cdir) else 0
+            _diag_color = "#22c55e" if _persistent else "#f59e0b"
+            _diag_label = "persistent (Volume aktiv)" if _persistent else "flüchtig (kein Volume!)"
+            st.markdown(
+                f"<div style='font-size:0.72rem;color:#666;margin:4px 0'>"
+                f"💾 Cache: <span style='color:{_diag_color}'>{_diag_label}</span> · "
+                f"<code>{_cdir}</code> · {_n_files} Dateien</div>",
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass
         st.divider()
 
     # ── App-Steuerung ─────────────────────────────────────────────────────────
