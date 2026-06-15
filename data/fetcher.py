@@ -23,7 +23,7 @@ from data import _persistent_cache as _dc
 
 # ── Datenquelle ───────────────────────────────────────────────────────────────
 # Auf True setzen sobald MASSIVE_API_KEY konfiguriert ist
-USE_MASSIVE: bool = False
+USE_MASSIVE: bool = True
 
 def _massive_enabled() -> bool:
     """True wenn Massive.com als Datenquelle aktiv und API-Key vorhanden."""
