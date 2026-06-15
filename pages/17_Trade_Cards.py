@@ -626,16 +626,18 @@ def _build_card_text(
 
 def _optionstrat_url_manual(
     ticker: str, strike: float, expiry, is_call: bool,
-    is_strangle: bool = False, call_strike: float = 0.0,
+    is_strangle: bool = False, call_strike: float = 0.0, call_expiry=None,
 ) -> str:
     try:
         d = pd.to_datetime(expiry)
         exp_str = d.strftime("%y%m%d")
         t = ticker.upper()
         if is_strangle and call_strike > 0:
+            _ce = pd.to_datetime(call_expiry) if call_expiry else d
+            call_exp_str = _ce.strftime("%y%m%d")
             return (
                 f"https://optionstrat.com/build/short-strangle/{t}"
-                f"/-.{t}{exp_str}P{strike:.0f},-.{t}{exp_str}C{call_strike:.0f}"
+                f"/-.{t}{exp_str}P{strike:.0f},-.{t}{call_exp_str}C{call_strike:.0f}"
             )
         if is_call:
             return (
@@ -674,11 +676,12 @@ def _gen_trade_id(ticker: str, strategy: str) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
-                        call_strike: float = 0.0) -> dict | None:
+                        call_strike: float = 0.0, call_expiry=None) -> dict | None:
     """
     Holt Prämie (Mid, sonst Last), Delta und IV für den exakten Kontrakt von Polygon.
-    Wählt das nächstliegende verfügbare Verfallsdatum und den nächstliegenden Strike.
-    Für Short Strangle: Put-Leg @ strike + Call-Leg @ call_strike (Prämien summiert).
+    Wählt je Leg das nächstliegende verfügbare Verfallsdatum + Strike.
+    Short Strangle: Put-Leg @ strike/expiry + Call-Leg @ call_strike/call_expiry.
+      → Gesamtprämie + Gesamt-Delta (Summe beider Legs), IV = Mittel beider Legs.
     Gibt None zurück wenn keine Daten verfügbar.
     """
     try:
@@ -686,11 +689,6 @@ def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
         if not _massive_enabled():
             return None
         from data.massive_fetcher import get_available_expirations, get_options_chain
-    except Exception:
-        return None
-
-    try:
-        target = pd.to_datetime(expiry).date()
     except Exception:
         return None
 
@@ -702,10 +700,17 @@ def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
             pass
     if not exp_dates:
         return None
-    nearest = min(exp_dates, key=lambda d: abs((d - target).days))
-    exp_str = nearest.strftime("%Y-%m-%d")
 
-    def _leg(opt_type: str, k: float):
+    def _nearest_exp(target):
+        try:
+            td = pd.to_datetime(target).date()
+        except Exception:
+            return None
+        return min(exp_dates, key=lambda d: abs((d - td).days)).strftime("%Y-%m-%d")
+
+    def _leg(exp_str: str, opt_type: str, k: float):
+        if not exp_str:
+            return None
         df = get_options_chain(ticker, exp_str, opt_type)
         if df is None or df.empty:
             return None
@@ -717,29 +722,36 @@ def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
             "delta":   round(float(row.get("delta") or 0), 2),
             "iv_pct":  round(float(row.get("impliedVolatility") or 0) * 100),
             "strike":  float(row["strike"]),
+            "expiry":  exp_str,
         }
 
     is_call     = "Call" in strategy
     is_strangle = "Strangle" in strategy
 
     if is_strangle:
-        put_leg  = _leg("put", strike)
-        call_leg = _leg("call", call_strike) if call_strike > 0 else None
-        if not put_leg:
+        put_leg  = _leg(_nearest_exp(expiry), "put", strike)
+        call_leg = _leg(_nearest_exp(call_expiry or expiry), "call", call_strike) if call_strike > 0 else None
+        if not put_leg and not call_leg:
             return None
-        prem = put_leg["premium"] + (call_leg["premium"] if call_leg else 0)
+        total_prem  = (put_leg["premium"] if put_leg else 0) + (call_leg["premium"] if call_leg else 0)
+        total_delta = (put_leg["delta"]   if put_leg else 0) + (call_leg["delta"]   if call_leg else 0)
+        ivs = [l["iv_pct"] for l in (put_leg, call_leg) if l]
         return {
-            "premium": round(prem, 2), "delta": put_leg["delta"],
-            "iv_pct": put_leg["iv_pct"], "found_expiry": exp_str,
-            "found_strike": put_leg["strike"],
+            "premium": round(total_prem, 2),
+            "delta":   round(total_delta, 2),
+            "iv_pct":  round(sum(ivs) / len(ivs)) if ivs else 0,
+            "found_expiry":      put_leg["expiry"]  if put_leg  else "",
+            "found_call_expiry": call_leg["expiry"] if call_leg else "",
+            "found_strike":      put_leg["strike"]  if put_leg  else 0.0,
+            "found_call_strike": call_leg["strike"] if call_leg else 0.0,
         }
 
-    leg = _leg("call" if is_call else "put", strike)
+    leg = _leg(_nearest_exp(expiry), "call" if is_call else "put", strike)
     if not leg:
         return None
     return {
         "premium": leg["premium"], "delta": leg["delta"], "iv_pct": leg["iv_pct"],
-        "found_expiry": exp_str, "found_strike": leg["strike"],
+        "found_expiry": leg["expiry"], "found_strike": leg["strike"],
     }
 
 
@@ -1057,18 +1069,40 @@ with tab1:
                 "Strategie", ["Short PUT", "Covered Call", "Short Strangle"],
                 key=f"m_{cls}_strategy",
             )
-            strike_v  = st.number_input(
-                "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
-            )
-            expiry_v  = st.date_input(
-                "Verfall", value=date.today() + timedelta(days=30),
-                min_value=date.today(), key=f"m_{cls}_expiry",
-            )
+            is_strangle_v = "Strangle" in strat_v
             call_strike_v = 0.0
-            if "Strangle" in strat_v:
-                call_strike_v = st.number_input(
-                    "CALL Strike ($)", min_value=0.0, step=1.0, format="%.2f",
-                    key=f"m_{cls}_call_strike",
+            call_expiry_v = None
+            if is_strangle_v:
+                # Short Strangle: PUT + CALL je mit eigenem Strike UND Verfall (4 Felder)
+                _sk1, _sk2 = st.columns(2)
+                with _sk1:
+                    strike_v = st.number_input(
+                        "PUT Strike ($)", min_value=0.0, step=1.0, format="%.2f",
+                        key=f"m_{cls}_strike",
+                    )
+                with _sk2:
+                    call_strike_v = st.number_input(
+                        "CALL Strike ($)", min_value=0.0, step=1.0, format="%.2f",
+                        key=f"m_{cls}_call_strike",
+                    )
+                _ex1, _ex2 = st.columns(2)
+                with _ex1:
+                    expiry_v = st.date_input(
+                        "PUT Verfall", value=date.today() + timedelta(days=30),
+                        min_value=date.today(), key=f"m_{cls}_expiry",
+                    )
+                with _ex2:
+                    call_expiry_v = st.date_input(
+                        "CALL Verfall", value=date.today() + timedelta(days=30),
+                        min_value=date.today(), key=f"m_{cls}_call_expiry",
+                    )
+            else:
+                strike_v = st.number_input(
+                    "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
+                )
+                expiry_v = st.date_input(
+                    "Verfall", value=date.today() + timedelta(days=30),
+                    min_value=date.today(), key=f"m_{cls}_expiry",
                 )
 
             # ── Auto-Fill aus Massive/Polygon ─────────────────────────────────
@@ -1077,14 +1111,21 @@ with tab1:
                          help="Holt Prämie, Delta & IV automatisch von Massive/Polygon"):
                 if ticker_v and strike_v > 0:
                     with st.spinner("⏳ Hole Optionsdaten…"):
-                        q = _fetch_option_quote(ticker_v, expiry_v, strike_v, strat_v, call_strike_v)
+                        q = _fetch_option_quote(ticker_v, expiry_v, strike_v, strat_v,
+                                                call_strike_v, call_expiry_v)
                     if q:
                         st.session_state[f"m_{cls}_premium"] = float(q["premium"])
                         st.session_state[f"m_{cls}_delta"]   = float(q["delta"])
                         st.session_state[f"m_{cls}_iv"]      = float(q["iv_pct"])
-                        st.session_state[f"m_{cls}_fill_msg"] = (
-                            f"✓ Strike ${q['found_strike']:.0f} · Verfall {q['found_expiry']}"
-                        )
+                        if is_strangle_v:
+                            st.session_state[f"m_{cls}_fill_msg"] = (
+                                f"✓ PUT ${q['found_strike']:.0f} / CALL ${q.get('found_call_strike', 0):.0f} "
+                                f"· Σ-Prämie {q['premium']:.2f}$ · Σ-Delta {q['delta']:.2f}"
+                            )
+                        else:
+                            st.session_state[f"m_{cls}_fill_msg"] = (
+                                f"✓ Strike ${q['found_strike']:.0f} · Verfall {q['found_expiry']}"
+                            )
                     else:
                         st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Keine Optionsdaten gefunden"
                     st.rerun()
@@ -1096,13 +1137,15 @@ with tab1:
                 _msg_color = "#22c55e" if _fill_msg.startswith("✓") else "#f59e0b"
                 st.html(f"<div style='font-size:0.7rem;color:{_msg_color};margin:-4px 0 4px'>{_fill_msg}</div>")
 
+            _prem_label  = "Gesamtprämie (USD)" if is_strangle_v else "Prämie (USD)"
+            _delta_label = "Gesamt-Delta" if is_strangle_v else "Delta"
             premium_v = st.number_input(
-                "Prämie (USD)", min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
+                _prem_label, min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
             )
             dc, dv = st.columns(2)
             with dc:
                 delta_v = st.number_input(
-                    "Delta", min_value=-1.0, max_value=1.0,
+                    _delta_label, min_value=-2.0, max_value=2.0,
                     step=0.01, format="%.2f", key=f"m_{cls}_delta",
                 )
             with dv:
@@ -1113,6 +1156,7 @@ with tab1:
             m_inputs[cls] = {
                 "ticker": ticker_v, "strategy": strat_v, "strike": strike_v,
                 "expiry": expiry_v, "call_strike": call_strike_v,
+                "call_expiry": call_expiry_v,
                 "premium": premium_v, "delta": delta_v, "iv_pct": iv_v,
             }
 
@@ -1154,6 +1198,7 @@ with tab1:
                 is_call     = "Call" in strategy
                 is_strangle = "Strangle" in strategy
                 call_strike = inp.get("call_strike", 0.0)
+                call_expiry = inp.get("call_expiry") or expiry
                 price_now   = tdata.get("price", 0.0)
                 company     = tdata.get("company", ticker)
 
@@ -1168,7 +1213,7 @@ with tab1:
                     dte            = 0
 
                 optionstrat_url = _optionstrat_url_manual(
-                    ticker, strike, expiry, is_call, is_strangle, call_strike
+                    ticker, strike, expiry, is_call, is_strangle, call_strike, call_expiry
                 )
                 trade_id     = _gen_trade_id(ticker, strategy)
                 tracking_url = _build_tracking_url(
@@ -1181,8 +1226,8 @@ with tab1:
                     "trade_id": trade_id, "class": cls, "ticker": ticker,
                     "company": company, "strategy": strategy,
                     "strike": strike, "call_strike": call_strike,
-                    "expiry": str(expiry), "premium": premium,
-                    "delta": delta, "iv_pct": iv_pct,
+                    "expiry": str(expiry), "call_expiry": str(call_expiry),
+                    "premium": premium, "delta": delta, "iv_pct": iv_pct,
                     "price_at_entry": price_now,
                     "created_at": datetime.now().isoformat(),
                     "post_ts": post_ts,
