@@ -120,19 +120,18 @@ with h1:
     chg_color = "#22c55e" if (chg_pct or 0) >= 0 else "#ef4444"
     chg_str = f'<span style="color:{chg_color};font-size:1.2rem"> {chg_pct:+.2f}%</span>' if chg_pct else ""
 
-    st.markdown(f"""
-    <div class="sc-header">
-        <div>
-            <div class="sc-page-title">
-                {SECTOR_ICONS.get(sector,'')} {company_name}
-                <span style='color:#d4a843;margin-left:8px'>({selected_ticker})</span>
-                {f'<span style="color:#e0e0e0;font-size:1.4rem;margin-left:12px">${current_price:.2f}</span>' if current_price else ''}
-                {chg_str}
-            </div>
-            <div class="sc-page-subtitle">{sector.split('.',1)[-1].strip() if '.' in sector else sector}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    price_html = (f'<span style="color:#e0e0e0;font-size:1.4rem;margin-left:12px">'
+                  f'${current_price:.2f}</span>') if current_price else ''
+    subtitle = sector.split('.', 1)[-1].strip() if '.' in sector else sector
+    st.markdown(
+        f'<div class="sc-header"><div>'
+        f'<div class="sc-page-title">{SECTOR_ICONS.get(sector, "")} {company_name}'
+        f'<span style="color:#d4a843;margin-left:8px">({selected_ticker})</span>'
+        f'{price_html}{chg_str}</div>'
+        f'<div class="sc-page-subtitle">{subtitle}</div>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
 
 with h2:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -700,17 +699,18 @@ with tab_news:
                       else str(earnings_date)[:10])
             dte_earn = calculate_dte(str(earnings_date)[:10])
             warn_color = "#ef4444" if dte_earn <= 14 else "#f59e0b" if dte_earn <= 30 else "#22c55e"
-            st.markdown(f"""
-            <div style='display:inline-block;background:#111;
-                        border:2px solid {warn_color};border-radius:10px;padding:16px 24px'>
-                <span style='font-family:RedRose,sans-serif;font-size:1.4rem;
-                              font-weight:700;color:{warn_color}'>📅 {ed_str}</span>
-                <span style='color:#666;margin-left:16px;font-family:RedRose,sans-serif'>
-                    in {dte_earn} Tagen
-                </span>
-                {"<br><span style='color:#ef4444;font-size:0.82rem;font-family:RedRose,sans-serif'>⚠️ Earnings innerhalb des DTE — Vorsicht beim Stillhalten!</span>" if dte_earn <= 21 else ""}
-            </div>
-            """, unsafe_allow_html=True)
+            earn_warn = ("<br><span style='color:#ef4444;font-size:0.82rem;font-family:RedRose,sans-serif'>"
+                         "⚠️ Earnings innerhalb des DTE — Vorsicht beim Stillhalten!</span>") if dte_earn <= 21 else ""
+            st.markdown(
+                f"<div style='display:inline-block;background:#111;"
+                f"border:2px solid {warn_color};border-radius:10px;padding:16px 24px'>"
+                f"<span style='font-family:RedRose,sans-serif;font-size:1.4rem;"
+                f"font-weight:700;color:{warn_color}'>📅 {ed_str}</span>"
+                f"<span style='color:#666;margin-left:16px;font-family:RedRose,sans-serif'>"
+                f"in {dte_earn} Tagen</span>"
+                f"{earn_warn}</div>",
+                unsafe_allow_html=True,
+            )
         except Exception:
             st.info(f"Earnings-Datum: {earnings_date}")
     else:
