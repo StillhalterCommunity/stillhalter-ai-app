@@ -919,107 +919,125 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
     return result
 
 
-def _build_tracking_url(
-    app_url: str, trade_id: str, ticker: str, strategy: str,
-    strike: float, expiry, premium: float, delta: float,
-    iv_pct: float, cls: str, company: str, price_now: float,
-) -> str:
-    """Baut Tracking-URL mit allen Trade-Parametern — funktioniert ohne JSON-Lookup."""
-    params = {
-        "trade_id": trade_id,
-        "t": ticker,
-        "s": f"{strike:.2f}",
-        "e": str(expiry),
-        "strat": strategy,
-        "p": f"{premium:.2f}",
-        "d": f"{delta:.2f}",
-        "iv": f"{iv_pct:.0f}",
-        "cls": cls,
-        "co": company[:40],
-        "px": f"{price_now:.2f}",
-    }
-    return f"{app_url}/20_Trade_Monitor?{urlencode(params)}"
+@st.cache_data(ttl=1800, show_spinner=False)
+def _tf_color_dots(ticker: str) -> dict:
+    """Farbpunkte (🟢/🟡/🔴) je Indikator und Zeitebene (4h, 1d) via Multi-Timeframe.
+    Trend: bull🟢/bear🔴 · MACD: bull🟢/bear🔴 · Stochastik: überverkauft🟢/überkauft🔴/neutral🟡."""
+    out = {"trend": {"4h": "⚪", "1d": "⚪"},
+           "macd":  {"4h": "⚪", "1d": "⚪"},
+           "stoch": {"4h": "⚪", "1d": "⚪"}}
+    try:
+        from analysis.multi_timeframe import analyze_multi_timeframe
+        m = analyze_multi_timeframe(ticker)
+        for key, sig in (("4h", m.tf_4h), ("1d", m.tf_1d)):
+            if not sig:
+                continue
+            out["trend"][key] = "🟢" if getattr(sig, "ema_bullish", False) else "🔴"
+            out["macd"][key]  = "🟢" if getattr(sig, "macd_bullish", False) else "🔴"
+            _os = getattr(sig, "stoch_oversold", False) or getattr(sig, "stoch_slow_oversold", False)
+            _ob = getattr(sig, "stoch_overbought", False) or getattr(sig, "stoch_slow_overbought", False)
+            out["stoch"][key] = "🟢" if _os else ("🔴" if _ob else "🟡")
+    except Exception:
+        pass
+    return out
+
+
+def _build_tracking_url(app_url: str, trade_id: str) -> str:
+    """Kurze Tracking-URL — nur die Trade-ID. Der Trade Monitor lädt den
+    vollständigen Trade aus dem persistenten Speicher (Volume) und hebt ihn hervor."""
+    from urllib.parse import quote
+    return f"{app_url}/20_Trade_Monitor?trade_id={quote(trade_id)}"
 
 
 def _build_whatsapp_short_manual(
     class_label: str, ticker: str, company: str, strategy: str,
-    strike: float, german_exp: str, dte: int,
+    strike: float, german_exp: str, expiry_short: str, dte: int,
     premium: float, delta: float, iv_pct: float, price_now: float,
     trend_simple: str, macd_desc: str, stoch_desc: str,
     optionstrat_url: str, tracking_url: str, post_ts: str,
     support_near=None, ath_price_dist=None,
-    company_sentence: str = "", news_line: str = "", funda_line: str = "",
+    company_sentence: str = "", news_line: str = "",
+    pe_trailing=None, pe_forward=None, growth_pct=None,
+    tf_colors: dict | None = None,
 ) -> str:
     is_call = "Call" in strategy
     otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
     praemie_usd = round(premium * 100)
     assign_pct = round(abs(delta) * 100)
-    # Covered Call: Renditebasis = Aktienkurs (nicht Strike)
     capital_basis = price_now if is_call and price_now > 0 else (strike if strike > 0 else 1)
     rend_lz  = premium / capital_basis * 100
-    rend_ann = rend_lz * 365 / max(dte, 1)   # annualisiert
-    # Klasse + Volatilitäts-Einordnung (mit farbigem Punkt)
+    rend_ann = rend_lz * 365 / max(dte, 1)
     class_tag = {
         "A": "🟢 Konservativ (Low Volatility)",
         "B": "🟡 Ausgewogen (Mid Volatility)",
         "C": "🔴 Aggressiv (High Volatility)",
     }.get(class_label, f"Class {class_label}")
     _risk_label = "Ausübungsrisiko" if is_call else "Einbuchungsrisiko"
+    tf = tf_colors or {}
+
+    def _tfsuffix(key: str) -> str:
+        c = tf.get(key, {})
+        if not c:
+            return ""
+        return f"  ·  4h {c.get('4h', '⚪')} · 1T {c.get('1d', '⚪')}"
 
     L = []
-    # ── Zeile 1: Trading-Idee + komplette Optionsbezeichnung ──────────────────
+    # ── Kopf (fett) + Zeitstempel ─────────────────────────────────────────────
     L.append(
-        f"🔔 Trading-Idee: {ticker} · {strategy} · {german_exp} · "
-        f"Strike ${strike:.0f} · Prämie {_fmt_num(premium)} USD"
+        f"*🔔 Trading-Idee: {strategy}  {ticker}  {expiry_short}  "
+        f"{strike:g} USD @ {_fmt_num(premium)} USD*"
     )
+    L.append(f"Stillhalter AI | {post_ts}")
     L.append("")
-    # ── Unternehmen (nur Name) + Klasse/Volatilität ───────────────────────────
-    L.append(f"🏢 {company}")
+    # ── Firma ─────────────────────────────────────────────────────────────────
+    L.append("*Firma*")
+    if company_sentence:
+        L.append(f"🏢 {company} — {company_sentence}")
+    else:
+        L.append(f"🏢 {company}")
+    if news_line:
+        L.append(f"📰 News: {news_line}")
     L.append(class_tag)
     L.append("")
-    # ── Optionsparameter ──────────────────────────────────────────────────────
-    L.append("📋 Optionsparameter")
+    # ── Option ────────────────────────────────────────────────────────────────
+    L.append("*Option*")
     L.append(f"💵 Kurs: ${price_now:.2f}")
-    L.append(f"🎯 Strike: ${strike:.0f}")
+    L.append(f"🎯 Strike: ${strike:g}")
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
-    L.append(f"🌡️ Volatilität (IV): {iv_pct:.0f}%")
-    L.append("")
-    # ── Cashflow-Parameter ────────────────────────────────────────────────────
-    L.append("💰 Cashflow-Parameter")
     if is_call and price_now > 0:
         L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
     L.append(f"💵 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
     L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% auf {dte} Tage Laufzeit (~{_fmt_num(rend_ann, 1)}% p.a.)")
     L.append("")
-    # ── Absicherung (inkl. Ausübungs-/Einbuchungsrisiko) ──────────────────────
-    L.append("🛡️ Absicherung")
-    L.append(f"• OTM: {_fmt_num(otm_pct, 1)}% Out-of-the-Money")
+    # ── Absicherung ───────────────────────────────────────────────────────────
+    L.append("*Absicherung*")
+    L.append(f"🛡️ OTM: {_fmt_num(otm_pct, 1)}% Abstand Aktienkurs")
     if support_near and strike > 0:
         if support_near >= strike:
             _sd = (support_near - strike) / strike * 100
-            L.append(f"• Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% über Strike, Puffer)")
+            L.append(f"🛡️ Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% über Strike)")
         else:
             _sd = (strike - support_near) / strike * 100
-            L.append(f"• Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
+            L.append(f"🛡️ Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
     if ath_price_dist is not None:
-        L.append(f"• ATH: {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
-    L.append(f"• {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
+        L.append(f"🛡️ ATH: {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
+    L.append(f"🛡️ {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
     L.append("")
-    # ── Technik (alle drei Stillhalter-Indikatoren) ───────────────────────────
-    L.append("📊 Technik")
-    L.append(f"• Stillhalter Trend: {trend_simple or 'neutral'}")
-    L.append(f"• Stillhalter MACD: {macd_desc or 'neutral'}")
-    L.append(f"• Stillhalter Dual Stochastik: {stoch_desc or 'neutral'}")
+    # ── Fundamentalanalyse ────────────────────────────────────────────────────
+    L.append("*Fundamentalanalyse*")
+    if growth_pct is not None:
+        L.append(f"💎 Gewinnwachstum {_fmt_num(growth_pct, 1)}% (Jahr)")
+    if pe_trailing is not None:
+        L.append(f"💎 KGV {_fmt_num(pe_trailing, 1)}")
+    if pe_forward is not None:
+        L.append(f"💎 FW KGV {_fmt_num(pe_forward, 1)}")
     L.append("")
-    # ── Unternehmen unten: News · was die Firma macht · Fundamentalkennzahlen ──
-    if news_line:
-        L.append(f"📰 {news_line}")
-    if company_sentence:
-        L.append(f"🏢 {company_sentence}")
-    if funda_line:
-        L.append(f"💎 {funda_line}")
-    if news_line or company_sentence or funda_line:
-        L.append("")
+    # ── Technische Analyse (mit 4h/1T-Farbpunkten) ────────────────────────────
+    L.append("*Technische Analyse*")
+    L.append(f"📊 Stillhalter Trend: {trend_simple or 'neutral'}{_tfsuffix('trend')}")
+    L.append(f"📊 Stillhalter MACD: {macd_desc or 'neutral'}{_tfsuffix('macd')}")
+    L.append(f"📊 Stillhalter Dual Stochastik: {stoch_desc or 'neutral'}{_tfsuffix('stoch')}")
+    L.append("")
     # ── Links ─────────────────────────────────────────────────────────────────
     L.append("📡 Live-Tracking:")
     L.append(tracking_url)
@@ -1028,8 +1046,8 @@ def _build_whatsapp_short_manual(
     L.append(optionstrat_url)
     L.append("")
     # ── Disclaimer ────────────────────────────────────────────────────────────
-    L.append("⚠️ Keine Finanzberatung — reine Finanzbildung und meine eigenen Trades.")
-    L.append(f"— Stillhalter AI | {post_ts}")
+    L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
+             "Handeln auf eigenes Risiko!")
     return "\n".join(L)
 
 
@@ -1258,11 +1276,14 @@ with tab1:
                     ticker, strike, expiry, is_call, is_strangle, call_strike, call_expiry
                 )
                 trade_id     = _gen_trade_id(ticker, strategy)
-                tracking_url = _build_tracking_url(
-                    _eff_app_url, trade_id, ticker, strategy, strike,
-                    expiry, premium, delta, iv_pct, cls, company, price_now,
-                )
-                post_ts      = datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
+                tracking_url = _build_tracking_url(_eff_app_url, trade_id)
+                # Zeitstempel in Berliner Zeit
+                try:
+                    import pytz as _pytz
+                    _now_berlin = datetime.now(_pytz.timezone("Europe/Berlin"))
+                except Exception:
+                    _now_berlin = datetime.now()
+                post_ts      = _now_berlin.strftime("%d.%m.%Y · %H:%M Uhr")
 
                 _save_manual_trade({
                     "trade_id": trade_id, "class": cls, "ticker": ticker,
@@ -1303,31 +1324,27 @@ with tab1:
                 else:
                     _news_line = ""
 
-                # Fundamental-Kennzahlen-Zeile: Gewinnwachstum + KGV
+                # Fundamental-Kennzahlen einzeln: Gewinnwachstum, KGV, FW KGV
                 _fund = tdata.get("fund", {}) or {}
-                _funda_parts = []
-                _eg = _fund.get("earnings_growth_yoy")
-                try:
-                    if _eg is not None:
-                        _funda_parts.append(f"Gewinnwachstum {_fmt_num(float(_eg) * 100, 1)}%")
-                except Exception:
-                    pass
-                _pe = _fund.get("pe_trailing")
-                _pef = _fund.get("pe_forward")
-                try:
-                    if _pe is not None:
-                        _funda_parts.append(f"KGV {_fmt_num(float(_pe), 1)}")
-                    elif _pef is not None:
-                        _funda_parts.append(f"KGV (fwd) {_fmt_num(float(_pef), 1)}")
-                except Exception:
-                    pass
-                _funda_line = " · ".join(_funda_parts)
+                def _ffloat(v):
+                    try:
+                        return float(v) if v is not None else None
+                    except Exception:
+                        return None
+                _eg = _ffloat(_fund.get("earnings_growth_yoy"))
+                _growth_pct = _eg * 100 if _eg is not None else None
+                _pe_t = _ffloat(_fund.get("pe_trailing"))
+                _pe_f = _ffloat(_fund.get("pe_forward"))
+
+                # Multi-Timeframe-Farbpunkte (4h / 1T) für die Technik
+                _tf_colors = _tf_color_dots(ticker)
 
                 # WhatsApp Short
                 wa_post = _build_whatsapp_short_manual(
                     class_label=cls, ticker=ticker, company=company,
                     strategy=strategy, strike=strike, german_exp=german_exp,
-                    dte=dte, premium=premium, delta=delta, iv_pct=iv_pct,
+                    expiry_short=expiry_display, dte=dte,
+                    premium=premium, delta=delta, iv_pct=iv_pct,
                     price_now=price_now,
                     trend_simple=tdata.get("trend_simple", ""),
                     macd_desc=tdata.get("macd_desc", ""),
@@ -1339,7 +1356,8 @@ with tab1:
                     ath_price_dist=_ath_price_dist,
                     company_sentence=_company_sentence,
                     news_line=_news_line,
-                    funda_line=_funda_line,
+                    pe_trailing=_pe_t, pe_forward=_pe_f, growth_pct=_growth_pct,
+                    tf_colors=_tf_colors,
                 )
 
                 # Circle Detailpost
