@@ -630,6 +630,11 @@ def _build_card_text(
 # MANUELLER TRADE-EINTRAG — Hilfsfunktionen
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _occ_strike(strike: float) -> str:
+    """OCC-Strike-Kodierung: Strike × 1000, 8-stellig (285 → '00285000')."""
+    return f"{int(round(float(strike) * 1000)):08d}"
+
+
 def _optionstrat_url_manual(
     ticker: str, strike: float, expiry, is_call: bool,
     is_strangle: bool = False, call_strike: float = 0.0, call_expiry=None,
@@ -643,14 +648,14 @@ def _optionstrat_url_manual(
             call_exp_str = _ce.strftime("%y%m%d")
             return (
                 f"https://optionstrat.com/build/short-strangle/{t}"
-                f"/-.{t}{exp_str}P{strike:.0f},-.{t}{call_exp_str}C{call_strike:.0f}"
+                f"/-.{t}{exp_str}P{_occ_strike(strike)},-.{t}{call_exp_str}C{_occ_strike(call_strike)}"
             )
         if is_call:
             return (
                 f"https://optionstrat.com/build/covered-call/{t}"
-                f"/+100{t},-.{t}{exp_str}C{strike:.0f}"
+                f"/+100{t},-.{t}{exp_str}C{_occ_strike(strike)}"
             )
-        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{strike:.0f}"
+        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{_occ_strike(strike)}"
     except Exception:
         return ""
 

@@ -24,6 +24,11 @@ from data.watchlist import get_sector_for_ticker, SECTOR_ICONS
 
 # ── OptionStrat Link Builder ──────────────────────────────────────────────────
 
+def _occ_strike(strike: float) -> str:
+    """OCC-Strike-Kodierung: Strike × 1000, 8-stellig (285 → '00285000')."""
+    return f"{int(round(float(strike) * 1000)):08d}"
+
+
 def _optionstrat_url(
     ticker: str,
     strike: float,
@@ -32,21 +37,21 @@ def _optionstrat_url(
     strategy_name: str = "",
 ) -> str:
     """
-    Generiert den direkten OptionStrat-Link für eine Option.
-    Format: https://optionstrat.com/build/cash-secured-put/AAPL/-.AAPL260626P285
+    Generiert den direkten OptionStrat-Link für eine Option (OCC-Format).
+    Beispiel: https://optionstrat.com/build/cash-secured-put/AAPL/-.AAPL260626P00285000
     """
     try:
         d = pd.to_datetime(expiry)
-        exp_str  = d.strftime("%y%m%d")           # YYMMDD (OptionStrat-Format)
+        exp_str  = d.strftime("%y%m%d")           # YYMMDD (OptionStrat/OCC-Format)
         t = ticker.upper()
         if is_call:
             return (
                 f"https://optionstrat.com/build/covered-call/{t}"
-                f"/+100{t},-.{t}{exp_str}C{strike:.0f}"
+                f"/+100{t},-.{t}{exp_str}C{_occ_strike(strike)}"
             )
         return (
             f"https://optionstrat.com/build/cash-secured-put/{t}"
-            f"/-.{t}{exp_str}P{strike:.0f}"
+            f"/-.{t}{exp_str}P{_occ_strike(strike)}"
         )
     except Exception:
         return ""
@@ -58,14 +63,14 @@ def _optionstrat_url_strangle(
     call_strike: float,
     expiry,
 ) -> str:
-    """OptionStrat-Link für Short Strangle (beide Legs)."""
+    """OptionStrat-Link für Short Strangle (beide Legs, OCC-Format)."""
     try:
         d       = pd.to_datetime(expiry)
         exp_str = d.strftime("%y%m%d")
         t       = ticker.upper()
         return (
             f"https://optionstrat.com/build/short-strangle/{t}"
-            f"/-.{t}{exp_str}P{put_strike:.0f},-.{t}{exp_str}C{call_strike:.0f}"
+            f"/-.{t}{exp_str}P{_occ_strike(put_strike)},-.{t}{exp_str}C{_occ_strike(call_strike)}"
         )
     except Exception:
         return ""

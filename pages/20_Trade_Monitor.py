@@ -150,8 +150,14 @@ def _dte_from_expiry(expiry_str: str) -> int:
         return 0
 
 
+def _occ_strike(strike: float) -> str:
+    """OCC-Strike-Kodierung: Strike × 1000, 8-stellig mit führenden Nullen.
+    285 → '00285000' (OptionStrat/OCC-Standardformat)."""
+    return f"{int(round(float(strike) * 1000)):08d}"
+
+
 def _build_optionstrat_url(trade: dict) -> str:
-    """Baut die OptionStrat-URL aus den Trade-Feldern (gleiches Format wie Trade Cards).
+    """Baut die OptionStrat-URL aus den Trade-Feldern (OCC-Format).
     Nötig, weil über den Tracking-Link reinkommende Trades keine gespeicherte URL haben."""
     try:
         t = (trade.get("ticker") or "").upper()
@@ -165,11 +171,11 @@ def _build_optionstrat_url(trade: dict) -> str:
             ce = trade.get("call_expiry") or trade.get("expiry")
             call_exp_str = pd.to_datetime(ce).strftime("%y%m%d")
             return (f"https://optionstrat.com/build/short-strangle/{t}"
-                    f"/-.{t}{exp_str}P{strike:.0f},-.{t}{call_exp_str}C{call_strike:.0f}")
+                    f"/-.{t}{exp_str}P{_occ_strike(strike)},-.{t}{call_exp_str}C{_occ_strike(call_strike)}")
         if "call" in strat:   # Covered Call
             return (f"https://optionstrat.com/build/covered-call/{t}"
-                    f"/+100{t},-.{t}{exp_str}C{strike:.0f}")
-        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{strike:.0f}"
+                    f"/+100{t},-.{t}{exp_str}C{_occ_strike(strike)}")
+        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{_occ_strike(strike)}"
     except Exception:
         return ""
 
