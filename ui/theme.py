@@ -404,11 +404,22 @@ def _css_green() -> str:
         font-weight: 700 !important;
         box-shadow: 0 2px 8px rgba(27,67,50,.25) !important;
     }}
+    /* Text-Elemente IM Primary-Button zwingend weiß (Streamlit rendert das Label
+       in einem inneren <p>/<div>, das sonst die dunkle Standardfarbe erbt) */
+    button[data-testid="baseButton-primary"] *,
+    [data-testid="baseButton-primary"] *,
+    .stButton button[kind="primary"] * {{
+        color: #ffffff !important;
+    }}
     button[data-testid="baseButton-primary"]:hover,
     .stButton button[kind="primary"]:hover {{
         background: {g["900"]} !important;   /* #0d2318 — noch dunkler */
         color: #ffffff !important;
         box-shadow: 0 4px 16px rgba(27,67,50,.35) !important;
+    }}
+    button[data-testid="baseButton-primary"]:hover *,
+    .stButton button[kind="primary"]:hover * {{
+        color: #ffffff !important;
     }}
 
     /* ── Eingabefelder ─────────────────────────────────────────────────── */

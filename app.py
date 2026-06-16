@@ -455,14 +455,19 @@ elif _bg["finished_at"] and _bg["results"] is not None:
 
 # ── Karten-Helper ─────────────────────────────────────────────────────────────
 def _card(num: str, title: str, desc: str, color: str, page: str, icon: str, label: str):
+    # Theme-abhängige Farben: hell im Grün-Theme, dunkel im Dark-Theme
+    if _is_green:
+        _bg, _bd, _desc_col, _title_col = "#f6fdfb", "#b7e4c7", "#475569", "#1b4332"
+    else:
+        _bg, _bd, _desc_col, _title_col = "#111", "#1e1e1e", "#666", color
     st.html(f"""
-    <div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid {color};
+    <div style='background:{_bg};border:1px solid {_bd};border-top:3px solid {color};
                 border-bottom:none;border-radius:14px 14px 0 0;padding:20px 22px 14px'>
         <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.1rem;
-                    color:{color};letter-spacing:0.05em;margin-bottom:6px'>
+                    color:{_title_col};letter-spacing:0.05em;margin-bottom:6px'>
             {icon} {num} · {title}
         </div>
-        <div style='font-family:RedRose,sans-serif;font-size:0.83rem;color:#666;line-height:1.65'>
+        <div style='font-family:RedRose,sans-serif;font-size:0.83rem;color:{_desc_col};line-height:1.65'>
             {desc}
         </div>
     </div>
