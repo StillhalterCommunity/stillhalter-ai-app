@@ -24,6 +24,15 @@ st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 # (aus den Trade Cards) müssen ohne Login funktionieren — auch im Wartungsmodus.
 render_sidebar(allow_public=True)
 
+# ── Theme-Farben (hell im Grün-Theme, dunkel im Dark-Theme) ──────────────────────
+_IS_GREEN = st.session_state.get("app_theme", "dark") == "green"
+if _IS_GREEN:
+    CARD_BG, CARD_BG2, CARD_BG3, CARD_BD = "#f6fdfb", "#eef8f5", "#eef8f5", "#b7e4c7"
+    TXT_MAIN, TXT_SUB, TXT_MUTED = "#0a1628", "#475569", "#94a3b8"
+else:
+    CARD_BG, CARD_BG2, CARD_BG3, CARD_BD = "#111", "#0e0e0e", "#0a120a", "#1e1e1e"
+    TXT_MAIN, TXT_SUB, TXT_MUTED = "#f0f0f0", "#888", "#555"
+
 # ── Konstanten ─────────────────────────────────────────────────────────────────
 # Trades persistent ablegen: auf dem Volume (STILLHALTER_DATA_DIR), damit sie
 # Neustarts überleben und so lange verfolgbar bleiben, wie sie laufen.
@@ -83,17 +92,18 @@ def _fetch_current_price(ticker: str) -> float:
     try:
         from data.fetcher import fetch_stock_info
         p = fetch_stock_info(ticker).get("price")
-        if p:
+        if p and not math.isnan(float(p)):
             return float(p)
     except Exception:
         pass
     try:
         import yfinance as yf
         info = yf.Ticker(ticker).info
-        return float(
+        v = float(
             info.get("currentPrice") or info.get("regularMarketPrice")
             or info.get("previousClose") or 0
         )
+        return 0.0 if math.isnan(v) else v
     except Exception:
         return 0.0
 
@@ -156,19 +166,34 @@ def _occ_strike(strike: float) -> str:
     return f"{int(round(float(strike) * 1000)):08d}"
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _nearest_expiry(ticker: str, expiry_str: str) -> str:
+    """Rastet ein (evtl. manuell gewähltes) Datum auf den nächsten ECHTEN
+    Optionsverfall ein. Verhindert tote OptionStrat-Links (Kontrakt existiert nicht)."""
+    try:
+        from data.massive_fetcher import get_available_expirations
+        target = pd.to_datetime(expiry_str).date()
+        exps = [pd.to_datetime(e).date() for e in get_available_expirations(ticker)]
+        if not exps:
+            return expiry_str
+        return min(exps, key=lambda d: abs((d - target).days)).strftime("%Y-%m-%d")
+    except Exception:
+        return expiry_str
+
+
 def _build_optionstrat_url(trade: dict) -> str:
     """Baut die OptionStrat-URL aus den Trade-Feldern (OCC-Format).
-    Nötig, weil über den Tracking-Link reinkommende Trades keine gespeicherte URL haben."""
+    Verfälle werden auf den nächsten echten Optionsverfall eingerastet."""
     try:
         t = (trade.get("ticker") or "").upper()
         strike = float(trade.get("strike") or 0)
         if not t or strike <= 0:
             return ""
-        exp_str = pd.to_datetime(trade.get("expiry")).strftime("%y%m%d")
+        exp_str = pd.to_datetime(_nearest_expiry(t, trade.get("expiry"))).strftime("%y%m%d")
         strat = (trade.get("strategy") or "").lower()
         call_strike = float(trade.get("call_strike") or 0)
         if "strangle" in strat and call_strike > 0:
-            ce = trade.get("call_expiry") or trade.get("expiry")
+            ce = _nearest_expiry(t, trade.get("call_expiry") or trade.get("expiry"))
             call_exp_str = pd.to_datetime(ce).strftime("%y%m%d")
             return (f"https://optionstrat.com/build/short-strangle/{t}"
                     f"/-.{t}{exp_str}P{_occ_strike(strike)},-.{t}{call_exp_str}C{_occ_strike(call_strike)}")
@@ -243,16 +268,16 @@ if "t" in _qp and "s" in _qp and "e" in _qp:
             pass
 
 if not all_trades:
-    st.html("""
-    <div style='background:#111;border:1px dashed #222;border-radius:12px;
+    st.html(f"""
+    <div style='background:{CARD_BG};border:1px dashed {CARD_BD};border-radius:12px;
                 padding:40px;text-align:center;margin-top:24px'>
         <div style='font-size:3rem;margin-bottom:12px'>📡</div>
         <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.1rem;
-                    color:#555;letter-spacing:0.05em;margin-bottom:8px'>
+                    color:{TXT_SUB};letter-spacing:0.05em;margin-bottom:8px'>
             Noch keine Trades gespeichert
         </div>
-        <div style='font-family:RedRose,sans-serif;font-size:0.88rem;color:#333;line-height:1.7'>
-            Gehe zu <b style='color:#d4a843'>Trade Cards → Manuell eingeben</b>,
+        <div style='font-family:RedRose,sans-serif;font-size:0.88rem;color:{TXT_MUTED};line-height:1.7'>
+            Gehe zu <b style='color:{"#b8902f" if _IS_GREEN else "#d4a843"}'>Trade Cards → Manuell eingeben</b>,
             trage deine Optionen ein und generiere Posts —<br>
             die Trades werden dann hier automatisch zum Live-Tracking gespeichert.
         </div>
@@ -394,15 +419,16 @@ for trade in visible_trades:
             # ── Layout ──────────────────────────────────────────────────────
             c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
 
+            _cp_str = f"${current_price:.2f}" if (current_price and current_price > 0) else "–"
             with c1:
                 st.html(f"""
-                <div style='background:#111;border:1px solid {cls_color}40;border-left:3px solid {cls_color};
+                <div style='background:{CARD_BG};border:1px solid {cls_color}40;border-left:3px solid {cls_color};
                             border-radius:8px;padding:10px 14px;{border_extra}'>
-                    <div style='font-size:0.6rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                    <div style='font-size:0.6rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         Class {cls} · {company}</div>
-                    <div style='font-size:1.4rem;font-weight:700;color:#f0f0f0;font-family:sans-serif;
+                    <div style='font-size:1.4rem;font-weight:700;color:{TXT_MAIN};font-family:sans-serif;
                                 margin:4px 0'>{ticker}</div>
-                    <div style='font-size:0.78rem;color:#888;font-family:sans-serif'>{strategy}</div>
+                    <div style='font-size:0.78rem;color:{TXT_SUB};font-family:sans-serif'>{strategy}</div>
                     <div style='margin-top:6px'>
                         <span style='background:{stat_color}22;color:{stat_color};border-radius:4px;
                                      padding:2px 8px;font-size:0.7rem;font-weight:700'>{status}</span>
@@ -412,14 +438,14 @@ for trade in visible_trades:
 
             with c2:
                 st.html(f"""
-                <div style='background:#0e0e0e;border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG2};border:1px solid {CARD_BD};border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         Aktueller Kurs</div>
-                    <div style='font-size:1.2rem;font-weight:700;color:#e0e0e0;font-family:sans-serif'>
-                        ${current_price:.2f}</div>
-                    <div style='margin-top:6px;font-size:0.58rem;color:#555;text-transform:uppercase;
+                    <div style='font-size:1.2rem;font-weight:700;color:{TXT_MAIN};font-family:sans-serif'>
+                        {_cp_str}</div>
+                    <div style='margin-top:6px;font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;
                                 font-family:sans-serif'>Einstieg</div>
-                    <div style='font-size:0.88rem;color:#888;font-family:sans-serif'>
+                    <div style='font-size:0.88rem;color:{TXT_SUB};font-family:sans-serif'>
                         ${entry_px:.2f}</div>
                 </div>
                 """)
@@ -427,14 +453,14 @@ for trade in visible_trades:
             with c3:
                 opt_price_str = f"${current_opt_mid:.2f}" if current_opt_mid > 0 else "–"
                 st.html(f"""
-                <div style='background:#0a120a;border:1px solid #1a2a1a;border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG3};border:1px solid {CARD_BD};border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         Option aktuell (Mid)</div>
-                    <div style='font-size:1.2rem;font-weight:700;color:#4ade80;font-family:sans-serif'>
+                    <div style='font-size:1.2rem;font-weight:700;color:#16a34a;font-family:sans-serif'>
                         {opt_price_str}</div>
-                    <div style='margin-top:6px;font-size:0.58rem;color:#555;text-transform:uppercase;
+                    <div style='margin-top:6px;font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;
                                 font-family:sans-serif'>Einstiegsprämie</div>
-                    <div style='font-size:0.88rem;color:#888;font-family:sans-serif'>
+                    <div style='font-size:0.88rem;color:{TXT_SUB};font-family:sans-serif'>
                         ${premium:.2f}</div>
                 </div>
                 """)
@@ -442,14 +468,14 @@ for trade in visible_trades:
             with c4:
                 pnl_sign = "+" if pnl_usd >= 0 else ""
                 st.html(f"""
-                <div style='background:#0e0e0e;border:1px solid {pl_color}40;border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG2};border:1px solid {pl_color}40;border-radius:8px;padding:10px 14px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         P/L (1 Kontrakt)</div>
                     <div style='font-size:1.4rem;font-weight:700;color:{pl_color};font-family:sans-serif'>
                         {pnl_sign}{pnl_usd:.0f} USD</div>
                     <div style='font-size:0.9rem;color:{pl_color};font-family:sans-serif'>
                         {pnl_sign}{pnl_pct:.1f}% der Prämie</div>
-                    <div style='margin-top:4px;font-size:0.7rem;color:#555;font-family:sans-serif'>
+                    <div style='margin-top:4px;font-size:0.7rem;color:{TXT_MUTED};font-family:sans-serif'>
                         {'💡 TP bei 50%' if pnl_pct >= 50 else '⏳ Läuft noch' if pnl_pct >= 0 else '⚠️ Im Minus'}</div>
                 </div>
                 """)
@@ -463,13 +489,13 @@ for trade in visible_trades:
                 except Exception:
                     exp_fmt = expiry
                 st.html(f"""
-                <div style='background:#0e0c0a;border:1px solid #2a2010;border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         📅 Verfall</div>
-                    <div style='font-size:1rem;font-weight:700;color:#d4a843;font-family:sans-serif'>
+                    <div style='font-size:1rem;font-weight:700;color:{"#b8902f" if _IS_GREEN else "#d4a843"};font-family:sans-serif'>
                         {exp_fmt}</div>
                     <div style='font-size:1.8rem;font-weight:900;color:{dte_color};font-family:sans-serif'>
-                        {dte_icon} {dte} <span style='font-size:0.7rem;color:#888'>Tage</span></div>
+                        {dte_icon} {dte} <span style='font-size:0.7rem;color:{TXT_SUB}'>Tage</span></div>
                 </div>
                 """)
 
@@ -479,14 +505,14 @@ for trade in visible_trades:
                     dist_label = f"{'OTM' if (dist_pct > 0 and not is_call) or (dist_pct < 0 and is_call) else '⚠️ ITM'}"
                     dist_color = "#22c55e" if "OTM" in dist_label else "#ef4444"
                 else:
-                    dist_pct, dist_label, dist_color = 0.0, "–", "#888"
+                    dist_pct, dist_label, dist_color = 0.0, "–", TXT_SUB
                 st.html(f"""
-                <div style='background:#0e0e0e;border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG2};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         Strike-Abstand</div>
                     <div style='font-size:1rem;font-weight:700;color:{dist_color};font-family:sans-serif'>
                         {_fmt_num(abs(dist_pct), 1)}% {dist_label}</div>
-                    <div style='font-size:0.78rem;color:#888;font-family:sans-serif'>
+                    <div style='font-size:0.78rem;color:{TXT_SUB};font-family:sans-serif'>
                         Strike ${strike:.0f} · Delta {delta:.2f}</div>
                 </div>
                 """)
@@ -497,17 +523,18 @@ for trade in visible_trades:
                 capital_basis = entry_px if is_call and entry_px > 0 else (strike if strike > 0 else premium)
                 rend_lz_pct = premium / capital_basis * 100 if capital_basis > 0 else 0
                 basis_label = "Aktienkurs" if is_call else "Strike/Cash"
+                _tp_green = "#16a34a" if _IS_GREEN else "#4ade80"
                 st.html(f"""
-                <div style='background:#0a120a;border:1px solid #1a2a1a;border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:#555;text-transform:uppercase;font-family:sans-serif'>
+                <div style='background:{CARD_BG3};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
+                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
                         Take Profit Ziele</div>
-                    <div style='font-size:0.82rem;color:#4ade80;font-family:sans-serif'>
+                    <div style='font-size:0.82rem;color:{_tp_green};font-family:sans-serif'>
                         50% → Prämie &lt; ${tp50:.2f} → schließen</div>
-                    <div style='font-size:0.82rem;color:#22c55e;font-family:sans-serif'>
+                    <div style='font-size:0.82rem;color:#16a34a;font-family:sans-serif'>
                         70% → Prämie &lt; ${tp70:.2f} → schließen</div>
-                    <div style='font-size:0.72rem;color:#4ade80;margin-top:4px;font-family:sans-serif'>
+                    <div style='font-size:0.72rem;color:{_tp_green};margin-top:4px;font-family:sans-serif'>
                         Rendite: {rend_lz_pct:.2f}% ({basis_label})</div>
-                    <div style='font-size:0.7rem;color:#555;margin-top:2px;font-family:sans-serif'>
+                    <div style='font-size:0.7rem;color:{TXT_MUTED};margin-top:2px;font-family:sans-serif'>
                         Post: {post_ts}</div>
                 </div>
                 """)
@@ -576,10 +603,11 @@ for trade in visible_trades:
             for icon, color, text in _mgmt_items:
                 st.html(
                     f"<div style='display:flex;gap:10px;align-items:flex-start;"
-                    f"background:#111;border-left:3px solid {color};border-radius:0 6px 6px 0;"
+                    f"background:{CARD_BG};border:1px solid {CARD_BD};border-left:3px solid {color};"
+                    f"border-radius:0 6px 6px 0;"
                     f"padding:8px 12px;margin:4px 0;font-family:sans-serif'>"
                     f"<span style='font-size:1.1rem'>{icon}</span>"
-                    f"<span style='font-size:0.82rem;color:#ccc;line-height:1.5'>{text}</span>"
+                    f"<span style='font-size:0.82rem;color:{TXT_MAIN};line-height:1.5'>{text}</span>"
                     f"</div>"
                 )
 

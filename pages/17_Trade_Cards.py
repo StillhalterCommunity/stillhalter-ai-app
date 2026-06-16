@@ -635,16 +635,34 @@ def _occ_strike(strike: float) -> str:
     return f"{int(round(float(strike) * 1000)):08d}"
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _snap_expiry(ticker: str, expiry_str) -> str:
+    """Rastet ein Datum auf den nächsten echten Optionsverfall ein
+    (verhindert tote OptionStrat-Links durch ungültige Verfallsdaten)."""
+    try:
+        from data.massive_fetcher import get_available_expirations
+        target = pd.to_datetime(expiry_str).date()
+        exps = [pd.to_datetime(e).date() for e in get_available_expirations(ticker)]
+        if not exps:
+            return pd.to_datetime(expiry_str).strftime("%Y-%m-%d")
+        return min(exps, key=lambda d: abs((d - target).days)).strftime("%Y-%m-%d")
+    except Exception:
+        try:
+            return pd.to_datetime(expiry_str).strftime("%Y-%m-%d")
+        except Exception:
+            return str(expiry_str)
+
+
 def _optionstrat_url_manual(
     ticker: str, strike: float, expiry, is_call: bool,
     is_strangle: bool = False, call_strike: float = 0.0, call_expiry=None,
 ) -> str:
     try:
-        d = pd.to_datetime(expiry)
-        exp_str = d.strftime("%y%m%d")
         t = ticker.upper()
+        d = pd.to_datetime(_snap_expiry(t, expiry))
+        exp_str = d.strftime("%y%m%d")
         if is_strangle and call_strike > 0:
-            _ce = pd.to_datetime(call_expiry) if call_expiry else d
+            _ce = pd.to_datetime(_snap_expiry(t, call_expiry if call_expiry else expiry))
             call_exp_str = _ce.strftime("%y%m%d")
             return (
                 f"https://optionstrat.com/build/short-strangle/{t}"
