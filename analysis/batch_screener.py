@@ -24,9 +24,9 @@ from data.watchlist import get_sector_for_ticker, SECTOR_ICONS
 
 # ── OptionStrat Link Builder ──────────────────────────────────────────────────
 
-def _occ_strike(strike: float) -> str:
-    """OCC-Strike-Kodierung: Strike × 1000, 8-stellig (285 → '00285000')."""
-    return f"{int(round(float(strike) * 1000)):08d}"
+def _strike_str(s) -> str:
+    """Schlichter Strike fürs OptionStrat-Format: 230 → '230', 222.5 → '222.5'."""
+    return f"{float(s):g}"
 
 
 def _optionstrat_url(
@@ -37,21 +37,22 @@ def _optionstrat_url(
     strategy_name: str = "",
 ) -> str:
     """
-    Generiert den direkten OptionStrat-Link für eine Option (OCC-Format).
-    Beispiel: https://optionstrat.com/build/cash-secured-put/AAPL/-.AAPL260626P00285000
+    Generiert den direkten OptionStrat-Link für eine Option.
+    Echtes Format: schlichter Strike, beim Covered Call Aktienleg '<TICKER>x100'.
+    Beispiel: https://optionstrat.com/build/cash-secured-put/AAPL/-.AAPL260626P285
     """
     try:
         d = pd.to_datetime(expiry)
-        exp_str  = d.strftime("%y%m%d")           # YYMMDD (OptionStrat/OCC-Format)
+        exp_str  = d.strftime("%y%m%d")           # YYMMDD
         t = ticker.upper()
         if is_call:
             return (
                 f"https://optionstrat.com/build/covered-call/{t}"
-                f"/+100{t},-.{t}{exp_str}C{_occ_strike(strike)}"
+                f"/{t}x100,-.{t}{exp_str}C{_strike_str(strike)}"
             )
         return (
             f"https://optionstrat.com/build/cash-secured-put/{t}"
-            f"/-.{t}{exp_str}P{_occ_strike(strike)}"
+            f"/-.{t}{exp_str}P{_strike_str(strike)}"
         )
     except Exception:
         return ""
@@ -63,14 +64,14 @@ def _optionstrat_url_strangle(
     call_strike: float,
     expiry,
 ) -> str:
-    """OptionStrat-Link für Short Strangle (beide Legs, OCC-Format)."""
+    """OptionStrat-Link für Short Strangle (beide Legs, schlichter Strike)."""
     try:
         d       = pd.to_datetime(expiry)
         exp_str = d.strftime("%y%m%d")
         t       = ticker.upper()
         return (
             f"https://optionstrat.com/build/short-strangle/{t}"
-            f"/-.{t}{exp_str}P{_occ_strike(put_strike)},-.{t}{exp_str}C{_occ_strike(call_strike)}"
+            f"/-.{t}{exp_str}P{_strike_str(put_strike)},-.{t}{exp_str}C{_strike_str(call_strike)}"
         )
     except Exception:
         return ""

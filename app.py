@@ -567,6 +567,28 @@ with c16:
           "Chris Camillo Social Arbitrage · Reddit · Google Trends · X/Twitter · YouTube · Bullish/Bearish Signale",
           "#8b5cf6", "pages/16_Sentiment_Analyse.py", "🧭", "Sentiment Analyse")
 
+# ── Zeile 9 ───────────────────────────────────────────────────────────────────
+c17, c18 = st.columns(2, gap="large")
+with c17:
+    _card("17", "TRADE CARDS",
+          "Trade-Idee eingeben → WhatsApp- &amp; Circle-Post · Live-Tracking-Link bis Verfall",
+          "#22c55e", "pages/17_Trade_Cards.py", "📤", "Trade Cards")
+with c18:
+    _card("18", "MARKT NEWSLETTER",
+          "Täglicher Markt-Überblick · Top-Bewegungen · Earnings · automatisch generiert",
+          "#38bdf8", "pages/18_Markt_Newsletter.py", "📰", "Markt Newsletter")
+
+# ── Zeile 10 ──────────────────────────────────────────────────────────────────
+c19, c20 = st.columns(2, gap="large")
+with c19:
+    _card("19", "SIGNAL PIPELINE",
+          "Automatische Signal-Erkennung · TradeCard-Generierung · Status-Engine",
+          "#a78bfa", "pages/19_Signal_Pipeline.py", "🛰️", "Signal Pipeline")
+with c20:
+    _card("20", "TRADE MONITOR",
+          "Live-Tracking aller offenen Trades bis zum Verfall · P/L · Trade Management",
+          "#d4a843", "pages/20_Trade_Monitor.py", "📡", "Trade Monitor")
+
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.html("""

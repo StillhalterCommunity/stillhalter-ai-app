@@ -160,47 +160,53 @@ def _dte_from_expiry(expiry_str: str) -> int:
         return 0
 
 
-def _occ_strike(strike: float) -> str:
-    """OCC-Strike-Kodierung: Strike × 1000, 8-stellig mit führenden Nullen.
-    285 → '00285000' (OptionStrat/OCC-Standardformat)."""
-    return f"{int(round(float(strike) * 1000)):08d}"
+def _strike_str(s) -> str:
+    """Schlichter Strike fürs OptionStrat-Format: 230 → '230', 222.5 → '222.5'."""
+    return f"{float(s):g}"
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _nearest_expiry(ticker: str, expiry_str: str) -> str:
-    """Rastet ein (evtl. manuell gewähltes) Datum auf den nächsten ECHTEN
-    Optionsverfall ein. Verhindert tote OptionStrat-Links (Kontrakt existiert nicht)."""
+@st.cache_data(ttl=1800, show_spinner=False)
+def _snap_contract(ticker: str, expiry, strike: float, option_type: str):
+    """Rastet (Verfall, Strike) auf einen echten handelbaren Kontrakt ein."""
     try:
-        from data.massive_fetcher import get_available_expirations
-        target = pd.to_datetime(expiry_str).date()
-        exps = [pd.to_datetime(e).date() for e in get_available_expirations(ticker)]
-        if not exps:
-            return expiry_str
-        return min(exps, key=lambda d: abs((d - target).days)).strftime("%Y-%m-%d")
+        from data.massive_fetcher import nearest_contract
+        return nearest_contract(ticker, expiry, strike, option_type)
     except Exception:
-        return expiry_str
+        return None, None
 
 
 def _build_optionstrat_url(trade: dict) -> str:
-    """Baut die OptionStrat-URL aus den Trade-Feldern (OCC-Format).
-    Verfälle werden auf den nächsten echten Optionsverfall eingerastet."""
+    """Baut die OptionStrat-URL (echtes Format: schlichter Strike, x100 beim CC).
+    Verfall + Strike werden auf einen existierenden Kontrakt eingerastet."""
     try:
         t = (trade.get("ticker") or "").upper()
         strike = float(trade.get("strike") or 0)
         if not t or strike <= 0:
             return ""
-        exp_str = pd.to_datetime(_nearest_expiry(t, trade.get("expiry"))).strftime("%y%m%d")
         strat = (trade.get("strategy") or "").lower()
         call_strike = float(trade.get("call_strike") or 0)
+
         if "strangle" in strat and call_strike > 0:
-            ce = _nearest_expiry(t, trade.get("call_expiry") or trade.get("expiry"))
-            call_exp_str = pd.to_datetime(ce).strftime("%y%m%d")
+            pe, ps = _snap_contract(t, trade.get("expiry"), strike, "put")
+            ce, cs = _snap_contract(t, trade.get("call_expiry") or trade.get("expiry"), call_strike, "call")
+            if not pe:
+                return ""
+            pexp = pd.to_datetime(pe).strftime("%y%m%d")
+            cexp = pd.to_datetime(ce or pe).strftime("%y%m%d")
             return (f"https://optionstrat.com/build/short-strangle/{t}"
-                    f"/-.{t}{exp_str}P{_occ_strike(strike)},-.{t}{call_exp_str}C{_occ_strike(call_strike)}")
+                    f"/-.{t}{pexp}P{_strike_str(ps)},-.{t}{cexp}C{_strike_str(cs)}")
         if "call" in strat:   # Covered Call
+            ce, cs = _snap_contract(t, trade.get("expiry"), strike, "call")
+            if not ce:
+                return ""
+            exp = pd.to_datetime(ce).strftime("%y%m%d")
             return (f"https://optionstrat.com/build/covered-call/{t}"
-                    f"/+100{t},-.{t}{exp_str}C{_occ_strike(strike)}")
-        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{_occ_strike(strike)}"
+                    f"/{t}x100,-.{t}{exp}C{_strike_str(cs)}")
+        pe, ps = _snap_contract(t, trade.get("expiry"), strike, "put")
+        if not pe:
+            return ""
+        exp = pd.to_datetime(pe).strftime("%y%m%d")
+        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp}P{_strike_str(ps)}"
     except Exception:
         return ""
 

@@ -284,6 +284,30 @@ def get_available_expirations(ticker: str, max_pages: int = 4) -> list[str]:
 
 # ── Kompatibilitäts-Wrapper für bestehenden Code ──────────────────────────────
 
+def nearest_contract(ticker: str, expiry, strike: float, option_type: str = "put"):
+    """
+    Rastet (Verfall, Strike) auf einen ECHTEN handelbaren Kontrakt ein:
+    nächstes verfügbares Verfallsdatum + nächster verfügbarer Strike.
+    Gibt (exp_str 'YYYY-MM-DD', strike float) zurück, oder (None, None) bei Fehler.
+    Verhindert tote OptionStrat-Links (ungültiges Datum / nicht existenter Strike).
+    """
+    try:
+        exps = get_available_expirations(ticker)
+        if not exps:
+            return None, None
+        target = pd.to_datetime(expiry).date()
+        exp_dates = [pd.to_datetime(e).date() for e in exps]
+        nearest_exp = min(exp_dates, key=lambda d: abs((d - target).days)).strftime("%Y-%m-%d")
+        df = get_options_chain(ticker, nearest_exp, option_type)
+        if df is None or df.empty:
+            return nearest_exp, float(strike)
+        strikes = [float(s) for s in df["strike"].tolist()]
+        nearest_strike = min(strikes, key=lambda s: abs(s - float(strike)))
+        return nearest_exp, nearest_strike
+    except Exception:
+        return None, None
+
+
 def fetch_options_massive(
     ticker: str,
     expiration: str,
