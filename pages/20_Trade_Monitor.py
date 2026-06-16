@@ -150,6 +150,30 @@ def _dte_from_expiry(expiry_str: str) -> int:
         return 0
 
 
+def _build_optionstrat_url(trade: dict) -> str:
+    """Baut die OptionStrat-URL aus den Trade-Feldern (gleiches Format wie Trade Cards).
+    Nötig, weil über den Tracking-Link reinkommende Trades keine gespeicherte URL haben."""
+    try:
+        t = (trade.get("ticker") or "").upper()
+        strike = float(trade.get("strike") or 0)
+        if not t or strike <= 0:
+            return ""
+        exp_str = pd.to_datetime(trade.get("expiry")).strftime("%y%m%d")
+        strat = (trade.get("strategy") or "").lower()
+        call_strike = float(trade.get("call_strike") or 0)
+        if "strangle" in strat and call_strike > 0:
+            ce = trade.get("call_expiry") or trade.get("expiry")
+            call_exp_str = pd.to_datetime(ce).strftime("%y%m%d")
+            return (f"https://optionstrat.com/build/short-strangle/{t}"
+                    f"/-.{t}{exp_str}P{strike:.0f},-.{t}{call_exp_str}C{call_strike:.0f}")
+        if "call" in strat:   # Covered Call
+            return (f"https://optionstrat.com/build/covered-call/{t}"
+                    f"/+100{t},-.{t}{exp_str}C{strike:.0f}")
+        return f"https://optionstrat.com/build/cash-secured-put/{t}/-.{t}{exp_str}P{strike:.0f}"
+    except Exception:
+        return ""
+
+
 def _pnl_color(pnl_pct: float) -> str:
     if pnl_pct >= 30:  return "#22c55e"
     if pnl_pct >= 0:   return "#4ade80"
@@ -311,7 +335,7 @@ for trade in visible_trades:
     entry_px  = float(trade.get("price_at_entry", 0))
     status    = trade.get("status", "AKTIV")
     post_ts   = trade.get("post_ts", "–")
-    opt_url   = trade.get("optionstrat_url", "")
+    opt_url   = trade.get("optionstrat_url", "") or _build_optionstrat_url(trade)
     track_url = trade.get("tracking_url", "")
     is_call   = "Call" in strategy
 
