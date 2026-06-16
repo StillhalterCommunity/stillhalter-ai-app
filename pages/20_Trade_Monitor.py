@@ -341,7 +341,9 @@ for trade in visible_trades:
     entry_px  = float(trade.get("price_at_entry", 0))
     status    = trade.get("status", "AKTIV")
     post_ts   = trade.get("post_ts", "–")
-    opt_url   = trade.get("optionstrat_url", "") or _build_optionstrat_url(trade)
+    # Immer frisch im korrekten OCC-Format bauen (alte gespeicherte URLs könnten
+    # noch das veraltete Format haben); gespeicherte nur als Fallback.
+    opt_url   = _build_optionstrat_url(trade) or trade.get("optionstrat_url", "")
     track_url = trade.get("tracking_url", "")
     is_call   = "Call" in strategy
 
