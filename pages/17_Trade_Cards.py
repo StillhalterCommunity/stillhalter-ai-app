@@ -989,44 +989,44 @@ def _build_whatsapp_short_manual(
     L.append("")
     # ── Option ────────────────────────────────────────────────────────────────
     L.append("*Option*")
-    L.append(f"Aktie: {company} ({ticker})")
+    L.append(f"🏢 Aktie: {company} ({ticker})")
     L.append(f"💵 Kurs: ${price_now:.2f}")
     L.append(f"🎯 Strike: ${strike:g}")
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
     if is_call and price_now > 0:
-        L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
-    L.append(f"💵 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
+        L.append(f"🛒 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
+    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
     L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
     L.append("")
     # ── Absicherung ───────────────────────────────────────────────────────────
     L.append("*Absicherung*")
-    L.append(f"🛡️ OTM: {_fmt_num(otm_pct, 1)}%")
+    L.append(f"📐 OTM: {_fmt_num(otm_pct, 1)}%")
     if support_near and strike > 0:
         if support_near >= strike:
             _sd = (support_near - strike) / strike * 100
-            L.append(f"🛡️ Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% über Strike)")
+            L.append(f"🛟 Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% über Strike)")
         else:
             _sd = (strike - support_near) / strike * 100
-            L.append(f"🛡️ Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
+            L.append(f"🛟 Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
     if ath_price_dist is not None:
-        L.append(f"🛡️ ATH: -{_fmt_num(ath_price_dist, 1)}%")
-    L.append(f"🛡️ Risiko: ~{assign_pct}% (Delta {delta:.2f})")
+        L.append(f"⛰️ ATH: -{_fmt_num(ath_price_dist, 1)}%")
+    L.append(f"⚠️ Risiko: ~{assign_pct}% (Delta {delta:.2f})")
     L.append("")
     # ── Fundamentalanalyse (aktuelles Jahr · nächstes Jahr/Forward) ───────────
     def _fv(v, suf=""):
         return f"{_fmt_num(v, 1)}{suf}" if v is not None else "–"
     L.append("*Fundamentalanalyse*")
-    L.append(f"💎 EPS: {_fv(fd.get('eps_cur'), '%')} (akt. Jahr) · "
+    L.append(f"🌱 EPS: {_fv(fd.get('eps_cur'), '%')} (akt. Jahr) · "
              f"EPS(e): {_fv(fd.get('eps_fwd'), '%')} (nächstes Jahr)")
-    L.append(f"💎 KGV: {_fv(fd.get('kgv'))} (akt.) · KGV(e): {_fv(fd.get('kgv_e'))} (forward)")
-    L.append(f"💎 PEG: {_fv(fd.get('peg'))} (akt.) · PEG(e): {_fv(fd.get('peg_e'))} (forward)")
+    L.append(f"💰 KGV: {_fv(fd.get('kgv'))} (akt.) · KGV(e): {_fv(fd.get('kgv_e'))} (forward)")
+    L.append(f"⚖️ PEG: {_fv(fd.get('peg'))} (akt.) · PEG(e): {_fv(fd.get('peg_e'))} (forward)")
     L.append("")
     # ── Chart (nur 4h/1T-Farbpunkte) ──────────────────────────────────────────
     L.append("*Chart*")
-    L.append(f"📊 Trend: {_dots('trend')}")
-    L.append(f"📊 MACD: {_dots('macd')}")
-    L.append(f"📊 Stochastik (schnell): {_dots('stoch_fast')}")
-    L.append(f"📊 Stochastik (langsam): {_dots('stoch_slow')}")
+    L.append(f"📈 Trend: {_dots('trend')}")
+    L.append(f"〰️ MACD: {_dots('macd')}")
+    L.append(f"⚡ Stochastik (schnell): {_dots('stoch_fast')}")
+    L.append(f"🐌 Stochastik (langsam): {_dots('stoch_slow')}")
     L.append("")
     # ── Visualisierung + Live-Tracking ────────────────────────────────────────
     L.append("*Visualisierung*")
