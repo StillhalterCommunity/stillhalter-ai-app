@@ -985,7 +985,7 @@ def _build_whatsapp_short_manual(
         f"*🔔 Trading-Idee: {strategy}  {ticker}  {expiry_short}  "
         f"{strike:g} USD @ {_fmt_num(premium)} USD*"
     )
-    L.append(f"Stand: Stillhalter AI | {post_ts}")
+    L.append(f"🕐 Stand: Stillhalter AI | {post_ts}")
     L.append("")
     # ── Option ────────────────────────────────────────────────────────────────
     L.append("*Option*")
