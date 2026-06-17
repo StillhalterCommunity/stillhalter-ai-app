@@ -1121,6 +1121,147 @@ def _next_friday(min_days: int = 1) -> date:
     return d + timedelta(days=ahead)
 
 
+# ── Sprach-/Text-Parser: "Apple Short Put 285 nächster Freitag" → Formularfelder ──
+_TICKER_ALIASES = {
+    "apple": "AAPL", "tesla": "TSLA", "amazon": "AMZN", "microsoft": "MSFT",
+    "google": "GOOG", "alphabet": "GOOG", "nvidia": "NVDA", "meta": "META",
+    "facebook": "META", "netflix": "NFLX", "amd": "AMD", "intel": "INTC",
+    "palantir": "PLTR", "coinbase": "COIN", "qualcomm": "QCOM", "broadcom": "AVGO",
+    "disney": "DIS", "boeing": "BA", "visa": "V", "mastercard": "MA",
+    "paypal": "PYPL", "walmart": "WMT", "coca cola": "KO", "coca-cola": "KO",
+    "pfizer": "PFE", "exxon": "XOM", "chevron": "CVX", "honeywell": "HON",
+    "caterpillar": "CAT", "starbucks": "SBUX", "nike": "NKE", "alibaba": "BABA",
+    "uber": "UBER", "shopify": "SHOP", "salesforce": "CRM", "oracle": "ORCL",
+    "adobe": "ADBE", "micron": "MU", "robinhood": "HOOD", "reddit": "RDDT",
+}
+
+
+def _third_friday(year: int, month: int) -> date:
+    d = date(year, month, 1)
+    offset = (4 - d.weekday()) % 7
+    return d + timedelta(days=offset + 14)   # 3. Freitag (Monatsverfall)
+
+
+def _parse_expiry_text(low: str) -> date:
+    import re
+    _MONTHS = {"januar":1,"jan":1,"februar":2,"feb":2,"märz":3,"maerz":3,"mar":3,"april":4,"apr":4,
+               "mai":5,"juni":6,"jun":6,"juli":7,"jul":7,"august":8,"aug":8,"september":9,"sep":9,
+               "oktober":10,"okt":10,"november":11,"nov":11,"dezember":12,"dez":12}
+    # explizites Datum TT.MM(.JJJJ)
+    m = re.search(r"\b(\d{1,2})\.(\d{1,2})\.?(\d{2,4})?", low)
+    if m:
+        dd, mm = int(m.group(1)), int(m.group(2))
+        yy = m.group(3)
+        year = (2000 + int(yy)) if (yy and len(yy) == 2) else (int(yy) if yy else date.today().year)
+        try:
+            cand = date(year, mm, dd)
+            if cand < date.today():
+                cand = date(year + 1, mm, dd)
+            return cand
+        except Exception:
+            pass
+    # "in X tagen"
+    m = re.search(r"in\s+(\d{1,3})\s*tag", low)
+    if m:
+        return date.today() + timedelta(days=int(m.group(1)))
+    # Monatsname → 3. Freitag (Monatsverfall)
+    for name, mm in _MONTHS.items():
+        if re.search(rf"\b{name}\b", low):
+            y = date.today().year
+            tf = _third_friday(y, mm)
+            if tf < date.today():
+                tf = _third_friday(y + 1, mm)
+            return tf
+    # Default: nächster Freitag (auch bei "freitag"/"next friday")
+    return _next_friday()
+
+
+def _parse_trade_segment(seg: str, all_tickers: set) -> dict | None:
+    import re
+    s = seg.strip()
+    low = s.lower()
+    if not low:
+        return None
+    # Strategie
+    if "strangle" in low:
+        strat = "Short Strangle"
+    elif "covered call" in low or ("call" in low and "put" not in low):
+        strat = "Covered Call"
+    else:
+        strat = "Short PUT"
+    # Ticker: 1) Symbol das in der Watchlist ist  2) Firmenname-Alias
+    ticker = ""
+    for tok in re.findall(r"\b[A-Za-z]{1,5}\b", s):
+        if tok.upper() in all_tickers:
+            ticker = tok.upper()
+            break
+    if not ticker:
+        for name, tk in _TICKER_ALIASES.items():
+            if name in low:
+                ticker = tk
+                break
+    # Zahlen + Kontext: Strike / Prämie
+    strike = 0.0
+    m = re.search(r"strike\s*\$?\s*(\d+(?:[.,]\d+)?)", low)
+    if m:
+        strike = float(m.group(1).replace(",", "."))
+    premium = 0.0
+    m = re.search(r"(?:prämie|praemie|premium|@|für|fuer)\s*\$?\s*(\d+(?:[.,]\d+)?)", low)
+    if m:
+        premium = float(m.group(1).replace(",", "."))
+    # Falls kein expliziter Strike: größte „strike-artige" Zahl (>10), die nicht die Prämie ist
+    if strike <= 0:
+        cands = [float(x.replace(",", ".")) for x in re.findall(r"\b(\d+(?:[.,]\d+)?)\b", low)]
+        cands = [c for c in cands if c > 10 and c != premium]
+        if cands:
+            strike = max(cands)
+    expiry = _parse_expiry_text(low)
+    if not ticker and strike <= 0:
+        return None
+    return {"ticker": ticker, "strategy": strat, "strike": strike,
+            "premium": premium, "expiry": expiry}
+
+
+def _parse_trade_text(text: str) -> list:
+    """Zerlegt diktierten/eingegebenen Text in bis zu 3 Trades (A/B/C)."""
+    import re
+    try:
+        from data.watchlist import ALL_TICKERS
+        all_t = {t.upper() for t in ALL_TICKERS}
+    except Exception:
+        all_t = set()
+    # Trenner: Zeilenumbruch, ' und ', ';'
+    segments = re.split(r"\n|;|\bund\b", text)
+    out = []
+    for seg in segments:
+        parsed = _parse_trade_segment(seg, all_t)
+        if parsed:
+            out.append(parsed)
+        if len(out) >= 3:
+            break
+    return out
+
+
+def _voice_fill_cb():
+    """Füllt das Class-A/B/C-Formular aus dem diktierten Text (on_click)."""
+    text = st.session_state.get("m_voice_text", "")
+    trades = _parse_trade_text(text)
+    if not trades:
+        st.session_state["m_voice_msg"] = "⚠️ Konnte keinen Trade erkennen — bitte Ticker + Strike nennen."
+        return
+    for i, tr in enumerate(trades):
+        cls = ["A", "B", "C"][i]
+        st.session_state[f"m_{cls}_ticker"]   = tr["ticker"]
+        st.session_state[f"m_{cls}_strategy"] = tr["strategy"]
+        st.session_state[f"m_{cls}_strike"]   = float(tr["strike"])
+        st.session_state[f"m_{cls}_expiry"]   = tr["expiry"]
+        if tr["premium"] > 0:
+            st.session_state[f"m_{cls}_premium"] = float(tr["premium"])
+    _names = ", ".join(f"{['A','B','C'][i]}: {t['ticker']} {t['strategy']} {t['strike']:g}"
+                       for i, t in enumerate(trades))
+    st.session_state["m_voice_msg"] = f"✓ {len(trades)} Trade(s) erkannt → {_names}"
+
+
 def _autofill_cb(cls, ticker, strike, strat, call_strike, call_expiry, expiry):
     """on_click-Callback für 'Optionsdaten holen'. Läuft VOR dem Rerun, damit
     nicht mitten im Skript st.rerun() aufgerufen wird (sonst verlieren noch
@@ -1200,6 +1341,21 @@ tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
 # ════════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.markdown("Trage **Class A** (Konservativ), **Class B** (Ausgewogen) und/oder **Class C** (Aggressiv) ein — mindestens eine Klasse:")
+
+    # ── Sprach-/Text-Eingabe (z.B. via Wispr Flow diktieren) ──────────────────
+    with st.expander("🎤 Per Sprache/Text befüllen (diktieren)", expanded=False):
+        st.caption("Diktiere (z.B. mit Wispr Flow) oder tippe — ein Trade pro Zeile "
+                   "oder mit 'und' getrennt. Beispiel: "
+                   "Apple Short Put 285 nächster Freitag und Tesla Covered Call 460 Juli")
+        st.text_area("Trade(s) beschreiben", key="m_voice_text", height=90,
+                     placeholder="Apple Short Put Strike 285 nächster Freitag, Prämie 2\n"
+                                 "Tesla Covered Call 460 Juli")
+        st.button("📝 Formular füllen", key="m_voice_fill", on_click=_voice_fill_cb)
+        _vmsg = st.session_state.get("m_voice_msg", "")
+        if _vmsg:
+            _vc = "#22c55e" if _vmsg.startswith("✓") else "#f59e0b"
+            st.html(f"<div style='font-size:0.78rem;color:{_vc}'>{_vmsg}</div>")
+        st.caption("Danach pro Klasse 'Optionsdaten holen' klicken → echte Prämie/Delta/IV.")
 
     col_a, col_b, col_c = st.columns(3, gap="small")
     _CLASS_DEFS = [
