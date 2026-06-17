@@ -1099,6 +1099,15 @@ def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
     return "\n".join(L)
 
 
+def _next_friday(min_days: int = 1) -> date:
+    """Nächster Freitag ab heute (Optionen verfallen freitags)."""
+    d = date.today()
+    ahead = (4 - d.weekday()) % 7   # Freitag = 4
+    if ahead < min_days:
+        ahead += 7
+    return d + timedelta(days=ahead)
+
+
 def _build_circle_suffix(
     optionstrat_url: str, tracking_url: str, post_ts: str, class_label: str,
 ) -> str:
@@ -1198,12 +1207,12 @@ with tab1:
                 _ex1, _ex2 = st.columns(2)
                 with _ex1:
                     expiry_v = st.date_input(
-                        "PUT Verfall", value=date.today() + timedelta(days=30),
+                        "PUT Verfall", value=_next_friday(),
                         min_value=date.today(), key=f"m_{cls}_expiry",
                     )
                 with _ex2:
                     call_expiry_v = st.date_input(
-                        "CALL Verfall", value=date.today() + timedelta(days=30),
+                        "CALL Verfall", value=_next_friday(),
                         min_value=date.today(), key=f"m_{cls}_call_expiry",
                     )
             else:
@@ -1211,7 +1220,7 @@ with tab1:
                     "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
                 )
                 expiry_v = st.date_input(
-                    "Verfall", value=date.today() + timedelta(days=30),
+                    "Verfall", value=_next_friday(),
                     min_value=date.today(), key=f"m_{cls}_expiry",
                 )
 
@@ -1262,6 +1271,16 @@ with tab1:
                 iv_v = st.number_input(
                     "IV %", min_value=0.0, step=1.0, format="%.0f",
                     key=f"m_{cls}_iv",
+                )
+            # ── Live-Rendite auf Laufzeit (Vorschau) ──────────────────────────
+            if strike_v > 0 and premium_v > 0:
+                _dte_p = max(1, (expiry_v - date.today()).days)
+                _rl_p  = premium_v / strike_v * 100
+                _ra_p  = _rl_p * 365 / _dte_p
+                st.html(
+                    f"<div style='font-size:0.74rem;color:#22c55e;font-weight:600;margin:-2px 0 4px'>"
+                    f"📈 Rendite: {_fmt_num(_rl_p)}% auf {_dte_p}T "
+                    f"<span style='color:#888;font-weight:400'>(~{_fmt_num(_ra_p, 0)}% p.a.)</span></div>"
                 )
             m_inputs[cls] = {
                 "ticker": ticker_v, "strategy": strat_v, "strike": strike_v,
