@@ -922,10 +922,11 @@ def _fetch_manual_ticker_data(ticker: str) -> dict:
 @st.cache_data(ttl=1800, show_spinner=False)
 def _tf_color_dots(ticker: str) -> dict:
     """Farbpunkte (🟢/🟡/🔴) je Indikator und Zeitebene (4h, 1d) via Multi-Timeframe.
-    Trend: bull🟢/bear🔴 · MACD: bull🟢/bear🔴 · Stochastik: überverkauft🟢/überkauft🔴/neutral🟡."""
-    out = {"trend": {"4h": "⚪", "1d": "⚪"},
-           "macd":  {"4h": "⚪", "1d": "⚪"},
-           "stoch": {"4h": "⚪", "1d": "⚪"}}
+    Trend/MACD: bull🟢/bear🔴 · Stochastik (schnell/langsam): überverkauft🟢/überkauft🔴/neutral🟡."""
+    out = {"trend":      {"4h": "⚪", "1d": "⚪"},
+           "macd":       {"4h": "⚪", "1d": "⚪"},
+           "stoch_fast": {"4h": "⚪", "1d": "⚪"},
+           "stoch_slow": {"4h": "⚪", "1d": "⚪"}}
     try:
         from analysis.multi_timeframe import analyze_multi_timeframe
         m = analyze_multi_timeframe(ticker)
@@ -934,9 +935,12 @@ def _tf_color_dots(ticker: str) -> dict:
                 continue
             out["trend"][key] = "🟢" if getattr(sig, "ema_bullish", False) else "🔴"
             out["macd"][key]  = "🟢" if getattr(sig, "macd_bullish", False) else "🔴"
-            _os = getattr(sig, "stoch_oversold", False) or getattr(sig, "stoch_slow_oversold", False)
-            _ob = getattr(sig, "stoch_overbought", False) or getattr(sig, "stoch_slow_overbought", False)
-            out["stoch"][key] = "🟢" if _os else ("🔴" if _ob else "🟡")
+            _fo = getattr(sig, "stoch_oversold", False)
+            _fob = getattr(sig, "stoch_overbought", False)
+            out["stoch_fast"][key] = "🟢" if _fo else ("🔴" if _fob else "🟡")
+            _so = getattr(sig, "stoch_slow_oversold", False)
+            _sob = getattr(sig, "stoch_slow_overbought", False)
+            out["stoch_slow"][key] = "🟢" if _so else ("🔴" if _sob else "🟡")
     except Exception:
         pass
     return out
@@ -957,7 +961,7 @@ def _build_whatsapp_short_manual(
     optionstrat_url: str, tracking_url: str, post_ts: str,
     support_near=None, ath_price_dist=None,
     company_sentence: str = "", news_line: str = "",
-    pe_trailing=None, pe_forward=None, growth_pct=None,
+    funda: dict | None = None,
     tf_colors: dict | None = None,
 ) -> str:
     is_call = "Call" in strategy
@@ -967,51 +971,36 @@ def _build_whatsapp_short_manual(
     capital_basis = price_now if is_call and price_now > 0 else (strike if strike > 0 else 1)
     rend_lz  = premium / capital_basis * 100
     rend_ann = rend_lz * 365 / max(dte, 1)
-    class_tag = {
-        "A": "🟢 Konservativ (Low Volatility)",
-        "B": "🟡 Ausgewogen (Mid Volatility)",
-        "C": "🔴 Aggressiv (High Volatility)",
-    }.get(class_label, f"Class {class_label}")
     _risk_label = "Ausübungsrisiko" if is_call else "Einbuchungsrisiko"
     tf = tf_colors or {}
+    fd = funda or {}
 
-    def _tfsuffix(key: str) -> str:
+    def _dots(key: str) -> str:
         c = tf.get(key, {})
-        if not c:
-            return ""
-        return f"  ·  4h {c.get('4h', '⚪')} · 1T {c.get('1d', '⚪')}"
+        return f"4h {c.get('4h', '⚪')} · 1T {c.get('1d', '⚪')}"
 
     L = []
-    # ── Kopf (fett) + Zeitstempel ─────────────────────────────────────────────
+    # ── Kopf (fett) + Stand ───────────────────────────────────────────────────
     L.append(
         f"*🔔 Trading-Idee: {strategy}  {ticker}  {expiry_short}  "
         f"{strike:g} USD @ {_fmt_num(premium)} USD*"
     )
-    L.append(f"Stillhalter AI | {post_ts}")
-    L.append("")
-    # ── Firma ─────────────────────────────────────────────────────────────────
-    L.append("*Firma*")
-    if company_sentence:
-        L.append(f"🏢 {company} — {company_sentence}")
-    else:
-        L.append(f"🏢 {company}")
-    if news_line:
-        L.append(f"📰 News: {news_line}")
-    L.append(class_tag)
+    L.append(f"Stand: Stillhalter AI | {post_ts}")
     L.append("")
     # ── Option ────────────────────────────────────────────────────────────────
     L.append("*Option*")
+    L.append(f"Aktie: {company} ({ticker})")
     L.append(f"💵 Kurs: ${price_now:.2f}")
     L.append(f"🎯 Strike: ${strike:g}")
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
     if is_call and price_now > 0:
         L.append(f"📋 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
     L.append(f"💵 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
-    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% auf {dte} Tage Laufzeit (~{_fmt_num(rend_ann, 1)}% p.a.)")
+    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
     L.append("")
     # ── Absicherung ───────────────────────────────────────────────────────────
     L.append("*Absicherung*")
-    L.append(f"🛡️ OTM: {_fmt_num(otm_pct, 1)}% Abstand Aktienkurs")
+    L.append(f"🛡️ OTM: {_fmt_num(otm_pct, 1)}%")
     if support_near and strike > 0:
         if support_near >= strike:
             _sd = (support_near - strike) / strike * 100
@@ -1020,35 +1009,50 @@ def _build_whatsapp_short_manual(
             _sd = (strike - support_near) / strike * 100
             L.append(f"🛡️ Support: ${support_near:.2f} ({_fmt_num(_sd, 1)}% unter Strike)")
     if ath_price_dist is not None:
-        L.append(f"🛡️ ATH: {_fmt_num(ath_price_dist, 1)}% unter Allzeithoch")
-    L.append(f"🛡️ {_risk_label}: ~{assign_pct}% (Delta {delta:.2f})")
+        L.append(f"🛡️ ATH: -{_fmt_num(ath_price_dist, 1)}%")
+    L.append(f"🛡️ Risiko: ~{assign_pct}% (Delta {delta:.2f})")
     L.append("")
-    # ── Fundamentalanalyse ────────────────────────────────────────────────────
+    # ── Fundamentalanalyse (aktuelles Jahr · nächstes Jahr/Forward) ───────────
+    def _fv(v, suf=""):
+        return f"{_fmt_num(v, 1)}{suf}" if v is not None else "–"
     L.append("*Fundamentalanalyse*")
-    if growth_pct is not None:
-        L.append(f"💎 Gewinnwachstum {_fmt_num(growth_pct, 1)}% (Jahr)")
-    if pe_trailing is not None:
-        L.append(f"💎 KGV {_fmt_num(pe_trailing, 1)}")
-    if pe_forward is not None:
-        L.append(f"💎 FW KGV {_fmt_num(pe_forward, 1)}")
+    L.append(f"💎 EPS: {_fv(fd.get('eps_cur'), '%')} (akt. Jahr) · "
+             f"EPS(e): {_fv(fd.get('eps_fwd'), '%')} (nächstes Jahr)")
+    L.append(f"💎 KGV: {_fv(fd.get('kgv'))} (akt.) · KGV(e): {_fv(fd.get('kgv_e'))} (forward)")
+    L.append(f"💎 PEG: {_fv(fd.get('peg'))} (akt.) · PEG(e): {_fv(fd.get('peg_e'))} (forward)")
     L.append("")
-    # ── Technische Analyse (mit 4h/1T-Farbpunkten) ────────────────────────────
-    L.append("*Technische Analyse*")
-    L.append(f"📊 Stillhalter Trend: {trend_simple or 'neutral'}{_tfsuffix('trend')}")
-    L.append(f"📊 Stillhalter MACD: {macd_desc or 'neutral'}{_tfsuffix('macd')}")
-    L.append(f"📊 Stillhalter Dual Stochastik: {stoch_desc or 'neutral'}{_tfsuffix('stoch')}")
+    # ── Chart (nur 4h/1T-Farbpunkte) ──────────────────────────────────────────
+    L.append("*Chart*")
+    L.append(f"📊 Trend: {_dots('trend')}")
+    L.append(f"📊 MACD: {_dots('macd')}")
+    L.append(f"📊 Stochastik (schnell): {_dots('stoch_fast')}")
+    L.append(f"📊 Stochastik (langsam): {_dots('stoch_slow')}")
     L.append("")
-    # ── Links ─────────────────────────────────────────────────────────────────
-    L.append("📡 Live-Tracking:")
-    L.append(tracking_url)
+    # ── Visualisierung + Live-Tracking ────────────────────────────────────────
+    L.append("*Visualisierung*")
+    L.append(f"📊 {optionstrat_url}")
     L.append("")
-    L.append("📊 OptionStrat:")
-    L.append(optionstrat_url)
+    L.append("*Live-Tracking*")
+    L.append(f"📡 {tracking_url}")
     L.append("")
-    # ── Disclaimer ────────────────────────────────────────────────────────────
     L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
              "Handeln auf eigenes Risiko!")
     return "\n".join(L)
+
+
+def _build_whatsapp_compact(
+    class_label: str, ticker: str, strategy: str, expiry_short: str,
+    strike: float, premium: float, post_ts: str, optionstrat_url: str,
+) -> str:
+    """Kurzversion: Kopf mit IV-Farbpunkt (🟢 Low / 🟡 Mid / 🔴 High) + OptionStrat-Link."""
+    dot = {"A": "🟢", "B": "🟡", "C": "🔴"}.get(class_label, "⚪")
+    return (
+        f"*🔔 Trading-Ideen:\n"
+        f"{dot} {strategy}  {ticker}  {expiry_short}  "
+        f"{strike:g} USD @ {_fmt_num(premium)} USD* "
+        f"(Stillhalter AI | {post_ts})\n"
+        f"{optionstrat_url}"
+    )
 
 
 def _build_circle_suffix(
@@ -1331,16 +1335,29 @@ with tab1:
                         return float(v) if v is not None else None
                     except Exception:
                         return None
-                _eg = _ffloat(_fund.get("earnings_growth_yoy"))
-                _growth_pct = _eg * 100 if _eg is not None else None
-                _pe_t = _ffloat(_fund.get("pe_trailing"))
-                _pe_f = _ffloat(_fund.get("pe_forward"))
+                _eg     = _ffloat(_fund.get("earnings_growth_yoy"))
+                _pe_t   = _ffloat(_fund.get("pe_trailing"))
+                _pe_f   = _ffloat(_fund.get("pe_forward"))
+                _eps_tr = _ffloat(_fund.get("eps_trailing"))
+                _eps_fw = _ffloat(_fund.get("eps_forward"))
+                _peg    = _ffloat(_fund.get("peg_ratio"))
+                # EPS-Wachstum: aktuell (YoY) + nächstes Jahr (Forward-EPS vs. Trailing-EPS)
+                _eps_cur = _eg * 100 if _eg is not None else None
+                _eps_fwd = (((_eps_fw - _eps_tr) / abs(_eps_tr)) * 100
+                            if (_eps_tr and _eps_fw and _eps_tr != 0) else None)
+                # PEG forward: Forward-KGV / Forward-EPS-Wachstum
+                _peg_e = (_pe_f / _eps_fwd) if (_pe_f and _eps_fwd and _eps_fwd > 0) else None
+                _funda = {
+                    "eps_cur": _eps_cur, "eps_fwd": _eps_fwd,
+                    "kgv": _pe_t, "kgv_e": _pe_f,
+                    "peg": _peg, "peg_e": _peg_e,
+                }
 
                 # Multi-Timeframe-Farbpunkte (4h / 1T) für die Technik
                 _tf_colors = _tf_color_dots(ticker)
 
-                # WhatsApp Short
-                wa_post = _build_whatsapp_short_manual(
+                # Langversion
+                wa_long = _build_whatsapp_short_manual(
                     class_label=cls, ticker=ticker, company=company,
                     strategy=strategy, strike=strike, german_exp=german_exp,
                     expiry_short=expiry_display, dte=dte,
@@ -1356,8 +1373,13 @@ with tab1:
                     ath_price_dist=_ath_price_dist,
                     company_sentence=_company_sentence,
                     news_line=_news_line,
-                    pe_trailing=_pe_t, pe_forward=_pe_f, growth_pct=_growth_pct,
+                    funda=_funda,
                     tf_colors=_tf_colors,
+                )
+                # Kurzversion
+                wa_compact = _build_whatsapp_compact(
+                    cls, ticker, strategy, expiry_display, strike, premium,
+                    post_ts, optionstrat_url,
                 )
 
                 # Circle Detailpost
@@ -1396,8 +1418,8 @@ with tab1:
                 )
 
                 _generated[cls] = {
-                    "ticker": ticker, "wa": wa_post, "circle": circle_post,
-                    "trade_id": trade_id,
+                    "ticker": ticker, "wa_compact": wa_compact, "wa_long": wa_long,
+                    "circle": circle_post, "trade_id": trade_id,
                 }
 
             st.session_state["m_generated"] = _generated
@@ -1408,27 +1430,22 @@ with tab1:
         gen = st.session_state["m_generated"]
 
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-        st.markdown("## 📱 WhatsApp Posts (kurz)")
-        wa_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
-        for (cls, d), wtab in zip(gen.items(), wa_tabs):
-            with wtab:
-                st.code(d["wa"], language="text")
-
-        st.markdown("### 📤 Alle 3 zusammen (WhatsApp)")
-        combined_wa = f"\n\n{'─' * 30}\n\n".join(d["wa"] for d in gen.values())
-        st.code(combined_wa, language="text")
+        st.markdown("## 📱 Kurzversion (für schnelles Teilen)")
+        sc_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
+        for (cls, d), stab in zip(gen.items(), sc_tabs):
+            with stab:
+                st.code(d["wa_compact"], language="text")
 
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-        st.markdown("## 🌐 Circle Posts (detailliert)")
-        circle_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
-        for (cls, d), ctab in zip(gen.items(), circle_tabs):
-            with ctab:
-                st.code(d["circle"], language="text")
+        st.markdown("## 📋 Langversion (Detail-Post)")
+        lg_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
+        for (cls, d), ltab in zip(gen.items(), lg_tabs):
+            with ltab:
+                st.code(d["wa_long"], language="text")
 
-        st.markdown("### 📤 Alle 3 + Disclaimer (Circle — komplette Nachricht)")
-        combined_circle = f"\n\n{'═' * 30}\n\n".join(d["circle"] for d in gen.values())
-        combined_circle += f"\n\n{'─' * 30}\n\n{_DISCLAIMER}"
-        st.code(combined_circle, language="text")
+        st.markdown("### 📤 Alle zusammen (Langversion)")
+        combined_wa = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
+        st.code(combined_wa, language="text")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
