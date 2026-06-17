@@ -1121,6 +1121,31 @@ def _next_friday(min_days: int = 1) -> date:
     return d + timedelta(days=ahead)
 
 
+def _autofill_cb(cls, ticker, strike, strat, call_strike, call_expiry, expiry):
+    """on_click-Callback für 'Optionsdaten holen'. Läuft VOR dem Rerun, damit
+    nicht mitten im Skript st.rerun() aufgerufen wird (sonst verlieren noch
+    nicht gerenderte Spalten ihren Widget-Zustand)."""
+    if not (ticker and strike > 0):
+        st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Erst Ticker + Strike eingeben"
+        return
+    q = _fetch_option_quote(ticker, expiry, strike, strat, call_strike, call_expiry)
+    if not q:
+        st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Keine Optionsdaten gefunden"
+        return
+    st.session_state[f"m_{cls}_premium"] = float(q["premium"])
+    st.session_state[f"m_{cls}_delta"]   = float(q["delta"])
+    st.session_state[f"m_{cls}_iv"]      = float(q["iv_pct"])
+    if "Strangle" in strat:
+        st.session_state[f"m_{cls}_fill_msg"] = (
+            f"✓ PUT ${q['found_strike']:.0f} / CALL ${q.get('found_call_strike', 0):.0f} "
+            f"· Σ-Prämie {q['premium']:.2f}$ · Σ-Delta {q['delta']:.2f}"
+        )
+    else:
+        st.session_state[f"m_{cls}_fill_msg"] = (
+            f"✓ Strike ${q['found_strike']:.0f} · Verfall {q['found_expiry']}"
+        )
+
+
 def _build_circle_suffix(
     optionstrat_url: str, tracking_url: str, post_ts: str, class_label: str,
 ) -> str:
@@ -1237,33 +1262,14 @@ with tab1:
                     min_value=date.today(), key=f"m_{cls}_expiry",
                 )
 
-            # ── Auto-Fill aus Massive/Polygon ─────────────────────────────────
-            if st.button("🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
-                         use_container_width=True,
-                         help="Holt Prämie, Delta & IV automatisch von Massive/Polygon"):
-                if ticker_v and strike_v > 0:
-                    with st.spinner("⏳ Hole Optionsdaten…"):
-                        q = _fetch_option_quote(ticker_v, expiry_v, strike_v, strat_v,
-                                                call_strike_v, call_expiry_v)
-                    if q:
-                        st.session_state[f"m_{cls}_premium"] = float(q["premium"])
-                        st.session_state[f"m_{cls}_delta"]   = float(q["delta"])
-                        st.session_state[f"m_{cls}_iv"]      = float(q["iv_pct"])
-                        if is_strangle_v:
-                            st.session_state[f"m_{cls}_fill_msg"] = (
-                                f"✓ PUT ${q['found_strike']:.0f} / CALL ${q.get('found_call_strike', 0):.0f} "
-                                f"· Σ-Prämie {q['premium']:.2f}$ · Σ-Delta {q['delta']:.2f}"
-                            )
-                        else:
-                            st.session_state[f"m_{cls}_fill_msg"] = (
-                                f"✓ Strike ${q['found_strike']:.0f} · Verfall {q['found_expiry']}"
-                            )
-                    else:
-                        st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Keine Optionsdaten gefunden"
-                    st.rerun()
-                else:
-                    st.session_state[f"m_{cls}_fill_msg"] = "⚠️ Erst Ticker + Strike eingeben"
-                    st.rerun()
+            # ── Auto-Fill aus Massive/Polygon (on_click → kein Daten­verlust) ──
+            st.button(
+                "🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
+                use_container_width=True,
+                help="Holt Prämie, Delta & IV automatisch von Massive/Polygon",
+                on_click=_autofill_cb,
+                args=(cls, ticker_v, strike_v, strat_v, call_strike_v, call_expiry_v, expiry_v),
+            )
             _fill_msg = st.session_state.get(f"m_{cls}_fill_msg", "")
             if _fill_msg:
                 _msg_color = "#22c55e" if _fill_msg.startswith("✓") else "#f59e0b"
@@ -1354,6 +1360,21 @@ with tab1:
                 call_expiry = inp.get("call_expiry") or expiry
                 price_now   = tdata.get("price", 0.0)
                 company     = tdata.get("company", ticker)
+
+                # Auf echten Kontrakt einrasten (Verfall + Strike), damit Card,
+                # OptionStrat-Link und Tracking konsistent sind. Existiert der
+                # gewählte Verfall/Strike nicht, wird der nächste genommen.
+                try:
+                    from data.massive_fetcher import nearest_contract
+                    _ne, _ns = nearest_contract(ticker, expiry, strike, "call" if is_call else "put")
+                    if _ne and _ns:
+                        expiry, strike = _ne, _ns
+                    if is_strangle and call_strike > 0:
+                        _nce, _ncs = nearest_contract(ticker, call_expiry, call_strike, "call")
+                        if _nce and _ncs:
+                            call_expiry, call_strike = _nce, _ncs
+                except Exception:
+                    pass
 
                 try:
                     d_exp = pd.to_datetime(expiry)
