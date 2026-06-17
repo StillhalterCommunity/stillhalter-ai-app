@@ -1077,23 +1077,22 @@ def _text_to_html(text: str) -> str:
 
 
 def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
-    """WhatsApp-Sammel-Kurzpost: alle Trades kompakt + EIN Circle-Link zur Langversion."""
-    dots = {"A": "🟢", "B": "🟡", "C": "🔴"}
-    _date = post_ts.split(" ·")[0].strip()
-    L = [f"*🔔 Trading-Ideen — {_date}*", ""]
+    """WhatsApp-Sammel-Kurzpost: alle Trades kompakt + EIN Circle-Link zur Langversion.
+    post_ts = aktueller Zeitstempel (Berlin) im Kopf."""
+    dots   = {"A": "🟢", "B": "🟡", "C": "🔴"}
+    iv_lbl = {"A": "Low IV", "B": "Mid IV", "C": "High IV"}
+    L = [f"*🔔 Trading-Ideen — Stillhalter AI | {post_ts}*", ""]
     for cls, d in gen.items():
         L.append(
-            f"{dots.get(cls, '⚪')} {d['strategy']}  {d['ticker']}  {d['expiry_short']}  "
-            f"{d['strike']:g} USD @ {_fmt_num(d['premium'])} USD"
+            f"{dots.get(cls, '⚪')} {iv_lbl.get(cls, '')}: {d['strategy']}  {d['ticker']}  "
+            f"{d['expiry_short']}  {d['strike']:g} USD @ {_fmt_num(d['premium'])} USD"
         )
         L.append(f"📊 {d['optionstrat_url']}")
         L.append("")
     if circle_url:
-        L.append("📋 Volle Analyse (nur Masterclass):")
+        L.append("📋 Volle Analyse für alle Trades (nur Masterclass):")
         L.append(circle_url)
         L.append("")
-    L.append(f"🕐 Stillhalter AI | {post_ts}")
-    L.append("")
     L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
              "Handeln auf eigenes Risiko!")
     return "\n".join(L)
@@ -1528,7 +1527,12 @@ with tab1:
                 "Solange kannst du die Langversion oben manuell auf Circle posten."
             )
         else:
-            _post_ts_now = st.session_state.get("m_post_ts") or datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
+            def _berlin_now() -> str:
+                try:
+                    import pytz as _p
+                    return datetime.now(_p.timezone("Europe/Berlin")).strftime("%d.%m.%Y · %H:%M Uhr")
+                except Exception:
+                    return datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
             if st.button("🌐 Sammelpost auf Circle erstellen", type="primary",
                          key="btn_circle_post",
                          help="Postet alle Trades als EINEN Detail-Post in den Masterclass-Space "
@@ -1542,6 +1546,7 @@ with tab1:
                         _url = _pub.create_post("masterclass", _title, _html_body)
                     if _url:
                         st.session_state["m_circle_url"] = _url
+                        st.session_state["m_circle_ts"]  = _berlin_now()   # Zeit = jetzt (Posting)
                         st.success(f"✅ Auf Circle (Masterclass) gepostet: {_url}")
                     else:
                         st.warning("Circle hat keine URL zurückgegeben — bitte im Space prüfen.")
@@ -1550,8 +1555,9 @@ with tab1:
 
             _circle_url = st.session_state.get("m_circle_url", "")
             if _circle_url:
+                _ts = st.session_state.get("m_circle_ts") or _berlin_now()
                 st.markdown("### 📱 WhatsApp-Sammelpost (mit Circle-Link) — auf WhatsApp kopieren")
-                st.code(_build_combined_short(gen, _circle_url, _post_ts_now), language="text")
+                st.code(_build_combined_short(gen, _circle_url, _ts), language="text")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
