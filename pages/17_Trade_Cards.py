@@ -1055,6 +1055,50 @@ def _build_whatsapp_compact(
     )
 
 
+def _sec(key: str, default: str = "") -> str:
+    """Liest einen Wert aus Streamlit-Secrets oder Umgebungsvariablen."""
+    try:
+        return str(st.secrets.get(key, os.environ.get(key, default)))
+    except Exception:
+        return os.environ.get(key, default)
+
+
+def _text_to_html(text: str) -> str:
+    """Wandelt einen WhatsApp-Textpost in HTML für Circle: *fett* → <strong>,
+    Zeilenumbrüche → <br>, URLs → klickbare Links."""
+    import html as _h, re as _re
+    out = []
+    for line in text.split("\n"):
+        esc = _h.escape(line)
+        esc = _re.sub(r"\*(.+?)\*", r"<strong>\1</strong>", esc)
+        esc = _re.sub(r"(https?://[^\s]+)", r'<a href="\1">\1</a>', esc)
+        out.append(esc)
+    return "<br>\n".join(out)
+
+
+def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
+    """WhatsApp-Sammel-Kurzpost: alle Trades kompakt + EIN Circle-Link zur Langversion."""
+    dots = {"A": "🟢", "B": "🟡", "C": "🔴"}
+    _date = post_ts.split(" ·")[0].strip()
+    L = [f"*🔔 Trading-Ideen — {_date}*", ""]
+    for cls, d in gen.items():
+        L.append(
+            f"{dots.get(cls, '⚪')} {d['strategy']}  {d['ticker']}  {d['expiry_short']}  "
+            f"{d['strike']:g} USD @ {_fmt_num(d['premium'])} USD"
+        )
+        L.append(f"📊 {d['optionstrat_url']}")
+        L.append("")
+    if circle_url:
+        L.append("📋 Volle Analyse (nur Masterclass):")
+        L.append(circle_url)
+        L.append("")
+    L.append(f"🕐 Stillhalter AI | {post_ts}")
+    L.append("")
+    L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
+             "Handeln auf eigenes Risiko!")
+    return "\n".join(L)
+
+
 def _build_circle_suffix(
     optionstrat_url: str, tracking_url: str, post_ts: str, class_label: str,
 ) -> str:
@@ -1420,9 +1464,15 @@ with tab1:
                 _generated[cls] = {
                     "ticker": ticker, "wa_compact": wa_compact, "wa_long": wa_long,
                     "circle": circle_post, "trade_id": trade_id,
+                    # Felder für den Sammel-Kurzpost
+                    "strategy": strategy, "expiry_short": expiry_display,
+                    "strike": strike, "premium": premium,
+                    "optionstrat_url": optionstrat_url,
                 }
 
             st.session_state["m_generated"] = _generated
+            st.session_state["m_post_ts"] = post_ts
+            st.session_state.pop("m_circle_url", None)   # alten Circle-Link verwerfen
             st.success("✅ Posts generiert — Trades für Live-Tracking gespeichert")
 
     # Display generated posts
@@ -1443,9 +1493,46 @@ with tab1:
             with ltab:
                 st.code(d["wa_long"], language="text")
 
-        st.markdown("### 📤 Alle zusammen (Langversion)")
-        combined_wa = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
-        st.code(combined_wa, language="text")
+        # ── Circle-Sammelpost (Masterclass) + WhatsApp-Sammel-Kurzpost ────────
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+        st.markdown("## 🌐 Auf Circle posten (Masterclass) → WhatsApp")
+
+        _ci_token = _sec("CIRCLE_API_TOKEN")
+        _ci_space = int(_sec("CIRCLE_SPACE_MASTERCLASS", "0") or 0)
+        _ci_ok = bool(_ci_token and _ci_space)
+
+        if not _ci_ok:
+            st.info(
+                "🔒 Circle-Auto-Post inaktiv. Setze in Railway/Secrets: "
+                "`CIRCLE_API_TOKEN` (dein Admin-API-Token) und "
+                "`CIRCLE_SPACE_MASTERCLASS` (Space-ID des Masterclass-Bereichs). "
+                "Solange kannst du die Langversion oben manuell auf Circle posten."
+            )
+        else:
+            _post_ts_now = st.session_state.get("m_post_ts") or datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
+            if st.button("🌐 Sammelpost auf Circle erstellen", type="primary",
+                         key="btn_circle_post",
+                         help="Postet alle Trades als EINEN Detail-Post in den Masterclass-Space "
+                              "und baut daraus den WhatsApp-Sammelpost mit Circle-Link."):
+                _title = f"Trading-Ideen {datetime.now().strftime('%d.%m.%Y')} — {len(gen)} Setups"
+                _html_body = "\n<hr>\n".join(_text_to_html(d["wa_long"]) for d in gen.values())
+                try:
+                    from pipeline.publishers import CirclePublisher
+                    _pub = CirclePublisher(token=_ci_token, space_ids={"masterclass": _ci_space})
+                    with st.spinner("⏳ Poste auf Circle…"):
+                        _url = _pub.create_post("masterclass", _title, _html_body)
+                    if _url:
+                        st.session_state["m_circle_url"] = _url
+                        st.success(f"✅ Auf Circle (Masterclass) gepostet: {_url}")
+                    else:
+                        st.warning("Circle hat keine URL zurückgegeben — bitte im Space prüfen.")
+                except Exception as _e:
+                    st.error(f"⚠️ Circle-Fehler: {_e}")
+
+            _circle_url = st.session_state.get("m_circle_url", "")
+            if _circle_url:
+                st.markdown("### 📱 WhatsApp-Sammelpost (mit Circle-Link) — auf WhatsApp kopieren")
+                st.code(_build_combined_short(gen, _circle_url, _post_ts_now), language="text")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
