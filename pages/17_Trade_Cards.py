@@ -1319,6 +1319,19 @@ with tab1:
             cls for cls in ["A", "B", "C"]
             if m_inputs[cls]["ticker"] and m_inputs[cls]["strike"] > 0 and m_inputs[cls]["premium"] > 0
         ]
+        # Angefangene, aber unvollständige Klassen sammeln (für klaren Hinweis)
+        _skipped = []
+        for _c in ["A", "B", "C"]:
+            if _c in _active_classes:
+                continue
+            _inp = m_inputs[_c]
+            if _inp["ticker"] or _inp["strike"] > 0 or _inp["premium"] > 0:
+                _miss = [n for n, ok in [
+                    ("Ticker", bool(_inp["ticker"])),
+                    ("Strike", _inp["strike"] > 0),
+                    ("Prämie", _inp["premium"] > 0),
+                ] if not ok]
+                _skipped.append(f"Class {_c} (fehlt: {', '.join(_miss)})")
         if not _active_classes:
             st.error("⚠️ Mindestens eine Klasse (Ticker + Strike + Prämie) muss ausgefüllt sein.")
         else:
@@ -1505,7 +1518,10 @@ with tab1:
             st.session_state["m_generated"] = _generated
             st.session_state["m_post_ts"] = post_ts
             st.session_state.pop("m_circle_url", None)   # alten Circle-Link verwerfen
-            st.success("✅ Posts generiert — Trades für Live-Tracking gespeichert")
+            st.success(f"✅ {len(_generated)} Trade(s) generiert ({', '.join(_generated.keys())}) "
+                       "— für Live-Tracking gespeichert")
+            if _skipped:
+                st.warning("⚠️ Übersprungen: " + " · ".join(_skipped))
 
     # Display generated posts
     if "m_generated" in st.session_state and st.session_state["m_generated"]:
@@ -1524,6 +1540,10 @@ with tab1:
         for (cls, d), ltab in zip(gen.items(), lg_tabs):
             with ltab:
                 st.code(d["wa_long"], language="text")
+
+        st.markdown(f"### 📤 Alle {len(gen)} zusammen (Langversion)")
+        combined_long = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
+        st.code(combined_long, language="text")
 
         # ── Circle-Sammelpost (Masterclass) + WhatsApp-Sammel-Kurzpost ────────
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
