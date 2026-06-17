@@ -995,8 +995,22 @@ def _build_whatsapp_short_manual(
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
     if is_call and price_now > 0:
         L.append(f"🛒 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
-    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
-    L.append(f"📈 Rendite: {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
+    _is_strangle = "Strangle" in strategy
+    _prem_note = " (Put + Call zusammen)" if _is_strangle else ""
+    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt){_prem_note}")
+    L.append(f"📈 Rendite (Prämie): {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
+    if is_call and price_now > 0 and strike > price_now:
+        # Covered Call: zusätzlich die Kurschance bis zum Strike
+        _upside = (strike - price_now) / price_now * 100
+        _max_ret = (premium + (strike - price_now)) / price_now * 100
+        _max_ann = _max_ret * 365 / max(dte, 1)
+        L.append(f"🚀 Upside bis Strike: {_fmt_num(_upside)}%")
+        L.append(f"🎯 Max-Rendite bei Ausübung: {_fmt_num(_max_ret)}% (~{_fmt_num(_max_ann, 1)}% p.a.)")
+    elif (not is_call) and (not _is_strangle) and strike > 0 and price_now > 0:
+        # Short PUT: Rabatt — effektiver Einbuchungspreis (Strike − Prämie) vs. Kurs
+        _eff = strike - premium
+        _disc = (price_now - _eff) / price_now * 100
+        L.append(f"🏷️ Rabatt bei Einbuchung: {_fmt_num(_disc)}% (effektiv ${_eff:g} statt ${price_now:.2f})")
     L.append("")
     # ── Absicherung ───────────────────────────────────────────────────────────
     L.append("*Absicherung*")
