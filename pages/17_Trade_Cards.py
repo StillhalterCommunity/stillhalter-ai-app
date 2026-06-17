@@ -1091,7 +1091,7 @@ def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
         L.append("")
     if circle_url:
         L.append("📋 Volle Analyse für alle Trades (nur Masterclass):")
-        L.append(circle_url)
+        L.append(f"🌐 {circle_url}")
         L.append("")
     L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
              "Handeln auf eigenes Risiko!")
