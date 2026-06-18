@@ -66,7 +66,9 @@ def render_sidebar(allow_public: bool = False):
 
     market_open = is_market_open()
     with st.sidebar:
-        st.html(get_logo_html("white", 28))
+        # "auto" → dunkles Logo im hellen (grünen) Theme, helles im dunklen Theme.
+        # Vorher fest "white" → im hellen Theme weiß auf fast-weiß = unsichtbar.
+        st.html(get_logo_html("auto", 28))
         if not show_nav:
             # Anonymer Besucher auf öffentlicher Seite → keine Navigation
             st.html("<div style='font-family:RedRose,sans-serif;font-size:0.7rem;"

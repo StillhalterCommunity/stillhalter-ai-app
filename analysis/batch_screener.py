@@ -147,12 +147,17 @@ def scan_strangle(
     otm_min: float = 10.0,
     otm_max: float = 50.0,
     max_spread_pct: float = 60.0,    # max. Bid/Ask-Spread in % des Midpreises
+    require_valid_market: bool = True,  # False = Off-Hours: lastPrice als Fallback
     exclude_earnings: bool = False,  # Optionen mit Earnings in Laufzeit ausschließen
 ) -> pd.DataFrame:
     """
     Scannt Short-Strangle-Kombinationen: SHORT PUT + SHORT CALL auf gleichem Verfallstag.
     Beide Strikes mind. otm_min% OTM. Gibt kombinierte Metriken zurück.
     Ideal: hohe IV, weite Strikes, noch ausreichende Prämie.
+
+    require_valid_market=False (Markt geschlossen): erlaubt lastPrice als
+    Preis-Fallback, da Bid/Ask außerhalb der Handelszeiten 0 ist — sonst
+    fände der Strangle-Scan off-hours NIE etwas (0 aus 0).
     """
     try:
         # max_expiries bewusst niedrig (3): Short Strangle zieht BEIDE Seiten
@@ -245,9 +250,13 @@ def scan_strangle(
             p_exp["_has_market"] = (p_exp["bid"] > 0) & (p_exp["ask"] > 0) & (p_exp["ask"] >= p_exp["bid"])
             c_exp["_has_market"] = (c_exp["bid"] > 0) & (c_exp["ask"] > 0) & (c_exp["ask"] >= c_exp["bid"])
 
-            # Mid-Price NUR aus Bid/Ask — kein lastPrice-Fallback
-            p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, 0.0)
-            c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, 0.0)
+            # Mid-Price aus Bid/Ask; off-hours (require_valid_market=False)
+            # lastPrice als Fallback, damit der Scan bei geschlossenem Markt
+            # nicht leer ausgeht.
+            _p_fallback = p_exp["lastPrice"] if not require_valid_market else 0.0
+            _c_fallback = c_exp["lastPrice"] if not require_valid_market else 0.0
+            p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, _p_fallback)
+            c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, _c_fallback)
 
             # Spread %
             p_exp["_spread_pct"] = np.where(
@@ -265,13 +274,22 @@ def scan_strangle(
             p_sparse = p_exp["_has_market"].mean() < 0.20
             c_sparse = c_exp["_has_market"].mean() < 0.20
 
-            # Filter anwenden — immer Bid UND Ask erforderlich
+            # Filter anwenden. Marktzeiten: Bid UND Ask Pflicht + Spread-Filter.
+            # Off-hours (require_valid_market=False): lastPrice-Optionen erlaubt,
+            # Spread-Filter nur auf Optionen mit echtem Markt anwenden.
             def _apply_filters(df_, sparse: bool) -> pd.DataFrame:
                 iv_col = df_.get("impliedVolatility", pd.Series([1.0]*len(df_), index=df_.index)).fillna(0)
                 oi_col = df_.get("openInterest",      pd.Series([min_oi]*len(df_), index=df_.index)).fillna(0)
+                if require_valid_market:
+                    market_ok   = df_["_has_market"]
+                    spread_ok   = df_["_spread_pct"] <= max_spread_pct
+                else:
+                    market_ok   = df_["_has_market"] | (df_["lastPrice"] > 0)
+                    # Spread nur prüfen wo echter Markt existiert
+                    spread_ok   = (~df_["_has_market"]) | (df_["_spread_pct"] <= max_spread_pct)
                 mask = (
-                    df_["_has_market"] &                         # Bid UND Ask vorhanden
-                    (df_["_spread_pct"] <= max_spread_pct) &     # Spread nicht zu groß
+                    market_ok &
+                    spread_ok &
                     (df_["otm_pct"] >= otm_min) &
                     (df_["otm_pct"] <= otm_max) &
                     (df_["mid_price"] >= premium_min) &
@@ -402,6 +420,7 @@ def scan_ticker(
             iv_min=iv_min, premium_min=premium_min,
             min_oi=min_oi, otm_min=otm_min, otm_max=otm_max,
             max_spread_pct=max_spread_pct,
+            require_valid_market=require_valid_market,
             exclude_earnings=exclude_earnings,
         )
 
