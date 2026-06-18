@@ -218,6 +218,104 @@ def _pnl_color(pnl_pct: float) -> str:
     return "#ef4444"
 
 
+def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
+                        txt_sub: str, txt_muted: str) -> str:
+    """Kompakter Zeitstrahl pro Trade: Balkenfüllung = verstrichene Laufzeit,
+    Farbe = Kurs-vs-Strike-Status (grün OK / gelb nah / rot im Geld)."""
+    ticker   = trade.get("ticker", "–")
+    strategy = trade.get("strategy", "–")
+    cls      = trade.get("class", "–")
+    strike   = float(trade.get("strike", 0) or 0)
+    premium  = float(trade.get("premium", 0) or 0)
+    expiry   = trade.get("expiry", "")
+    is_call  = "Call" in strategy
+
+    price   = _fetch_current_price(ticker)
+    try:
+        d_exp = pd.to_datetime(expiry)
+        opt_mid = _fetch_option_mid(ticker, d_exp.strftime("%Y-%m-%d"), strike, is_call)
+        end = d_exp.date()
+    except Exception:
+        opt_mid, end = 0.0, date.today()
+
+    # Kurs-vs-Strike: Abstand (positiv = aus dem Geld) + ITM-Flag
+    if price > 0 and strike > 0:
+        otm = ((strike - price) / price * 100) if is_call else ((price - strike) / price * 100)
+        itm = (price > strike) if is_call else (price < strike)
+    else:
+        otm, itm = 0.0, False
+    if itm:
+        col, word = "#ef4444", "🔴 Im Geld"
+    elif abs(otm) < 3:
+        col, word = "#f59e0b", "🟡 nah am Strike"
+    else:
+        col, word = "#22c55e", "🟢 OK"
+
+    # Zeitstrahl: Abschluss → Verfall, Füllung = verstrichen
+    start_raw = trade.get("created_at", "")
+    try:
+        start = pd.to_datetime(start_raw).date() if start_raw else (end - timedelta(days=45))
+    except Exception:
+        start = end - timedelta(days=45)
+    today = date.today()
+    total = max(1, (end - start).days)
+    elapsed = min(total, max(0, (today - start).days))
+    elapsed_pct = round(elapsed / total * 100)
+    dte = max(0, (end - today).days)
+
+    decay = ((premium - opt_mid) / premium * 100) if (premium > 0 and opt_mid > 0) else None
+
+    # Handlungsempfehlung (kurz)
+    if itm:
+        action = "⚠️ Im Geld — beobachten oder rollen"
+    elif dte <= 3:
+        action = "⏳ Verfall nah — schließen oder auf nächsten Monat rollen"
+    elif decay is not None and decay >= 50:
+        action = "💡 50%+ Gewinn — Schließen erwägen (Take Profit)"
+    else:
+        action = "✅ läuft — alles in Ordnung"
+
+    _price_str = f"${price:.2f}" if price > 0 else "–"
+    _opt_str   = f"${opt_mid:.2f}" if opt_mid > 0 else "–"
+    _decay_str = f"{decay:.0f}%" if decay is not None else "–"
+    _otm_lbl   = "ITM" if itm else "OTM"
+
+    return f"""
+<div style='background:{track_bg};border:1px solid {col}55;border-left:4px solid {col};
+            border-radius:10px;padding:10px 14px;margin-bottom:8px'>
+  <div style='display:flex;justify-content:space-between;align-items:center;
+              font-family:sans-serif;margin-bottom:6px'>
+    <div style='font-weight:700;font-size:0.95rem;color:{txt_main}'>
+      {ticker} · {strategy} ${strike:g} <span style='color:{txt_muted};font-weight:400'>· Class {cls}</span>
+    </div>
+    <div style='font-size:0.82rem;font-weight:700;color:{col}'>{word}</div>
+  </div>
+  <div style='display:flex;justify-content:space-between;font-size:0.62rem;
+              color:{txt_muted};font-family:sans-serif'>
+    <span>Abschluss {start.strftime('%d.%m.')}</span>
+    <span>{elapsed_pct}% Laufzeit · noch {dte} Tage</span>
+    <span>Verfall {end.strftime('%d.%m.')}</span>
+  </div>
+  <div style='position:relative;height:16px;background:{col}22;border-radius:8px;
+              overflow:hidden;margin:3px 0 8px'>
+    <div style='position:absolute;left:0;top:0;height:100%;width:{elapsed_pct}%;
+                background:{col};opacity:0.85'></div>
+    <div style='position:absolute;left:{elapsed_pct}%;top:0;height:100%;width:2px;
+                background:{txt_main}'></div>
+  </div>
+  <div style='font-size:0.78rem;color:{txt_sub};font-family:sans-serif'>
+    💵 Kurs {_price_str} <span style='color:{col};font-weight:600'>({otm:+.1f}% {_otm_lbl})</span>
+    &nbsp;·&nbsp; 🎯 Strike ${strike:g}
+    &nbsp;·&nbsp; 📉 Option {_opt_str}
+    &nbsp;·&nbsp; 🔥 Verfall {_decay_str}
+  </div>
+  <div style='font-size:0.74rem;color:{txt_muted};font-family:sans-serif;margin-top:3px'>
+    → {action}
+  </div>
+</div>
+"""
+
+
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
@@ -328,34 +426,18 @@ if not visible_trades:
     st.info("Keine Trades mit den gewählten Filtern gefunden.")
     st.stop()
 
-# ── Zusammenfassung ────────────────────────────────────────────────────────────
+# ── Übersicht: Zeitstrahl pro Trade ─────────────────────────────────────────────
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-st.markdown(f"### 📊 {len(visible_trades)} aktive Trades")
+st.markdown(f"### 📊 Übersicht — {len(visible_trades)} Trades")
+st.caption("Balken = Laufzeit (Abschluss → Verfall, Füllung = verstrichene Zeit) · "
+           "Farbe: 🟢 OK · 🟡 nah am Strike · 🔴 im Geld")
 
-# Übersichtstabelle
-summary_rows = []
-for t in visible_trades:
-    dte = _dte_from_expiry(t.get("expiry", ""))
-    summary_rows.append({
-        "Klasse": t.get("class", "–"),
-        "Ticker": t.get("ticker", "–"),
-        "Strategie": t.get("strategy", "–"),
-        "Strike": f"${t.get('strike', 0):.0f}",
-        "Verfall": t.get("expiry", "–"),
-        "DTE": dte,
-        "Einstiegsprämie": f"{t.get('premium', 0):.2f} USD",
-        "Status": t.get("status", "AKTIV"),
-        "Einstieg": t.get("created_at", "")[:10],
-    })
-
-if summary_rows:
-    st.dataframe(
-        pd.DataFrame(summary_rows),
-        hide_index=True,
-        use_container_width=True,
-    )
+with st.spinner("⏳ Live-Daten…"):
+    for _t in visible_trades:
+        st.html(_timeline_card_html(_t, CARD_BG2, TXT_MAIN, TXT_SUB, TXT_MUTED))
 
 st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+st.markdown("#### 🔎 Details")
 
 # ── Live-Karten ────────────────────────────────────────────────────────────────
 for trade in visible_trades:
