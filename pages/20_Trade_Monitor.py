@@ -280,38 +280,77 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
     _decay_str = f"{decay:.0f}%" if decay is not None else "–"
     _otm_lbl   = "ITM" if itm else "OTM"
 
+    # ── Kurs↔Strike-Skala: Strike mittig, Preis-Marker, farbige Zonen ──────────
+    _lo, _hi = strike * 0.85, strike * 1.15
+    _ppos = ((price - _lo) / (_hi - _lo) * 100) if (price > 0 and _hi > _lo) else 50.0
+    _ppos = max(4, min(96, _ppos))
+    G, R = "#22c55e", "#ef4444"
+    # Put: links vom Strike = ITM (rot), rechts = OTM (grün) · Call umgekehrt
+    if is_call:
+        _zone = f"linear-gradient(90deg,{G}33 0%,{G}1f 49%,{R}1f 51%,{R}33 100%)"
+    else:
+        _zone = f"linear-gradient(90deg,{R}33 0%,{R}1f 49%,{G}1f 51%,{G}33 100%)"
+
+    def _tile(label: str, value: str, vcolor: str) -> str:
+        return (
+            f"<div style='flex:1;min-width:70px;background:{track_bg};border:1px solid {txt_muted}33;"
+            f"border-radius:8px;padding:6px 8px;text-align:center'>"
+            f"<div style='font-size:0.58rem;color:{txt_muted};text-transform:uppercase;"
+            f"letter-spacing:0.05em'>{label}</div>"
+            f"<div style='font-size:0.92rem;font-weight:700;color:{vcolor}'>{value}</div></div>"
+        )
+
+    tiles = (
+        _tile("Abstand", f"{otm:+.1f}% {_otm_lbl}", col)
+        + _tile("Option", _opt_str, txt_main)
+        + _tile("Verfall", _decay_str, G if (decay or 0) >= 0 else R)
+        + _tile("Rest", f"{dte} T", txt_main)
+    )
+
     return f"""
-<div style='background:{track_bg};border:1px solid {col}55;border-left:4px solid {col};
-            border-radius:10px;padding:10px 14px;margin-bottom:8px'>
-  <div style='display:flex;justify-content:space-between;align-items:center;
-              font-family:sans-serif;margin-bottom:6px'>
-    <div style='font-weight:700;font-size:0.95rem;color:{txt_main}'>
-      {ticker} · {strategy} ${strike:g} <span style='color:{txt_muted};font-weight:400'>· Class {cls}</span>
+<div style='background:{track_bg};border:1px solid {col}40;border-radius:14px;
+            padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.18);
+            font-family:RedRose,sans-serif'>
+  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:11px'>
+    <div style='display:flex;align-items:center;gap:9px;flex-wrap:wrap'>
+      <span style='font-weight:700;font-size:1.18rem;color:{txt_main};letter-spacing:0.02em'>{ticker}</span>
+      <span style='background:{col}1f;color:{col};font-size:0.7rem;font-weight:700;
+                   padding:3px 9px;border-radius:6px'>{strategy} ${strike:g}</span>
+      <span style='color:{txt_muted};font-size:0.7rem'>Class {cls}</span>
     </div>
-    <div style='font-size:0.82rem;font-weight:700;color:{col}'>{word}</div>
+    <span style='background:{col};color:#fff;font-size:0.72rem;font-weight:700;
+                 padding:3px 12px;border-radius:20px;white-space:nowrap'>{word}</span>
   </div>
-  <div style='display:flex;justify-content:space-between;font-size:0.62rem;
-              color:{txt_muted};font-family:sans-serif'>
-    <span>Abschluss {start.strftime('%d.%m.')}</span>
-    <span>{elapsed_pct}% Laufzeit · noch {dte} Tage</span>
-    <span>Verfall {end.strftime('%d.%m.')}</span>
+
+  <div style='display:flex;justify-content:space-between;font-size:0.62rem;color:{txt_muted};margin-bottom:4px'>
+    <span>📅 Abschluss {start.strftime('%d.%m.')}</span>
+    <span style='font-weight:700;color:{txt_sub}'>{elapsed_pct}% Laufzeit · noch {dte} Tage</span>
+    <span>🏁 Verfall {end.strftime('%d.%m.')}</span>
   </div>
-  <div style='position:relative;height:16px;background:{col}22;border-radius:8px;
-              overflow:hidden;margin:3px 0 8px'>
+  <div style='position:relative;height:12px;background:{txt_muted}22;border-radius:6px;overflow:hidden'>
     <div style='position:absolute;left:0;top:0;height:100%;width:{elapsed_pct}%;
-                background:{col};opacity:0.85'></div>
-    <div style='position:absolute;left:{elapsed_pct}%;top:0;height:100%;width:2px;
-                background:{txt_main}'></div>
+                background:linear-gradient(90deg,{col}88,{col});border-radius:6px'></div>
+    <div style='position:absolute;left:calc({elapsed_pct}% - 1.5px);top:-2px;height:16px;width:3px;
+                background:{txt_main};border-radius:2px'></div>
   </div>
-  <div style='font-size:0.78rem;color:{txt_sub};font-family:sans-serif'>
-    💵 Kurs {_price_str} <span style='color:{col};font-weight:600'>({otm:+.1f}% {_otm_lbl})</span>
-    &nbsp;·&nbsp; 🎯 Strike ${strike:g}
-    &nbsp;·&nbsp; 📉 Option {_opt_str}
-    &nbsp;·&nbsp; 🔥 Verfall {_decay_str}
+
+  <div style='display:flex;justify-content:space-between;font-size:0.6rem;color:{txt_muted};
+              margin:11px 0 3px'>
+    <span>Kurs ↔ Strike</span><span style='color:{col};font-weight:700'>{word}</span>
   </div>
-  <div style='font-size:0.74rem;color:{txt_muted};font-family:sans-serif;margin-top:3px'>
-    → {action}
+  <div style='position:relative;height:14px;border-radius:7px;background:{_zone}'>
+    <div style='position:absolute;left:50%;top:-2px;height:18px;width:2px;background:{txt_main};opacity:0.55'></div>
+    <div style='position:absolute;left:{_ppos}%;top:-4px;width:0;height:0;
+                border-left:6px solid transparent;border-right:6px solid transparent;
+                border-top:9px solid {col};transform:translateX(-6px)'></div>
   </div>
+  <div style='display:flex;justify-content:space-between;font-size:0.6rem;color:{txt_muted};margin-top:3px'>
+    <span>💵 Kurs {_price_str}</span><span>🎯 Strike ${strike:g}</span>
+  </div>
+
+  <div style='display:flex;gap:7px;margin-top:11px'>{tiles}</div>
+
+  <div style='font-size:0.76rem;color:{txt_sub};margin-top:9px'>→ {action}</div>
 </div>
 """
 
