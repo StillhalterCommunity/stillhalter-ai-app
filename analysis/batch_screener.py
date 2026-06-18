@@ -161,6 +161,21 @@ def scan_strangle(
         if not expirations or puts_df is None or calls_df is None:
             return pd.DataFrame()
 
+        # Verfalls-Spalte vereinheitlichen → String "YYYY-MM-DD".
+        # Massive/Polygon liefert datetime.date-Objekte, die Verfalls-Liste
+        # dagegen Strings. Ohne Normalisierung schlägt der Vergleich
+        # puts_df["expiration"] == expiry IMMER fehl → 0 Treffer.
+        def _norm_exp(v) -> str:
+            try:
+                return pd.to_datetime(v).strftime("%Y-%m-%d")
+            except Exception:
+                return str(v)
+
+        for _df in (puts_df, calls_df):
+            if _df is not None and not _df.empty and "expiration" in _df.columns:
+                _df["expiration"] = _df["expiration"].map(_norm_exp)
+        expirations = [_norm_exp(e) for e in expirations]
+
         stock_info = fetch_stock_info(ticker)
         current_price = stock_info.get("price")
         if not current_price or current_price <= 0:
