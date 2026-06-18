@@ -422,43 +422,61 @@ def _css_green() -> str:
         color: #ffffff !important;
     }}
 
-    /* ── Eingabefelder ─────────────────────────────────────────────────── */
+    /* ── Eingabefelder: GENAU EIN sauberer Rahmen pro Feld ─────────────────
+       Der Rahmen sitzt nur am äußeren BaseWeb-Container; alle inneren
+       Elemente sind transparent + randlos → keine Doppelränder mehr.       */
+    .stSelectbox [data-baseweb="select"],
+    .stTextInput [data-baseweb="input"],
+    .stTextInput [data-baseweb="base-input"],
+    .stNumberInput [data-baseweb="input"],
+    .stNumberInput [data-baseweb="base-input"],
+    .stTextArea [data-baseweb="textarea"],
+    .stTextArea [data-baseweb="base-input"] {{
+        background: #ffffff !important;
+        border: 1px solid {g["200"]} !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;        /* rundet auch die ±-Buttons sauber ab */
+        box-shadow: none !important;
+    }}
+    /* Innen alles randlos + transparent */
     .stSelectbox [data-baseweb="select"] > div,
     .stSelectbox [data-baseweb="select"] > div > div,
-    .stTextInput input, .stTextArea textarea {{
-        background: #ffffff !important; border: 1px solid {g["300"]} !important;
-        border-radius: 8px !important; color: {_INK} !important;
-        font-family: 'RedRose', sans-serif !important;
-    }}
-    .stSelectbox [data-baseweb="select"] > div:focus-within {{
-        border-color: {g["600"]} !important;
-    }}
-    .stSelectbox [data-baseweb="select"] span,
-    .stSelectbox [data-baseweb="select"] div {{
-        color: {_INK} !important;
-    }}
-
-    /* Number Input — Container, Eingabefeld und ±-Buttons */
-    .stNumberInput > div,
-    .stNumberInput [data-baseweb="input"],
-    .stNumberInput [data-baseweb="base-input"] {{
-        background: #ffffff !important; border: 1px solid {g["300"]} !important;
-        border-radius: 8px !important;
-    }}
+    .stNumberInput [data-baseweb="input"] > div,
     .stNumberInput input,
     [data-testid="stNumberInput"] input,
-    [data-testid="stNumberInputField"] {{
-        background: #ffffff !important; color: {_INK} !important;
-        font-family: 'RedRose', sans-serif !important; font-weight: 600 !important;
+    [data-testid="stNumberInputField"],
+    .stTextInput input, .stTextArea textarea {{
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        color: {_INK} !important;
+        font-family: 'RedRose', sans-serif !important;
     }}
+    .stNumberInput input {{ font-weight: 600 !important; }}
+    /* Fokus: ein dezenter grüner Rahmen + Glow am Container */
+    .stSelectbox [data-baseweb="select"]:focus-within,
+    .stTextInput [data-baseweb="input"]:focus-within,
+    .stNumberInput [data-baseweb="input"]:focus-within,
+    .stTextArea [data-baseweb="textarea"]:focus-within {{
+        border-color: {g["600"]} !important;
+        box-shadow: 0 0 0 2px rgba(64,145,108,0.18) !important;
+    }}
+    /* Ausgewählter Wert + Platzhalter im Select dunkel + Pfeil grün */
+    .stSelectbox [data-baseweb="select"] span,
+    .stSelectbox [data-baseweb="select"] div {{ color: {_INK} !important; }}
+    .stSelectbox [data-baseweb="select"] svg {{ fill: {g["700"]} !important; color: {g["700"]} !important; }}
+
+    /* ± / Stepper-Buttons im Number Input — bündig im Rahmen */
     .stNumberInput button,
     [data-testid="stNumberInput"] button {{
-        background: {g["100"]} !important; color: {g["700"]} !important;
+        background: {g["50"]} !important; color: {g["700"]} !important;
         border: none !important; border-left: 1px solid {g["200"]} !important;
+        border-radius: 0 !important;
     }}
     .stNumberInput button:hover {{
-        background: {g["200"]} !important; color: {g["800"]} !important;
+        background: {g["100"]} !important; color: {g["800"]} !important;
     }}
+    .stNumberInput button svg {{ fill: {g["700"]} !important; }}
 
     /* ── Tabellen ──────────────────────────────────────────────────────── */
     [data-testid="stDataFrame"] {{ border: 1px solid {g["200"]}; border-radius: 10px; overflow: hidden; }}
@@ -561,31 +579,75 @@ def _css_green() -> str:
 
     /* ── Checkboxen / Radio / Slider ───────────────────────────────────── */
     .stCheckbox label, .stCheckbox label span {{ font-family: 'RedRose', sans-serif; font-size: 0.88rem; color: {_INK2} !important; }}
-    .stCheckbox [data-testid="stCheckbox"] {{ accent-color: {g["600"]}; }}
     .stRadio label, .stRadio label span {{ font-family: 'RedRose', sans-serif; font-size: 0.85rem; color: {_INK2} !important; }}
-    [data-testid="stSlider"] [data-baseweb="slider"] [data-testid="stTickBar"] {{ color: {_INK4}; }}
+    /* Checkbox-Kästchen: heller Rand auf weiß, grün wenn ausgewählt
+       (BaseWeb-dark macht es sonst dunkelgrau/golden) */
+    .stCheckbox [data-baseweb="checkbox"] span[data-baseweb="checkmark"],
+    .stCheckbox [data-baseweb="checkbox"] > span:first-child {{
+        background-color: #ffffff !important;
+        border-color: {g["300"]} !important;
+    }}
+    .stCheckbox [data-baseweb="checkbox"] input:checked + span,
+    .stCheckbox [data-baseweb="checkbox"][aria-checked="true"] span[data-baseweb="checkmark"],
+    .stCheckbox [data-baseweb="checkbox"] span[aria-checked="true"] {{
+        background-color: {g["600"]} !important;
+        border-color: {g["600"]} !important;
+    }}
+    /* Radio-Punkte grün statt gold */
+    .stRadio [data-baseweb="radio"] div[aria-checked="true"],
+    .stRadio [role="radiogroup"] [aria-checked="true"] > div:first-child {{
+        background-color: {g["600"]} !important; border-color: {g["600"]} !important;
+    }}
+    .stRadio [data-baseweb="radio"] div:first-child {{ border-color: {g["300"]} !important; }}
+    /* Slider: Track hell, gefüllter Teil + Knopf grün */
+    [data-testid="stSlider"] [data-baseweb="slider"] [data-testid="stTickBar"] {{ color: {_INK4} !important; }}
     [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {{ background: {g["600"]} !important; }}
+    [data-testid="stSlider"] [data-baseweb="slider"] div[data-testid="stThumbValue"] {{ color: {g["800"]} !important; }}
+    [data-testid="stSlider"] [data-baseweb="slider"] > div > div {{ background: {g["200"]} !important; }}
+    [data-testid="stSlider"] [data-baseweb="slider"] > div > div > div {{ background: {g["600"]} !important; }}
 
     /* Trennlinie */
     .gold-line {{ height: 2px; background: linear-gradient(90deg, {g["600"]}, transparent); margin: 12px 0; border: none; }}
 
-    /* ── Dropdown-Popups (werden außerhalb des normalen DOM gerendert) ──── */
+    /* ── Dropdown-Popups (Portal außerhalb der App; BaseWeb rendert sie wegen
+       config.toml base="dark" dunkel → hier hart auf hell überschreiben) ──
+       li[role="option"] hat höhere Spezifität als BaseWebs Emotion-Klassen,
+       deshalb gewinnen diese Regeln zuverlässig.                            */
     [data-baseweb="popover"],
-    [data-baseweb="menu"] {{
-        background: #ffffff !important;
-        border: 1px solid {g["200"]} !important;
+    [data-baseweb="popover"] > div,
+    [data-baseweb="popover"] [data-baseweb="menu"],
+    [data-baseweb="menu"],
+    ul[role="listbox"],
+    [data-baseweb="popover"] ul,
+    [data-testid="stSelectboxVirtualDropdown"],
+    [data-testid="stSelectboxVirtualDropdown"] ul,
+    [data-testid="stVirtualDropdown"],
+    [data-testid="stVirtualDropdown"] ul {{
+        background-color: #ffffff !important;
+        border-color: {g["200"]} !important;
         border-radius: 8px !important;
     }}
-    [data-baseweb="menu"] [role="option"] {{
-        background: #ffffff !important;
+    li[role="option"],
+    [data-baseweb="menu"] li,
+    [data-baseweb="popover"] li[role="option"],
+    [role="option"] {{
+        background-color: #ffffff !important;
         color: {_INK} !important;
         font-family: 'RedRose', sans-serif !important;
     }}
-    [data-baseweb="menu"] [role="option"]:hover,
-    [data-baseweb="menu"] [aria-selected="true"] {{
-        background: {g["50"]} !important;
+    li[role="option"] *,
+    [role="option"] * {{ color: {_INK} !important; }}
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"],
+    [data-baseweb="menu"] li:hover,
+    [role="option"]:hover,
+    [role="option"][aria-selected="true"] {{
+        background-color: {g["50"]} !important;
         color: {g["800"]} !important;
     }}
+    li[role="option"]:hover *,
+    li[role="option"][aria-selected="true"] *,
+    [role="option"]:hover * {{ color: {g["800"]} !important; }}
 
     /* ── Multiselect-Chips ─────────────────────────────────────────────── */
     [data-baseweb="tag"] {{
@@ -593,6 +655,8 @@ def _css_green() -> str:
         color: {g["800"]} !important;
         border-radius: 4px !important;
     }}
+    [data-baseweb="tag"] span, [data-baseweb="tag"] div {{ color: {g["800"]} !important; }}
+    [data-baseweb="tag"] svg {{ fill: {g["800"]} !important; }}
 
     /* ── Tooltips ──────────────────────────────────────────────────────── */
     [data-baseweb="tooltip"] div {{
