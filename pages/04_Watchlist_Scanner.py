@@ -830,22 +830,30 @@ if start_scan:
         # → Off-Hours-Modus deaktiviert diese Pflicht (lastPrice als Fallback)
         require_valid_mkt     = not off_hours_mode
 
-        results = scan_watchlist(
-            tickers=filtered_tickers,
-            strategy=scan_strategy,
-            delta_min=d_min, delta_max=d_max,
-            dte_min=int(dte_min), dte_max=int(dte_max),
-            iv_min=iv_min / 100,
-            premium_min=effective_premium_min,
-            min_oi=effective_oi_min,
-            otm_min=float(otm_min), otm_max=float(otm_max),
-            max_results_per_ticker=int(max_per_ticker),
-            require_valid_market=require_valid_mkt,
-            max_spread_pct=float(max_spread_pct),
-            exclude_earnings=exclude_earnings,
-            progress_callback=on_progress,
-            result_callback=on_result,
-        )
+        try:
+            results = scan_watchlist(
+                tickers=filtered_tickers,
+                strategy=scan_strategy,
+                delta_min=d_min, delta_max=d_max,
+                dte_min=int(dte_min), dte_max=int(dte_max),
+                iv_min=iv_min / 100,
+                premium_min=effective_premium_min,
+                min_oi=effective_oi_min,
+                otm_min=float(otm_min), otm_max=float(otm_max),
+                max_results_per_ticker=int(max_per_ticker),
+                require_valid_market=require_valid_mkt,
+                max_spread_pct=float(max_spread_pct),
+                exclude_earnings=exclude_earnings,
+                progress_callback=on_progress,
+                result_callback=on_result,
+            )
+        except Exception as _scan_err:
+            st.session_state.scan_running = False
+            st.error(f"⚠️ Scan-Fehler: {type(_scan_err).__name__}: {_scan_err}")
+            import traceback as _tb
+            with st.expander("🔧 Technische Details (für Diagnose)"):
+                st.code(_tb.format_exc())
+            results = pd.DataFrame()
 
         # Live-Platzhalter entfernen (finale Tabelle übernimmt)
         live_count_ph.empty()
