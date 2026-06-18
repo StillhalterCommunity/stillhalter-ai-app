@@ -671,7 +671,7 @@ elif _bg["finished_at"] and _bg["results"] is not None and not _bg["results"].em
         st.session_state.scan_meta = {"strategy": _bg["strategy"], "source": "background"}
 
 # ── Scan Buttons ──────────────────────────────────────────────────────────────
-b1, b2, b3, _ = st.columns([2, 2, 2, 6])
+b1, b2, b3, b4, _ = st.columns([2, 2, 2, 2, 4])
 with b1:
     start_scan_fg = st.button(f"🚀 Scan starten ({len(scan_tickers)} Ticker)", type="primary", use_container_width=True)
 with b2:
@@ -687,6 +687,13 @@ with b3:
         for key in ["scan_results", "scan_meta", "tf_results", "preset"]:
             if key in st.session_state:
                 del st.session_state[key]
+        st.rerun()
+with b4:
+    if st.button("🔄 Scanner-Reset", use_container_width=True,
+                 help="Setzt einen hängenden/abgebrochenen Scan zurück (auch für andere Nutzer)"):
+        bg_scan.force_reset()
+        st.session_state.scan_running = False
+        st.success("✅ Scanner zurückgesetzt — du kannst neu scannen.")
         st.rerun()
 
 # Hintergrund-Scan starten
