@@ -155,8 +155,12 @@ def scan_strangle(
     Ideal: hohe IV, weite Strikes, noch ausreichende Prämie.
     """
     try:
+        # max_expiries bewusst niedrig (3): Short Strangle zieht BEIDE Seiten
+        # (Put + Call) je Verfall → 6 Verfälle × 225 Ticker überlasten die
+        # Railway-Instanz und blockieren den Vordergrund-Scan. 3 Verfälle im
+        # DTE-Fenster reichen für ein gutes Strangle (i. d. R. der Monatsverfall).
         puts_df, calls_df, expirations = fetch_options_chain(
-            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=6
+            ticker, dte_min=dte_min, dte_max=dte_max, max_expiries=3
         )
         if not expirations or puts_df is None or calls_df is None:
             return pd.DataFrame()

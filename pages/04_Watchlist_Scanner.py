@@ -671,6 +671,13 @@ elif _bg["finished_at"] and _bg["results"] is not None and not _bg["results"].em
         st.session_state.scan_meta = {"strategy": _bg["strategy"], "source": "background"}
 
 # ── Scan Buttons ──────────────────────────────────────────────────────────────
+# Bei großen Universen blockiert der synchrone Vordergrund-Scan den Streamlit-
+# Worker (→ „keine Reaktion / weiße Seite"). Hintergrund-Scan empfehlen.
+if len(scan_tickers) > 60:
+    st.info(
+        f"💡 **{len(scan_tickers)} Ticker** — für große Scans bitte **🌙 Im Hintergrund** "
+        "nutzen. Der Vordergrund-Scan blockiert die Seite, bis er fertig ist."
+    )
 b1, b2, b3, b4, _ = st.columns([2, 2, 2, 2, 4])
 with b1:
     start_scan_fg = st.button(f"🚀 Scan starten ({len(scan_tickers)} Ticker)", type="primary", use_container_width=True)
