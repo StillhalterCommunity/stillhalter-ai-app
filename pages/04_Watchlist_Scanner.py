@@ -1208,7 +1208,7 @@ else:
         results["Konv. Ampeln"]  = [x[3] for x in _cx]
         results["Konv. Hinweis"] = [x[4] for x in _cx]
         st.session_state.scan_results = results
-        st.session_state.tf_results = {**st.session_state.get("tf_results", {}), **_cached_tf}
+        st.session_state.tf_results = {**(st.session_state.get("tf_results") or {}), **(_cached_tf or {})}
 
     # ── Kennzahlen ─────────────────────────────────────────────────────────
     n_tickers_found = results["Ticker"].nunique() if "Ticker" in results.columns else 0

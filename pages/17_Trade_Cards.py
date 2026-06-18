@@ -3,6 +3,8 @@ Stillhalter AI App — Trade Cards
 Generiert WhatsApp-fertige Trading-Ideen im exakten Format.
 """
 
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import pickle
