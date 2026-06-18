@@ -30,3 +30,7 @@ secrets.toml
 # Nutzerdaten (DSGVO — nicht in Git!)
 data/login_log.csv
 .bridge_config.json
+
+# Laufzeit-Scan-Cache (gehoert NICHT ins Repo, lebt im Volume)
+data/last_scan_cache.pkl
+data/_disk_cache/

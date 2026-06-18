@@ -62,7 +62,10 @@ with st.sidebar:
 
 
 # ── Cache-Datei ────────────────────────────────────────────────────────────────
-CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "last_scan_cache.pkl")
+# WICHTIG: liegt im persistenten Volume, NICHT im Code-Ordner — sonst zeigt Top9
+# nach jedem Deploy wieder einen uralten, mit-eingecheckten Scan-Stand.
+from data import _persistent_cache as _pc
+CACHE_PATH = _pc.scan_cache_path()
 
 
 def load_top9_cache():

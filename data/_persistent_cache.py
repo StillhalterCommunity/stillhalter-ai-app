@@ -41,6 +41,14 @@ def _cache_path(key: str) -> str:
     return os.path.join(_CACHE_DIR, f"{safe}.pkl")
 
 
+def scan_cache_path() -> str:
+    """Pfad zur letzten Scan-Ergebnis-Datei (Top9 + Watchlist) — IM persistenten
+    Volume, NICHT im Code-Ordner. Sonst überschreibt jeder Deploy den frischen
+    Scan wieder mit einer evtl. mit-eingecheckten alten Datei.
+    Liegt direkt im Datenverzeichnis (z.B. /data/last_scan_cache.pkl)."""
+    return os.path.join(os.path.dirname(_CACHE_DIR), "last_scan_cache.pkl")
+
+
 def save(key: str, data: Any, ttl_hours: float = 24.0) -> None:
     """Speichert Daten persistent auf Disk."""
     try:

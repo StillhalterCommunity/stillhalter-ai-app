@@ -40,7 +40,16 @@ _state: dict = {
     "error":      "",
 }
 
-_CACHE_PATH = os.path.join(os.path.dirname(__file__), "last_scan_cache.pkl")
+def _scan_cache_path() -> str:
+    """Persistenter Pfad (Volume) für das letzte Scan-Ergebnis."""
+    try:
+        from data._persistent_cache import scan_cache_path
+        return scan_cache_path()
+    except Exception:
+        return os.path.join(os.path.dirname(__file__), "last_scan_cache.pkl")
+
+
+_CACHE_PATH = _scan_cache_path()
 
 
 def _maybe_expire_locked() -> None:

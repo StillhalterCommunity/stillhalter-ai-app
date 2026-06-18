@@ -761,12 +761,12 @@ def scan_watchlist(
     # Rang hinzufügen
     combined.insert(0, "Rang", range(1, len(combined) + 1))
 
-    # Ergebnisse für Top-9-Homepage speichern
+    # Ergebnisse für Top-9-Homepage speichern — im persistenten Volume,
+    # damit der Stand einen Deploy/Neustart überlebt.
     try:
-        import pickle, datetime, os
-        cache_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(cache_dir, "last_scan_cache.pkl")
+        import pickle, datetime
+        from data._persistent_cache import scan_cache_path
+        cache_path = scan_cache_path()
         with open(cache_path, "wb") as f:
             pickle.dump({
                 "results": combined,
