@@ -658,6 +658,31 @@ def _css_green() -> str:
     [data-baseweb="tag"] span, [data-baseweb="tag"] div {{ color: {g["800"]} !important; }}
     [data-baseweb="tag"] svg {{ fill: {g["800"]} !important; }}
 
+    /* ── Dunkle Inline-Karten im hellen Theme aufhellen ─────────────────────
+       Viele Seiten-HTML-Karten sind fürs dunkle Theme gebaut (dunkler BG,
+       heller Text). Im hellen Theme erzwingt die globale Textregel dunklen
+       Text → auf dunklem BG unlesbar. Hier werden die gängigen dunklen
+       Karten-Hintergründe per Inline-Style-Treffer auf hell umgefärbt
+       (NUR im grünen Theme; das dunkle Theme bleibt unberührt).
+       So entsteht überall lesbares Dunkel-auf-Hell, ohne Seiten-Code.       */
+    [style*="background:#0e0e0e"], [style*="background: #0e0e0e"],
+    [style*="background:#111"],    [style*="background: #111"],
+    [style*="background:#0a0a0a"], [style*="background: #0a0a0a"],
+    [style*="background:#0c0c0c"], [style*="background: #0c0c0c"],
+    [style*="background:#141414"], [style*="background: #141414"],
+    [style*="background:#161616"], [style*="background:#1c1c1c"],
+    [style*="background:#1a1a1a"], [style*="background: #1a1a1a"],
+    [style*="background-color:#0e0e0e"], [style*="background-color:#111"],
+    [style*="background-color:#0a0a0a"], [style*="background-color:#1a1a1a"] {{
+        background-color: {g["50"]} !important;
+        border-color: {g["200"]} !important;
+    }}
+    /* Gängige dunkle Rahmen → heller grüner Rahmen */
+    [style*="solid #1e1e1e"], [style*="solid #252525"], [style*="solid #222"],
+    [style*="solid #2a2a2a"], [style*="solid #333"], [style*="solid #1a1a1a"] {{
+        border-color: {g["200"]} !important;
+    }}
+
     /* ── Tooltips ──────────────────────────────────────────────────────── */
     [data-baseweb="tooltip"] div {{
         background: {g["900"]} !important;
