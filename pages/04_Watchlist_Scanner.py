@@ -46,7 +46,7 @@ def _fetch_mini_hist(ticker: str):
 # ── Header ────────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([1, 6])
 with h1:
-    st.markdown(get_logo_html("white", 36), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 36), unsafe_allow_html=True)
 with h2:
     market_open = is_market_open()
     mkt_class = "market-open" if market_open else "market-closed"
@@ -1328,20 +1328,20 @@ else:
     # Spalten je nach Strategie — Top + Liq. immer zuerst
     is_strangle = "Strangle" in meta.get("strategy", scan_strategy)
     if is_strangle and "Strike PUT" in display_df.columns:
-        base_cols = ["Top", "Liq.", "Ticker", "Sektor", "Kurs",
+        base_cols = ["OptionStrat", "Top", "Liq.", "Ticker", "Sektor", "Kurs",
                      "Strike PUT", "Strike CALL", "OTM% PUT", "OTM% CALL", "Range %",
                      "Verfall", "DTE",
                      "Prämie gesamt", "Prämie PUT", "Prämie CALL", "Prämie/Tag",
                      "Rendite ann. %", "Rendite % Laufzeit",
                      "Delta PUT", "Delta CALL", "IV %", "IV Rank",
                      "Break-even Low", "Break-even High",
-                     "Trend", "⚠️ Earnings", "OptionStrat"]
+                     "Trend", "⚠️ Earnings"]
     else:
-        base_cols = ["Top", "Liq.", "Ticker", "Sektor", "Kurs", "Strike", "OTM %",
+        base_cols = ["OptionStrat", "Top", "Liq.", "Ticker", "Sektor", "Kurs", "Strike", "OTM %",
                      "Verfall", "DTE", "Prämie", "Bid", "Ask", "Kursquelle", "Spread %",
                      "Prämie/Tag", "Rendite ann. %", "Rendite % Laufzeit", "Rendite %/Tag",
                      "Delta", "Theta/Tag", "IV %", "IV Rank", "OI", "Volumen",
-                     "Trend", "⚠️ Earnings", "OptionStrat"]
+                     "Trend", "⚠️ Earnings"]
     # Tech-Spalten wenn vorhanden
     tech_cols = [c for c in ["RSI(1D)", "Stoch(1D)", "MACD(1D)", "SC Trend(1D)", "TF-Align"] if c in display_df.columns]
     # Konvergenz-Spalten inkl. neue Breakdown + S/R Schutz

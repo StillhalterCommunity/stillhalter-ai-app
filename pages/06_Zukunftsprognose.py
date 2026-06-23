@@ -719,7 +719,7 @@ def make_convergence_bar(results) -> go.Figure:
 # Header
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.markdown(get_logo_html("white", 40), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 40), unsafe_allow_html=True)
 with col_title:
     st.markdown("""
     <div style='padding-top:4px'>

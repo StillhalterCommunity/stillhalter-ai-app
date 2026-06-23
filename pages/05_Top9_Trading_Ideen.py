@@ -24,12 +24,15 @@ render_sidebar()
 
 from data.fetcher import (
     fetch_extended_hours_price, get_extended_hours_session, is_market_open,
+    fetch_price_history,
 )
+from ui.charts import render_option_mini_chart
+from analysis.batch_screener import _optionstrat_url
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.markdown(get_logo_html("white", 40), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 40), unsafe_allow_html=True)
 with col_title:
     st.markdown("""
     <div style='padding-top:4px'>
@@ -898,11 +901,39 @@ if cached_results is not None and not cached_results.empty:
                 show_key  = f"show_{share_key}"
                 share_text = _build_share_text(row.to_dict(), tech, cached_strategy)
 
-                btn_col, _ = st.columns([2, 3])
-                with btn_col:
-                    if st.button("📋 Community-Post", key=share_key, use_container_width=True,
-                                 help="Formatierten Post für die Community kopieren"):
-                        st.session_state[show_key] = not st.session_state.get(show_key, False)
+                # OptionStrat-Link (vorne) + Chart-Toggle + Community-Post
+                _is_call_idea = "Call" in str(strategie)
+                _os_url_idea  = _optionstrat_url(ticker, strike, verfall, _is_call_idea)
+                chart_key     = f"chart_{cls}_{idx}"
+                show_chart    = f"showc_{chart_key}"
+
+                bcol1, bcol2 = st.columns(2)
+                with bcol1:
+                    if _os_url_idea:
+                        st.link_button("📊 OptionStrat", url=_os_url_idea,
+                                       use_container_width=True)
+                with bcol2:
+                    if st.button("📈 Chart", key=chart_key, use_container_width=True,
+                                 help="Kurschart mit Strike & Break-Even"):
+                        st.session_state[show_chart] = not st.session_state.get(show_chart, False)
+
+                if st.button("📋 Community-Post", key=share_key, use_container_width=True,
+                             help="Formatierten Post für die Community kopieren"):
+                    st.session_state[show_key] = not st.session_state.get(show_key, False)
+
+                if st.session_state.get(show_chart, False) and strike > 0:
+                    _hist_idea = fetch_price_history(ticker, period="6mo")
+                    if _hist_idea is not None and not _hist_idea.empty and kurs > 0:
+                        _fig_idea = render_option_mini_chart(
+                            hist=_hist_idea, ticker=ticker, current_price=kurs,
+                            strike=strike, premium=praemie, dte=dte,
+                            iv_pct=iv_pct, option_type=("call" if _is_call_idea else "put"),
+                            expiry_date=verfall,
+                        )
+                        st.plotly_chart(_fig_idea, use_container_width=True,
+                                        config={"displayModeBar": False})
+                    else:
+                        st.caption("Keine Kursdaten für den Chart verfügbar.")
 
                 if st.session_state.get(show_key, False):
                     st.text_area("Post kopieren:", value=share_text, height=340,

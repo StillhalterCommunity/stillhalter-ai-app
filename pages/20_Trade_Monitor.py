@@ -358,7 +358,7 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.markdown(get_logo_html("white", 40), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 40), unsafe_allow_html=True)
 with col_title:
     st.markdown("""
     <div style='padding-top:4px'>

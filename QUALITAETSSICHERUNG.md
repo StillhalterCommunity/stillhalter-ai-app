@@ -46,6 +46,15 @@ Letzte Durcharbeitung: 2026-06-18 (autonom)
 - ℹ️ Saubere Langfrist-Lösung: echtes zweites Streamlit-`[theme]` statt
       BaseWeb per CSS zu überstimmen (mit Nutzer abgestimmt offen)
 
+## 4b. Features (neu)
+- ✅ OptionStrat-Button **vorne** in der Scanner-Tabelle (LinkColumn an erster Stelle)
+- ✅ Top 9: pro Karte OptionStrat-Button + „📈 Chart"-Toggle (Kurschart mit Strike/Break-Even)
+- ✅ Scanner: Zeilenauswahl → Kurschart + Payoff + OptionStrat (war bereits da)
+- ✅ Header-/Sidebar-Logos auf „auto" (in beiden Themes sichtbar)
+- ✅ Trade Cards: Checkbox „📡 In Trade Monitor übernehmen" — Übernahme jetzt
+      steuerbar (vorher automatisch für jeden generierten Trade)
+- ✅ Gemeinsamer Trade-Store `data/monitor_store.py` (eine Quelle für Pfad/Format)
+
 ## 5. Kern-Features
 - ✅ Trade Monitor Übersicht (app-native Karten, Zeit-Balken, Kurs↔Strike)
 - ✅ OptionStrat-Links (Format + Snapping auf reale Kontrakte)

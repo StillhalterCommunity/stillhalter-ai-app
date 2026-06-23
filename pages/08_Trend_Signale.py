@@ -1461,7 +1461,7 @@ def _render_approaching_card(sig: Dict) -> None:
 
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
-    st.html(get_logo_html("white", 40))
+    st.html(get_logo_html("auto", 40))
 with col_title:
     st.html(
         "<div style='padding-top:4px'>"

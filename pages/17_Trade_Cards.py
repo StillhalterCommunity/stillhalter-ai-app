@@ -1315,7 +1315,7 @@ def _build_circle_suffix(
 
 h1, h2 = st.columns([1, 6])
 with h1:
-    st.markdown(get_logo_html("white", 36), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 36), unsafe_allow_html=True)
 with h2:
     st.markdown(
         '<div class="sc-page-title">📤 Trade Cards</div>'
@@ -1477,6 +1477,14 @@ with tab1:
 
     st.markdown("---")
 
+    # Steuerung: ob generierte Trades in den Trade Monitor (Live-Tracking) wandern.
+    st.checkbox(
+        "📡 In Trade Monitor übernehmen (live verfolgen)",
+        value=True, key="m_into_monitor",
+        help="Wenn aktiv, werden die generierten Trades zum Live-Tracking in den "
+             "Trade Monitor übernommen. Zum reinen Posten ohne Tracking abwählen.",
+    )
+
     if st.button("🚀 Posts generieren", type="primary",
                  use_container_width=True, key="btn_gen_manual"):
         _active_classes = [
@@ -1557,19 +1565,21 @@ with tab1:
                     _now_berlin = datetime.now()
                 post_ts      = _now_berlin.strftime("%d.%m.%Y · %H:%M Uhr")
 
-                _save_manual_trade({
-                    "trade_id": trade_id, "class": cls, "ticker": ticker,
-                    "company": company, "strategy": strategy,
-                    "strike": strike, "call_strike": call_strike,
-                    "expiry": str(expiry), "call_expiry": str(call_expiry),
-                    "premium": premium, "delta": delta, "iv_pct": iv_pct,
-                    "price_at_entry": price_now,
-                    "created_at": datetime.now().isoformat(),
-                    "post_ts": post_ts,
-                    "optionstrat_url": optionstrat_url,
-                    "tracking_url": tracking_url,
-                    "status": "AKTIV",
-                })
+                # Nur in den Trade Monitor übernehmen, wenn der Nutzer es wünscht.
+                if st.session_state.get("m_into_monitor", True):
+                    _save_manual_trade({
+                        "trade_id": trade_id, "class": cls, "ticker": ticker,
+                        "company": company, "strategy": strategy,
+                        "strike": strike, "call_strike": call_strike,
+                        "expiry": str(expiry), "call_expiry": str(call_expiry),
+                        "premium": premium, "delta": delta, "iv_pct": iv_pct,
+                        "price_at_entry": price_now,
+                        "created_at": datetime.now().isoformat(),
+                        "post_ts": post_ts,
+                        "optionstrat_url": optionstrat_url,
+                        "tracking_url": tracking_url,
+                        "status": "AKTIV",
+                    })
 
                 # ── Zusatzdaten für den Post: ATH-Distanz, Unternehmenssatz, News-Zeile
                 _ath_price_dist = None

@@ -20,7 +20,7 @@ render_sidebar()
 # ── Header ────────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([1, 6])
 with h1:
-    st.html(get_logo_html("white", 36))
+    st.html(get_logo_html("auto", 36))
 with h2:
     st.html("""
     <div style='padding-top:4px'>

@@ -39,7 +39,7 @@ from pipeline.publishers import CirclePublisher, WhatsAppPublisher
 # ── Header ────────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([1, 6])
 with h1:
-    st.markdown(get_logo_html("white", 36), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 36), unsafe_allow_html=True)
 with h2:
     st.markdown(
         '<div class="sc-page-title">🚦 Signal Pipeline</div>'

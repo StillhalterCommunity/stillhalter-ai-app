@@ -976,7 +976,7 @@ def _load_scan_cache() -> dict | None:
 # ══════════════════════════════════════════════════════════════════════════════
 h1, h2 = st.columns([1, 6])
 with h1:
-    st.markdown(get_logo_html("white", 36), unsafe_allow_html=True)
+    st.markdown(get_logo_html("auto", 36), unsafe_allow_html=True)
 with h2:
     now_str = datetime.now().strftime("%A, %d. %B %Y · %H:%M Uhr")
     st.markdown(

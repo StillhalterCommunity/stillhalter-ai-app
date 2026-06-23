@@ -14,7 +14,7 @@ def _show_maintenance_screen() -> None:
     st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
     st.html(f"""
 <div style='text-align:center;padding:80px 40px 40px'>
-    <div style='margin-bottom:32px'>{get_logo_html("white", 56)}</div>
+    <div style='margin-bottom:32px'>{get_logo_html("auto", 56)}</div>
     <div style='background:#111;border:1px solid #1e1e1e;border-top:3px solid #d4a843;
                 border-radius:14px;padding:40px 48px;max-width:520px;margin:0 auto'>
         <div style='font-size:2.5rem;margin-bottom:16px'>🔧</div>
