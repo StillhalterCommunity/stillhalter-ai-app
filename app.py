@@ -247,6 +247,7 @@ with st.expander("⚙️ System", expanded=False):
 
         # ── Tagesdaten-Prefetch (nur Admin) ────────────────────────────────────
         import data.prefetch as _pf
+        import data.preloader as _preloader   # vor Nutzung im Button-Handler (Z.288)
         _pf_state = _pf.get_state()
         _pf_meta  = _pf.last_prefetch()
         if _pf_state["running"]:
