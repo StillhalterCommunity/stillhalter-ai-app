@@ -1514,6 +1514,7 @@ else:
                             iv_pct=_iv_pct,
                             option_type=_opt_type,
                             expiry_date=_expiry,
+                            dark_mode=(st.session_state.get("app_theme", "dark") != "green"),
                         )
                         st.plotly_chart(fig_mini, use_container_width=True,
                                         config={"displayModeBar": False})

@@ -24,6 +24,14 @@ st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 # (aus den Trade Cards) müssen ohne Login funktionieren — auch im Wartungsmodus.
 render_sidebar(allow_public=True)
 
+# Nur der Admin (Oliver) darf Trades schließen/entfernen — andere Nutzer sehen
+# die Trades nur (read-only). Anonyme Tracking-Link-Besucher ohnehin nicht.
+try:
+    from data.maintenance import is_admin as _is_admin
+    _is_owner = _is_admin(st.session_state.get("auth_user", ""))
+except Exception:
+    _is_owner = False
+
 # ── Theme-Farben (hell im Grün-Theme, dunkel im Dark-Theme) ──────────────────────
 _IS_GREEN = st.session_state.get("app_theme", "dark") == "green"
 if _IS_GREEN:
@@ -83,6 +91,12 @@ def _update_trade_status(trade_id: str, new_status: str, note: str = "") -> None
                 "status": new_status,
                 "note": note,
             })
+    _save_trades(trades)
+
+
+def _delete_trade(trade_id: str) -> None:
+    """Entfernt einen Trade dauerhaft aus dem Monitor (nur Admin)."""
+    trades = [t for t in _load_trades() if t.get("trade_id") != trade_id]
     _save_trades(trades)
 
 
@@ -230,13 +244,18 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
     expiry   = trade.get("expiry", "")
     is_call  = "Call" in strategy
 
-    price   = _fetch_current_price(ticker)
+    # Live-Preise; fallen auf die gespeicherten Einstiegswerte zurück, wenn der
+    # Markt zu ist / kein Live-Kurs verfügbar — sonst stünden überall "–".
+    price_at_entry = float(trade.get("price_at_entry", 0) or 0)
+    _live_price = _fetch_current_price(ticker)
+    price = _live_price if _live_price > 0 else price_at_entry
     try:
         d_exp = pd.to_datetime(expiry)
-        opt_mid = _fetch_option_mid(ticker, d_exp.strftime("%Y-%m-%d"), strike, is_call)
+        _live_opt = _fetch_option_mid(ticker, d_exp.strftime("%Y-%m-%d"), strike, is_call)
         end = d_exp.date()
     except Exception:
-        opt_mid, end = 0.0, date.today()
+        _live_opt, end = 0.0, date.today()
+    opt_mid = _live_opt if _live_opt > 0 else premium
 
     # Kurs-vs-Strike: Abstand (positiv = aus dem Geld) + ITM-Flag
     if price > 0 and strike > 0:
@@ -293,11 +312,11 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
 
     def _tile(label: str, value: str, vcolor: str) -> str:
         return (
-            f"<div style='flex:1;min-width:70px;background:{track_bg};border:1px solid {txt_muted}33;"
-            f"border-radius:8px;padding:6px 8px;text-align:center'>"
-            f"<div style='font-size:0.58rem;color:{txt_muted};text-transform:uppercase;"
-            f"letter-spacing:0.05em'>{label}</div>"
-            f"<div style='font-size:0.92rem;font-weight:700;color:{vcolor}'>{value}</div></div>"
+            f"<div style='flex:1;min-width:74px;background:{track_bg};border:1px solid {txt_sub}55;"
+            f"border-radius:8px;padding:8px 8px;text-align:center'>"
+            f"<div style='font-size:0.72rem;color:{txt_sub};text-transform:uppercase;"
+            f"letter-spacing:0.04em'>{label}</div>"
+            f"<div style='font-size:1.12rem;font-weight:700;color:{vcolor};margin-top:2px'>{value}</div></div>"
         )
 
     tiles = (
@@ -311,20 +330,20 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
 <div style='background:{track_bg};border:1px solid {col}40;border-radius:14px;
             padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,0.18);
             font-family:RedRose,sans-serif'>
-  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:11px'>
-    <div style='display:flex;align-items:center;gap:9px;flex-wrap:wrap'>
-      <span style='font-weight:700;font-size:1.18rem;color:{txt_main};letter-spacing:0.02em'>{ticker}</span>
-      <span style='background:{col}1f;color:{col};font-size:0.7rem;font-weight:700;
-                   padding:3px 9px;border-radius:6px'>{strategy} ${strike:g}</span>
-      <span style='color:{txt_muted};font-size:0.7rem'>Class {cls}</span>
+  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>
+    <div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>
+      <span style='font-weight:700;font-size:1.4rem;color:{txt_main};letter-spacing:0.02em'>{ticker}</span>
+      <span style='background:{col}2a;color:{col};font-size:0.85rem;font-weight:700;
+                   padding:3px 10px;border-radius:6px'>{strategy} ${strike:g}</span>
+      <span style='color:{txt_sub};font-size:0.82rem;font-weight:600'>Class {cls}</span>
     </div>
-    <span style='background:{col};color:#fff;font-size:0.72rem;font-weight:700;
-                 padding:3px 12px;border-radius:20px;white-space:nowrap'>{word}</span>
+    <span style='background:{col};color:#fff;font-size:0.9rem;font-weight:700;
+                 padding:5px 16px;border-radius:20px;white-space:nowrap'>{word}</span>
   </div>
 
-  <div style='display:flex;justify-content:space-between;font-size:0.62rem;color:{txt_muted};margin-bottom:4px'>
+  <div style='display:flex;justify-content:space-between;font-size:0.78rem;color:{txt_sub};margin-bottom:5px'>
     <span>📅 Abschluss {start.strftime('%d.%m.')}</span>
-    <span style='font-weight:700;color:{txt_sub}'>{elapsed_pct}% Laufzeit · noch {dte} Tage</span>
+    <span style='font-weight:700;color:{txt_main}'>{elapsed_pct}% Laufzeit · noch {dte} Tage</span>
     <span>🏁 Verfall {end.strftime('%d.%m.')}</span>
   </div>
   <div style='position:relative;height:12px;background:{txt_muted}22;border-radius:6px;overflow:hidden'>
@@ -334,9 +353,9 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
                 background:{txt_main};border-radius:2px'></div>
   </div>
 
-  <div style='display:flex;justify-content:space-between;font-size:0.6rem;color:{txt_muted};
-              margin:11px 0 3px'>
-    <span>Kurs ↔ Strike</span><span style='color:{col};font-weight:700'>{word}</span>
+  <div style='display:flex;justify-content:space-between;font-size:0.74rem;color:{txt_sub};
+              margin:12px 0 3px'>
+    <span style='font-weight:600'>Kurs ↔ Strike</span><span style='color:{col};font-weight:700'>{word}</span>
   </div>
   <div style='position:relative;height:14px;border-radius:7px;background:{_zone}'>
     <div style='position:absolute;left:50%;top:-2px;height:18px;width:2px;background:{txt_main};opacity:0.55'></div>
@@ -344,13 +363,14 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
                 border-left:6px solid transparent;border-right:6px solid transparent;
                 border-top:9px solid {col};transform:translateX(-6px)'></div>
   </div>
-  <div style='display:flex;justify-content:space-between;font-size:0.6rem;color:{txt_muted};margin-top:3px'>
+  <div style='display:flex;justify-content:space-between;font-size:0.82rem;color:{txt_sub};
+              font-weight:600;margin-top:4px'>
     <span>💵 Kurs {_price_str}</span><span>🎯 Strike ${strike:g}</span>
   </div>
 
-  <div style='display:flex;gap:7px;margin-top:11px'>{tiles}</div>
+  <div style='display:flex;gap:8px;margin-top:12px'>{tiles}</div>
 
-  <div style='font-size:0.76rem;color:{txt_sub};margin-top:9px'>→ {action}</div>
+  <div style='font-size:0.9rem;color:{txt_main};font-weight:600;margin-top:10px'>→ {action}</div>
 </div>
 """
 
@@ -431,10 +451,11 @@ if not all_trades:
 # ── Filter-Controls ────────────────────────────────────────────────────────────
 fc1, fc2, fc3 = st.columns([2, 2, 3])
 with fc1:
+    _ALL_STATUS = ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"]
     status_filter = st.multiselect(
         "Status-Filter",
-        ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"],
-        default=["AKTIV", "WATCH", "WARNING", "ROLL"],
+        _ALL_STATUS,
+        default=_ALL_STATUS,   # alle aktiv; einzelne über das ✕ am Chip ausblenden
         key="tm_status",
     )
 with fc2:
@@ -749,30 +770,37 @@ for trade in visible_trades:
                     if track_url:
                         st.markdown(f"[📡 Dieser Trade (Link für Post)]({track_url})")
 
-            # ── Status-Steuerung ─────────────────────────────────────────────
-            st.markdown("**⚙️ Status aktualisieren**")
-            sc1, sc2, sc3 = st.columns([2, 2, 3])
-            with sc1:
-                new_status = st.selectbox(
-                    "Neuer Status",
-                    ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"],
-                    index=["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"].index(status)
-                    if status in ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"] else 0,
-                    key=f"ns_{trade_id}",
-                    label_visibility="collapsed",
-                )
-            with sc2:
-                status_note = st.text_input(
-                    "Notiz", placeholder="z.B. Strike bedroht, rollen…",
-                    key=f"note_{trade_id}", label_visibility="collapsed",
-                )
-            with sc3:
-                if st.button(
-                    f"💾 Status speichern", key=f"save_{trade_id}", use_container_width=True,
-                ):
-                    _update_trade_status(trade_id, new_status, status_note)
-                    st.success(f"Status auf **{new_status}** gesetzt.")
-                    st.rerun()
+            # ── Status-Steuerung (nur Admin) ─────────────────────────────────
+            if _is_owner:
+                st.markdown("**⚙️ Status aktualisieren / Trade schließen**")
+                sc1, sc2, sc3, sc4 = st.columns([2, 2, 2, 2])
+                _STAT = ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"]
+                with sc1:
+                    new_status = st.selectbox(
+                        "Neuer Status", _STAT,
+                        index=_STAT.index(status) if status in _STAT else 0,
+                        key=f"ns_{trade_id}", label_visibility="collapsed",
+                    )
+                with sc2:
+                    status_note = st.text_input(
+                        "Notiz", placeholder="z.B. Strike bedroht, rollen…",
+                        key=f"note_{trade_id}", label_visibility="collapsed",
+                    )
+                with sc3:
+                    if st.button("💾 Status speichern", key=f"save_{trade_id}",
+                                 use_container_width=True):
+                        _update_trade_status(trade_id, new_status, status_note)
+                        st.success(f"Status auf **{new_status}** gesetzt.")
+                        st.rerun()
+                with sc4:
+                    if st.button("✕ Trade entfernen", key=f"del_{trade_id}",
+                                 use_container_width=True,
+                                 help="Entfernt diesen Trade dauerhaft aus dem Monitor"):
+                        _delete_trade(trade_id)
+                        st.success("Trade entfernt.")
+                        st.rerun()
+            else:
+                st.caption("🔒 Status & Schließen nur für den Ersteller.")
 
     st.html("<div style='height:8px'></div>")
 

@@ -749,10 +749,13 @@ def render_option_mini_chart(
     iv_pct: float,
     option_type: str = "put",
     expiry_date: str = "",
+    dark_mode: bool = True,
 ) -> go.Figure:
     """
     Kompakter Inline-Chart: Kurshistorie + Options-Overlay.
     Zeigt Profit/Warning/Loss-Zonen, Strike, Break-Even und IV-Kegel.
+    dark_mode=False → heller Hintergrund (für das grüne/helle Theme), sonst
+    war der Chart auf hellem Grund schwarz.
     """
     df = hist.tail(90) if len(hist) > 90 else hist
     if df.empty:
@@ -867,31 +870,35 @@ def render_option_mini_chart(
               f"<b>Prämie/Tag:</b> ${premium / max(dte, 1) * 100:.2f}  "
               f"<b>Rendite ann.:</b> {ann_yield:.1f}%"),
         showarrow=False, xanchor="left", yanchor="top",
-        font=dict(size=10, color="#d1d5db"),
-        bgcolor="rgba(10,10,10,0.85)", borderpad=6,
-        bordercolor="#333", borderwidth=1,
+        font=dict(size=11, color="#d1d5db" if dark_mode else "#1e293b"),
+        bgcolor="rgba(10,10,10,0.85)" if dark_mode else "rgba(255,255,255,0.92)",
+        borderpad=6,
+        bordercolor="#333" if dark_mode else "#cbd5e1", borderwidth=1,
     )
 
     # ── Layout ─────────────────────────────────────────────────────────────
     strat = "Short Put" if option_type == "put" else "Short Call"
     title = (f"{strat} · {ticker} · Strike ${strike:.2f} · Prämie ${premium:.2f}"
              f"{' · ' + expiry_date if expiry_date else ''}")
+    _plot_bg = "rgba(10,10,10,0.85)" if dark_mode else "#ffffff"
+    _grid    = "#1e1e1e" if dark_mode else "#e5e7eb"
+    _txt     = "#9ca3af" if dark_mode else "#334155"
     fig.update_layout(
         height=420,
-        title=dict(text=title, font=dict(size=12, color="#9ca3af"), x=0),
+        title=dict(text=title, font=dict(size=13, color=_txt), x=0),
         margin=dict(l=10, r=140, t=42, b=30),
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(10,10,10,0.85)",
-        font=dict(color="#9ca3af", family="RedRose, Inter, sans-serif", size=10),
+        plot_bgcolor=_plot_bg,
+        font=dict(color=_txt, family="RedRose, Inter, sans-serif", size=11),
         xaxis=dict(
-            gridcolor="#1e1e1e", zeroline=False, tickfont=dict(size=9),
+            gridcolor=_grid, zeroline=False, tickfont=dict(size=10),
             rangeslider=dict(visible=False),
             range=[dates[0],
                    expiry_dt + pd.Timedelta(days=max(dte // 8, 3))],
         ),
         yaxis=dict(
-            gridcolor="#1e1e1e", zeroline=False,
-            tickfont=dict(size=9), tickformat="$,.0f",
+            gridcolor=_grid, zeroline=False,
+            tickfont=dict(size=10), tickformat="$,.0f",
             range=[y_min, y_max],
         ),
         legend=dict(orientation="h", y=-0.08, x=0,

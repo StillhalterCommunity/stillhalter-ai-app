@@ -41,6 +41,7 @@ def _show_option_chart_dialog(ticker, kurs, strike, premium, dte, iv_pct, is_cal
             hist=_hist, ticker=ticker, current_price=kurs, strike=strike,
             premium=premium, dte=dte, iv_pct=iv_pct,
             option_type=("call" if is_call else "put"), expiry_date=verfall,
+            dark_mode=(st.session_state.get("app_theme", "dark") != "green"),
         )
         st.plotly_chart(_fig, use_container_width=True, config={"displayModeBar": False})
     else:
