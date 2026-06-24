@@ -29,6 +29,23 @@ from data.fetcher import (
 from ui.charts import render_option_mini_chart
 from analysis.batch_screener import _optionstrat_url
 
+
+@st.dialog("📈 Options-Chart")
+def _show_option_chart_dialog(ticker, kurs, strike, premium, dte, iv_pct, is_call, verfall):
+    """Öffnet ein Popup mit dem Kurschart (Strike + Break-Even) der Option."""
+    st.markdown(f"**{ticker}** · {'Call' if is_call else 'Put'} "
+                f"Strike ${strike:g} · Verfall {verfall} · {dte} Tage")
+    _hist = fetch_price_history(ticker, period="6mo")
+    if _hist is not None and not _hist.empty and (kurs or 0) > 0 and strike > 0:
+        _fig = render_option_mini_chart(
+            hist=_hist, ticker=ticker, current_price=kurs, strike=strike,
+            premium=premium, dte=dte, iv_pct=iv_pct,
+            option_type=("call" if is_call else "put"), expiry_date=verfall,
+        )
+        st.plotly_chart(_fig, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.warning("Keine Kursdaten für den Chart verfügbar.")
+
 # ── Header ─────────────────────────────────────────────────────────────────────
 col_logo, col_title = st.columns([1, 6])
 with col_logo:
@@ -901,11 +918,10 @@ if cached_results is not None and not cached_results.empty:
                 show_key  = f"show_{share_key}"
                 share_text = _build_share_text(row.to_dict(), tech, cached_strategy)
 
-                # OptionStrat-Link (vorne) + Chart-Toggle + Community-Post
+                # OptionStrat-Link (vorne) + Chart-Popup + Community-Post
                 _is_call_idea = "Call" in str(strategie)
                 _os_url_idea  = _optionstrat_url(ticker, strike, verfall, _is_call_idea)
                 chart_key     = f"chart_{cls}_{idx}"
-                show_chart    = f"showc_{chart_key}"
 
                 bcol1, bcol2 = st.columns(2)
                 with bcol1:
@@ -914,26 +930,15 @@ if cached_results is not None and not cached_results.empty:
                                        use_container_width=True)
                 with bcol2:
                     if st.button("📈 Chart", key=chart_key, use_container_width=True,
-                                 help="Kurschart mit Strike & Break-Even"):
-                        st.session_state[show_chart] = not st.session_state.get(show_chart, False)
+                                 help="Kurschart mit Strike & Break-Even öffnen"):
+                        _show_option_chart_dialog(
+                            ticker, kurs, strike, praemie, dte, iv_pct,
+                            _is_call_idea, verfall,
+                        )
 
                 if st.button("📋 Community-Post", key=share_key, use_container_width=True,
                              help="Formatierten Post für die Community kopieren"):
                     st.session_state[show_key] = not st.session_state.get(show_key, False)
-
-                if st.session_state.get(show_chart, False) and strike > 0:
-                    _hist_idea = fetch_price_history(ticker, period="6mo")
-                    if _hist_idea is not None and not _hist_idea.empty and kurs > 0:
-                        _fig_idea = render_option_mini_chart(
-                            hist=_hist_idea, ticker=ticker, current_price=kurs,
-                            strike=strike, premium=praemie, dte=dte,
-                            iv_pct=iv_pct, option_type=("call" if _is_call_idea else "put"),
-                            expiry_date=verfall,
-                        )
-                        st.plotly_chart(_fig_idea, use_container_width=True,
-                                        config={"displayModeBar": False})
-                    else:
-                        st.caption("Keine Kursdaten für den Chart verfügbar.")
 
                 if st.session_state.get(show_key, False):
                     st.text_area("Post kopieren:", value=share_text, height=340,
