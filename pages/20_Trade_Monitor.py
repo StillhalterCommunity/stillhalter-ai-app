@@ -39,7 +39,8 @@ if _IS_GREEN:
     TXT_MAIN, TXT_SUB, TXT_MUTED = "#0a1628", "#475569", "#94a3b8"
 else:
     CARD_BG, CARD_BG2, CARD_BG3, CARD_BD = "#111", "#0e0e0e", "#0a120a", "#1e1e1e"
-    TXT_MAIN, TXT_SUB, TXT_MUTED = "#f0f0f0", "#888", "#555"
+    # Im Dark-Theme alles weiß (statt grau) für maximale Lesbarkeit.
+    TXT_MAIN, TXT_SUB, TXT_MUTED = "#ffffff", "#ffffff", "#e8e8e8"
 
 # ── Konstanten ─────────────────────────────────────────────────────────────────
 # Trades persistent ablegen: auf dem Volume (STILLHALTER_DATA_DIR), damit sie
@@ -385,7 +386,7 @@ with col_title:
         <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.8rem;
                     color:#f0f0f0;letter-spacing:0.04em'>📡 TRADE MONITOR</div>
         <div style='font-family:RedRose,sans-serif;font-weight:300;font-size:0.8rem;
-                    color:#666;text-transform:uppercase;letter-spacing:0.12em;margin-top:2px'>
+                    color:#e8e8e8;text-transform:uppercase;letter-spacing:0.12em;margin-top:2px'>
             Live-Tracking · Optionen verfolgen bis zum Verfall
         </div>
     </div>
@@ -475,7 +476,19 @@ visible_trades = [
     and t.get("class", "A") in class_filter
 ]
 
-# Hervorgehobenen Trade zuerst zeigen
+# Immer nach Laufzeitende (Verfall) sortieren — der naheste Verfall zuerst.
+def _expiry_key(t: dict):
+    # errors="coerce" → NaT statt Crash; leeres/ungültiges Datum ans Ende.
+    d = pd.to_datetime(t.get("expiry", ""), errors="coerce")
+    if pd.isna(d):
+        return date.max
+    try:
+        return d.date()
+    except Exception:
+        return date.max
+visible_trades = sorted(visible_trades, key=_expiry_key)
+
+# Hervorgehobenen Trade (aus Tracking-Link) trotzdem zuerst zeigen
 if highlight_id:
     visible_trades = sorted(
         visible_trades,
@@ -807,7 +820,7 @@ for trade in visible_trades:
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("""
-<div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.76rem;color:#333;letter-spacing:0.08em'>
+<div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.76rem;color:#cfcfcf;letter-spacing:0.08em'>
     STILLHALTER COMMUNITY · Live-Preise: Yahoo Finance · Nicht als Finanzberatung zu verstehen
 </div>
 """, unsafe_allow_html=True)
