@@ -250,11 +250,18 @@ def scan_strangle(
             p_exp["_has_market"] = (p_exp["bid"] > 0) & (p_exp["ask"] > 0) & (p_exp["ask"] >= p_exp["bid"])
             c_exp["_has_market"] = (c_exp["bid"] > 0) & (c_exp["ask"] > 0) & (c_exp["ask"] >= c_exp["bid"])
 
-            # Mid-Price aus Bid/Ask; off-hours (require_valid_market=False)
-            # lastPrice als Fallback, damit der Scan bei geschlossenem Markt
-            # nicht leer ausgeht.
-            _p_fallback = p_exp["lastPrice"] if not require_valid_market else 0.0
-            _c_fallback = c_exp["lastPrice"] if not require_valid_market else 0.0
+            # Sparse-Market-Erkennung (off-hours: kaum echte Bid/Ask vorhanden)
+            p_sparse = p_exp["_has_market"].mean() < 0.20
+            c_sparse = c_exp["_has_market"].mean() < 0.20
+
+            # lastPrice als Preis-Fallback erlauben, wenn off-hours
+            # (require_valid_market=False) ODER der Markt sparse ist — exakt wie
+            # scan_ticker beim CSP. Sonst findet der Strangle off-hours NICHTS,
+            # weil Bid/Ask dann 0 sind (Bug: CSP ging, Strangle nicht).
+            _p_last_ok = (not require_valid_market) or p_sparse
+            _c_last_ok = (not require_valid_market) or c_sparse
+            _p_fallback = p_exp["lastPrice"] if _p_last_ok else 0.0
+            _c_fallback = c_exp["lastPrice"] if _c_last_ok else 0.0
             p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, _p_fallback)
             c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, _c_fallback)
 
@@ -270,17 +277,13 @@ def scan_strangle(
             p_exp["otm_pct"] = ((current_price - p_exp["strike"].astype(float)) / current_price * 100).clip(lower=0)
             c_exp["otm_pct"] = ((c_exp["strike"].astype(float) - current_price) / current_price * 100).clip(lower=0)
 
-            # Sparse-Market-Erkennung (wenn <20% echte Bid/Ask → Warnung aber kein Fallback)
-            p_sparse = p_exp["_has_market"].mean() < 0.20
-            c_sparse = c_exp["_has_market"].mean() < 0.20
-
-            # Filter anwenden. Marktzeiten: Bid UND Ask Pflicht + Spread-Filter.
-            # Off-hours (require_valid_market=False): lastPrice-Optionen erlaubt,
-            # Spread-Filter nur auf Optionen mit echtem Markt anwenden.
-            def _apply_filters(df_, sparse: bool) -> pd.DataFrame:
+            # Filter anwenden. last_ok=True (off-hours ODER sparse): lastPrice-
+            # Optionen erlaubt, Spread-Filter nur wo echter Markt existiert.
+            # last_ok=False (echter Markt): Bid UND Ask Pflicht + Spread-Filter.
+            def _apply_filters(df_, last_ok: bool) -> pd.DataFrame:
                 iv_col = df_.get("impliedVolatility", pd.Series([1.0]*len(df_), index=df_.index)).fillna(0)
                 oi_col = df_.get("openInterest",      pd.Series([min_oi]*len(df_), index=df_.index)).fillna(0)
-                if require_valid_market:
+                if not last_ok:
                     market_ok   = df_["_has_market"]
                     spread_ok   = df_["_spread_pct"] <= max_spread_pct
                 else:
@@ -298,8 +301,8 @@ def scan_strangle(
                 )
                 return df_[mask]
 
-            p_filt = _apply_filters(p_exp, p_sparse)
-            c_filt = _apply_filters(c_exp, c_sparse)
+            p_filt = _apply_filters(p_exp, _p_last_ok)
+            c_filt = _apply_filters(c_exp, _c_last_ok)
 
             if p_filt.empty or c_filt.empty:
                 continue
