@@ -3,6 +3,7 @@ Stillhalter AI App — Watchlist Scanner
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -42,6 +43,57 @@ def _fetch_mini_hist(ticker: str):
     except Exception:
         import pandas as pd
         return pd.DataFrame()
+
+
+def _tradingview_html(ticker: str, dark: bool, height: int = 460) -> str:
+    """TradingView Advanced-Chart-Widget (interaktiv, schön) für einen Ticker."""
+    theme = "dark" if dark else "light"
+    bg    = "#0e0e0e" if dark else "#ffffff"
+    cid   = f"tv_{ticker}".replace(".", "_")
+    return f"""
+<div class="tradingview-widget-container" style="height:{height}px;width:100%;background:{bg}">
+  <div id="{cid}" style="height:100%;width:100%"></div>
+</div>
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script>
+new TradingView.widget({{
+  "autosize": true,
+  "symbol": "{ticker}",
+  "interval": "D",
+  "timezone": "Europe/Berlin",
+  "theme": "{theme}",
+  "style": "1",
+  "locale": "de_DE",
+  "hide_side_toolbar": true,
+  "allow_symbol_change": true,
+  "studies": ["STD;EMA", "STD;MACD"],
+  "container_id": "{cid}"
+}});
+</script>
+"""
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _scanner_tf_ampel(ticker: str) -> dict:
+    """Ampel-Farben (🟢/🟡/🔴) je Indikator × Zeitebene (4h, 1d) via Multi-Timeframe."""
+    out = {"Trend":      {"4h": "⚪", "1d": "⚪"},
+           "MACD":       {"4h": "⚪", "1d": "⚪"},
+           "Stoch schnell": {"4h": "⚪", "1d": "⚪"},
+           "Stoch langsam": {"4h": "⚪", "1d": "⚪"}}
+    try:
+        m = analyze_multi_timeframe(ticker)
+        for key, sig in (("4h", getattr(m, "tf_4h", None)), ("1d", getattr(m, "tf_1d", None))):
+            if not sig:
+                continue
+            out["Trend"][key] = "🟢" if getattr(sig, "ema_bullish", False) else "🔴"
+            out["MACD"][key]  = "🟢" if getattr(sig, "macd_bullish", False) else "🔴"
+            out["Stoch schnell"][key] = ("🟢" if getattr(sig, "stoch_oversold", False)
+                                         else ("🔴" if getattr(sig, "stoch_overbought", False) else "🟡"))
+            out["Stoch langsam"][key] = ("🟢" if getattr(sig, "stoch_slow_oversold", False)
+                                         else ("🔴" if getattr(sig, "stoch_slow_overbought", False) else "🟡"))
+    except Exception:
+        pass
+    return out
 
 # ── Header ────────────────────────────────────────────────────────────────────
 h1, h2 = st.columns([1, 6])
@@ -1403,9 +1455,9 @@ else:
         "S/R Schutz":    st.column_config.TextColumn("S/R Schutz", width="medium",
                                                       help="✅ Strike liegt hinter einer Unterstützung/Widerstand · ⚠️ Kein S/R gefunden"),
         "OptionStrat":   st.column_config.LinkColumn(
-            "📊 OptionStrat",
-            display_text="→ Analysieren",
-            width="medium",
+            "📊",
+            display_text="↗",
+            width="small",
             help="Direkt auf OptionStrat öffnen — Live-Prämie, Payoff-Diagramm, Greeks",
         ),
     }
@@ -1478,7 +1530,7 @@ else:
             key="scan_table_sel_fb",
         )
 
-    st.caption("💡 Zeile anklicken → Mini-Chart mit Payoff-Overlay")
+    st.caption("💡 Zeile anklicken → TradingView-Chart + 4h/1D-Indikator-Ampel")
 
     # ── Mini-Chart bei Zeilenauswahl ──────────────────────────────────────
     _scan_sel = (getattr(_scan_event, "selection", None) or {})
@@ -1502,31 +1554,32 @@ else:
                 st.markdown("---")
                 _mc1, _mc2 = st.columns([3, 2])
                 with _mc1:
-                    _mini_hist = _fetch_mini_hist(_tkr)
-                    if not _mini_hist.empty and _kurs > 0:
-                        fig_mini = render_option_mini_chart(
-                            hist=_mini_hist,
-                            ticker=_tkr,
-                            current_price=_kurs,
-                            strike=_strike,
-                            premium=_premium,
-                            dte=_dte,
-                            iv_pct=_iv_pct,
-                            option_type=_opt_type,
-                            expiry_date=_expiry,
-                            dark_mode=(st.session_state.get("app_theme", "dark") != "green"),
-                        )
-                        st.plotly_chart(fig_mini, use_container_width=True,
-                                        config={"displayModeBar": False})
+                    # Schöner interaktiver TradingView-Chart statt Plotly-Mini
+                    _tv_dark = st.session_state.get("app_theme", "dark") != "green"
+                    components.html(_tradingview_html(_tkr, _tv_dark), height=470)
                 with _mc2:
-                    if _kurs > 0:
-                        fig_pay = render_payoff_diagram(
-                            _kurs, _strike, _premium,
-                            _opt_type, _tkr, _dte,
-                        )
-                        fig_pay.update_layout(height=260, margin=dict(l=5,r=5,t=45,b=30))
-                        st.plotly_chart(fig_pay, use_container_width=True,
-                                        config={"displayModeBar": False})
+                    # ── Ampel 4h / 1D ─────────────────────────────────────
+                    _is_green = st.session_state.get("app_theme", "dark") == "green"
+                    _lbl = "#0a1628" if _is_green else "#f0f0f0"
+                    _sub = "#475569" if _is_green else "#888"
+                    _amp = _scanner_tf_ampel(_tkr)
+                    _amp_rows = "".join(
+                        f"<tr><td style='padding:4px 10px 4px 0;font-size:0.84rem;color:{_lbl}'>{k}</td>"
+                        f"<td style='text-align:center;font-size:1.05rem'>{v['4h']}</td>"
+                        f"<td style='text-align:center;font-size:1.05rem'>{v['1d']}</td></tr>"
+                        for k, v in _amp.items()
+                    )
+                    st.html(
+                        f"<div style='font-size:0.9rem;font-weight:700;color:{_lbl};margin-bottom:4px'>"
+                        f"🚦 Indikator-Ampel</div>"
+                        f"<table style='width:100%;border-collapse:collapse'>"
+                        f"<tr><td></td>"
+                        f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>4h</td>"
+                        f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>1D</td></tr>"
+                        f"{_amp_rows}</table>"
+                        f"<div style='font-size:0.68rem;color:{_sub};margin-top:4px'>"
+                        f"🟢 bullisch/überverkauft · 🔴 bärisch/überkauft · 🟡 neutral</div>"
+                    )
 
                     # ── OptionStrat-Button ────────────────────────────────
                     _os_url = str(_r.get("OptionStrat", ""))
