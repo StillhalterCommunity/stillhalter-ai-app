@@ -3,15 +3,30 @@
 Lebende Prüfliste für „läuft fehlerfrei **und** sieht fehlerfrei aus". Status:
 ✅ erledigt · 🔧 in Arbeit · ⬜ offen · ⚠️ bekannt/akzeptiert
 
-Letzte Durcharbeitung: 2026-06-18 (autonom)
+Letzte Durcharbeitung: 2026-07-03 (autonom, App-weiter Klick-Test)
+
+## 0. Wiederholbarer QA-Lauf (das Werkzeug)
+```
+STILLHALTER_DATA_DIR=/tmp/sth_qa python3 qa/run_qa.py            # Seiten-Sweep
+STILLHALTER_DATA_DIR=/tmp/sth_qa python3 qa/run_qa.py --clicks   # + Klick-Tests
+```
+Sweep = alle Seiten × Admin/Gast × dark/green via Streamlit AppTest.
+Klicks = Monitor-Verwaltung, TM-Bewertung, Top9-Chart, Tagesdaten, Scanner-Scan
+(letzterer nur mit `MASSIVE_API_KEY`). Exit-Code 0/1 → CI-tauglich.
+Hinweis: Nach ~90 Loads drosselt Yahoo zeitweise → 0-Treffer im Scan-Klick
+sind dann Drosselung, kein Bug (einzeln gegenprüfen).
 
 ---
 
 ## 1. Code-Gesundheit (läuft fehlerfrei)
 - ✅ Alle `.py` kompilieren (`py_compile` über das ganze Repo)
 - ✅ App bootet headless ohne Importfehler (`streamlit run app.py` → HTTP 200)
-- ✅ Jede Seite läuft ohne Laufzeitfehler — automatisiert über `AppTest`
-      (beide Themes). 21/21 Seiten OK; Seite 18 nur netzwerk-langsam (Test-Timeout).
+- ✅ Voll-Sweep 2026-07-03: 22 Seiten × Admin/Gast × 2 Themes = 88 Läufe,
+      **0 Exceptions**. Gefixt dabei:
+      · Top9 startete beim bloßen Öffnen einen 225-Ticker-Auto-Scan
+        (Timeout + 502-Risiko) → entfernt, Hinweis + bewusster Button.
+      · Seite 18 (Newsletter) baute beim Öffnen synchron alles auf (Minuten)
+        → Lazy-Gate „Newsletter jetzt erzeugen" (Laden jetzt 0,1s).
 - ⚠️ Viele `except Exception: return leer` schlucken Fehler (bewusst für
       Robustheit; erschwert aber Diagnose) — als Designentscheidung akzeptiert
 

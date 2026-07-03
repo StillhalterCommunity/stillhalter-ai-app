@@ -510,13 +510,14 @@ with st.expander(_qs_label, expanded=_qs_expanded):
                  key="btn_quickscan"):
         _run_comprehensive_scan(exclude_earnings=qs_excl_earn)
 
-# Auto-Scan bei veralteten Daten (einmalig pro Session, nur bei offenem Markt)
-_AUTO_KEY = "_top9_autoscan_done"
+# KEIN Auto-Scan mehr beim Seitenload: Der 225-Ticker-Komplett-Scan wurde
+# sonst von JEDEM Besucher ausgelöst (Instanz-Überlast/502, Seite hing).
+# Stattdessen deutlicher Hinweis — Start nur bewusst über den Button oben.
 if (cached_results is None or age_hours_global > 4) and mkt_open:
-    if not st.session_state.get(_AUTO_KEY, False):
-        st.session_state[_AUTO_KEY] = True
-        st.info("🔄 Cache veraltet — automatischer Komplett-Scan wird gestartet…")
-        _run_comprehensive_scan()
+    st.warning(
+        "🔄 **Scan-Daten veraltet** — bitte oben **🚀 Komplett-Scan starten** "
+        "klicken für frische Top-9-Ideen (Dauer ca. 4–8 Min.).",
+    )
 
 if cached_results is not None and not cached_results.empty:
     ts_str = cached_ts.strftime("%d.%m.%Y %H:%M") if cached_ts else "unbekannt"

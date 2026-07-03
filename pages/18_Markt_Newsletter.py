@@ -1006,7 +1006,24 @@ with st.expander("⚙️ Einstellungen", expanded=False):
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — MARKTÜBERBLICK (auto-load)
+# LAZY-GATE: Der Newsletter zieht Daten aus vielen Quellen (Marktdaten, News,
+# 11 Sektoren, Optionen) — das dauerte beim bloßen Öffnen der Seite mehrere
+# Minuten. Aufbau startet jetzt erst per Klick (einmal pro Session).
+# ══════════════════════════════════════════════════════════════════════════════
+if not st.session_state.get("nl_built", False):
+    st.markdown("### 📰 Newsletter erzeugen")
+    st.caption(
+        "Der Aufbau lädt Marktüberblick, Top-News, 11 Sektoren mit News, "
+        "Fundamentals, Technik und Optionsempfehlungen — Dauer ca. 1–3 Minuten."
+    )
+    if st.button("📰 Newsletter jetzt erzeugen", type="primary",
+                 use_container_width=True, key="nl_build_btn"):
+        st.session_state["nl_built"] = True
+        st.rerun()
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 1 — MARKTÜBERBLICK
 # ══════════════════════════════════════════════════════════════════════════════
 with st.spinner("Lade Marktdaten…"):
     mkt = _market_overview()
