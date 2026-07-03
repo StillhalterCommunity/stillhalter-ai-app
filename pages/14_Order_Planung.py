@@ -111,10 +111,11 @@ _on_railway = (
 _bridge_cmd = "python3 bridge.py" if _on_railway else f'python3 "{_os.path.join(_app_dir, "bridge.py")}"'
 _bridge_key = "stillhalter-bridge"
 
-# URL-Persistenz: Query-Parameter überlebt Deployments (Browser speichert sie)
+# URL-Persistenz: Query-Parameter (Browser) + Volume (app-weit, überlebt Deploys)
+from trading.order_sender import save_bridge_url as _persist_burl, load_bridge_url as _load_burl
 _qp = st.query_params.get("burl", "")
 if "bridge_url" not in st.session_state:
-    st.session_state["bridge_url"] = _qp or ""
+    st.session_state["bridge_url"] = _qp or _load_burl() or ""
 
 # Auto-Connect: beim Seitenload still pingen wenn URL vorhanden und noch nicht verbunden
 if not st.session_state.ibkr_connected and st.session_state.get("bridge_url"):
@@ -138,6 +139,10 @@ with st.expander("🔌 TWS Verbindung", expanded=not st.session_state.ibkr_conne
         st.session_state["bridge_url"] = url
         try:
             st.query_params["burl"] = url   # im Browser-URL speichern
+        except Exception:
+            pass
+        try:
+            _persist_burl(url)              # app-weit im Volume (Scanner/Monitor)
         except Exception:
             pass
 

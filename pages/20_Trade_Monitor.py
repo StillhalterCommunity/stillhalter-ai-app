@@ -611,6 +611,30 @@ with st.spinner("⏳ Live-Daten…"):
                         _delete_trade(_tid)
                         st.rerun()
 
+                # ── Order direkt an IBKR (Held) über die lokale Bridge ────────
+                st.markdown("---")
+                _t_strike  = float(_t.get("strike", 0) or 0)
+                _t_expiry  = str(_t.get("expiry", ""))[:10]
+                _t_iscall  = "Call" in str(_t.get("strategy", ""))
+                _t_premium = float(_t.get("premium", 0) or 0)
+                _ord_lmt = st.number_input(
+                    "Limit $", min_value=0.01,
+                    value=max(0.01, round(_t_premium * 0.9, 2) or 0.05),
+                    step=0.05, format="%.2f", key=f"ov_lmt_{_tid}",
+                    help="Vorschlag: 90% der Einstiegsprämie — anpassen nach Marktlage",
+                )
+                _ord_qty = st.number_input("Kontrakte", 1, 100, 1, key=f"ov_qty_{_tid}")
+                if st.button("📤 An IBKR senden (Held)", key=f"ov_ibkr_{_tid}",
+                             use_container_width=True,
+                             help="Pausiert (Held) in TWS platzieren — Freigabe in TWS"):
+                    from trading.order_sender import send_short_option as _send_ord
+                    _ok, _msg = _send_ord(
+                        ticker=_tkr, right=("C" if _t_iscall else "P"),
+                        strike=_t_strike, expiration=_t_expiry,
+                        limit_price=float(_ord_lmt), quantity=int(_ord_qty),
+                    )
+                    (st.success if _ok else st.error)(_msg)
+
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("""

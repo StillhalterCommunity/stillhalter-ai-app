@@ -1697,6 +1697,28 @@ else:
                         key=f"qty_quick_{_tkr}_{_strike}",
                     )
 
+                    # ── Direkt an IBKR senden (Held) — nur Admin + Bridge aktiv ──
+                    try:
+                        from data.maintenance import is_admin as _os_is_admin
+                        _order_admin = _os_is_admin(st.session_state.get("auth_user", ""))
+                    except Exception:
+                        _order_admin = False
+                    if _order_admin:
+                        from trading.order_sender import send_short_option as _send_ord
+                        if st.button(
+                            "📤 Jetzt in TWS platzieren (Held)",
+                            key=f"ibkr_quick_{_tkr}_{_strike}",
+                            use_container_width=True,
+                            help="Sendet die Order pausiert (Held) über die lokale "
+                                 "Bridge an TWS — Freigabe machst du in TWS.",
+                        ):
+                            _ok, _msg = _send_ord(
+                                ticker=_tkr, right=("C" if _is_call else "P"),
+                                strike=_strike, expiration=_expiry_raw,
+                                limit_price=_lmt_input, quantity=int(_qty_input),
+                            )
+                            (st.success if _ok else st.error)(_msg)
+
                     if st.button(
                         "📋 In Order-Planung öffnen",
                         key=f"trade_btn_{_tkr}_{_strike}",
