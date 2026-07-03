@@ -1094,10 +1094,15 @@ def _text_to_html(text: str) -> str:
 
 def _to_circle_text(text: str) -> str:
     """Wandelt einen WhatsApp-Post in Circle-taugliches Format zum Einfügen:
-    *fett* (WhatsApp) → **fett** (Markdown — Circles Editor wandelt das beim
-    Einfügen/Tippen in echtes Fett um). Rest bleibt unverändert."""
+    - *fett* (WhatsApp) → **fett** (Markdown — Circles Editor übernimmt das
+      beim Einfügen als echtes Fett).
+    - Leerzeilen entfernen: Circles Editor macht aus JEDER Zeile einen Absatz
+      mit eigenem Abstand — die WhatsApp-Leerzeilen ergäben doppelte Lücken
+      (zu großer Zeilenabstand). Die Absatz-Optik übernimmt Circle selbst."""
     import re as _re
-    return _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"**\1**", text)
+    out = _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"**\1**", text)
+    out = _re.sub(r"\n\s*\n+", "\n", out)   # Leerzeilen raus
+    return out.strip()
 
 
 def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
@@ -1724,23 +1729,27 @@ with tab1:
     if "m_generated" in st.session_state and st.session_state["m_generated"]:
         gen = st.session_state["m_generated"]
 
+        _tab_labels = [f"Class {cls} · {d['ticker']}" for cls, d in gen.items()]
+        _all_label  = f"Alle {len(gen)} zusammen"
+
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
         st.markdown("## 📱 Kurzversion (für schnelles Teilen)")
-        sc_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
-        for (cls, d), stab in zip(gen.items(), sc_tabs):
+        sc_tabs = st.tabs(_tab_labels + [_all_label])
+        for (cls, d), stab in zip(gen.items(), sc_tabs[:-1]):
             with stab:
                 st.code(d["wa_compact"], language="text")
+        with sc_tabs[-1]:
+            st.code("\n\n".join(d["wa_compact"] for d in gen.values()), language="text")
 
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
         st.markdown("## 📋 Langversion (Detail-Post)")
-        lg_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()])
-        for (cls, d), ltab in zip(gen.items(), lg_tabs):
+        combined_long = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
+        lg_tabs = st.tabs(_tab_labels + [_all_label])
+        for (cls, d), ltab in zip(gen.items(), lg_tabs[:-1]):
             with ltab:
                 st.code(d["wa_long"], language="text")
-
-        st.markdown(f"### 📤 Alle {len(gen)} zusammen (Langversion)")
-        combined_long = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
-        st.code(combined_long, language="text")
+        with lg_tabs[-1]:
+            st.code(combined_long, language="text")
 
         # ── Circle-Version zum manuellen Kopieren ─────────────────────────────
         # WhatsApp-*fett* wirkt auf Circle nicht — hier als **Markdown-Fett**,

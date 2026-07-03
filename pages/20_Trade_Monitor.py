@@ -311,21 +311,47 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
     else:
         _zone = f"linear-gradient(90deg,{R}33 0%,{R}1f 49%,{G}1f 51%,{G}33 100%)"
 
-    def _tile(label: str, value: str, vcolor: str) -> str:
+    def _tile(label: str, value: str, vcolor: str, sub: str = "") -> str:
+        sub_html = (f"<div style='font-size:0.7rem;color:{txt_sub};margin-top:1px'>{sub}</div>"
+                    if sub else "")
         return (
             f"<div style='flex:1;min-width:74px;background:{track_bg};border:1px solid {txt_sub}55;"
             f"border-radius:8px;padding:8px 8px;text-align:center'>"
             f"<div style='font-size:0.72rem;color:{txt_sub};text-transform:uppercase;"
             f"letter-spacing:0.04em'>{label}</div>"
-            f"<div style='font-size:1.12rem;font-weight:700;color:{vcolor};margin-top:2px'>{value}</div></div>"
+            f"<div style='font-size:1.12rem;font-weight:700;color:{vcolor};margin-top:2px'>{value}</div>"
+            f"{sub_html}</div>"
         )
 
+    # P&L pro Kontrakt (eingenommene Prämie − aktueller Optionspreis)
+    delta_v  = float(trade.get("delta", 0) or 0)
+    pnl_usd  = ((premium - opt_mid) * 100) if premium > 0 else None
+    pnl_col  = G if (pnl_usd or 0) >= 0 else R
+    _pnl_str = f"{pnl_usd:+,.0f} $" if pnl_usd is not None else "–"
+
     tiles = (
-        _tile("Abstand", f"{otm:+.1f}% {_otm_lbl}", col)
-        + _tile("Option", _opt_str, txt_main)
-        + _tile("Verfall", _decay_str, G if (decay or 0) >= 0 else R)
-        + _tile("Rest", f"{dte} T", txt_main)
+        _tile("Abstand", f"{otm:+.1f}% {_otm_lbl}", col,
+              sub=(f"Δ {delta_v:+.2f}" if delta_v else ""))
+        + _tile("Option", _opt_str, txt_main,
+                sub=(f"Einstieg ${premium:.2f}" if premium > 0 else ""))
+        + _tile("P&L", _pnl_str, pnl_col,
+                sub=(f"{decay:+.0f}% der Prämie" if decay is not None else ""))
+        + _tile("Rest", f"{dte} T", txt_main, sub=end.strftime("%d.%m.%y"))
     )
+
+    # Take-Profit-Ziele + Links (OptionStrat, Post-Link)
+    opt_url   = _build_optionstrat_url(trade) or trade.get("optionstrat_url", "")
+    track_url = trade.get("tracking_url", "")
+    _tp_html = (f"🎯 TP 50% ≤ ${premium*0.5:.2f} · TP 70% ≤ ${premium*0.3:.2f}"
+                if premium > 0 else "")
+    _link_parts = []
+    if opt_url:
+        _link_parts.append(f"<a href='{opt_url}' target='_blank' "
+                           f"style='color:{col};text-decoration:none;font-weight:600'>📊 OptionStrat ↗</a>")
+    if track_url:
+        _link_parts.append(f"<a href='{track_url}' target='_blank' "
+                           f"style='color:{txt_sub};text-decoration:none'>📡 Post-Link</a>")
+    _links_html = " &nbsp;·&nbsp; ".join(_link_parts)
 
     return f"""
 <div style='background:{track_bg};border:1px solid {col}40;border-radius:14px;
@@ -366,12 +392,17 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
   </div>
   <div style='display:flex;justify-content:space-between;font-size:0.82rem;color:{txt_sub};
               font-weight:600;margin-top:4px'>
-    <span>💵 Kurs {_price_str}</span><span>🎯 Strike ${strike:g}</span>
+    <span>💵 Kurs {_price_str}{f" <span style='font-weight:400'>(Einstieg ${price_at_entry:.2f})</span>" if price_at_entry > 0 else ""}</span>
+    <span>🎯 Strike ${strike:g}</span>
   </div>
 
   <div style='display:flex;gap:8px;margin-top:12px'>{tiles}</div>
 
-  <div style='font-size:0.9rem;color:{txt_main};font-weight:600;margin-top:10px'>→ {action}</div>
+  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;
+              gap:6px;margin-top:10px'>
+    <span style='font-size:0.9rem;color:{txt_main};font-weight:600'>→ {action}</span>
+    <span style='font-size:0.78rem;color:{txt_sub}'>{_tp_html}{" &nbsp;·&nbsp; " if (_tp_html and _links_html) else ""}{_links_html}</span>
+  </div>
 </div>
 """
 
@@ -468,6 +499,16 @@ with fc2:
     )
 with fc3:
     st.caption(f"📡 {len(all_trades)} Trades gespeichert · Live-Preise werden alle 60s aktualisiert")
+    # ── Alle Trades entfernen (nur Admin, mit Bestätigung) ────────────────────
+    if _is_owner and all_trades:
+        with st.popover("🗑️ Alle Trades entfernen"):
+            st.warning(f"⚠️ Entfernt **alle {len(all_trades)} Trades** dauerhaft "
+                       f"aus dem Monitor. Das kann nicht rückgängig gemacht werden.")
+            if st.button("Ja, alle Trades unwiderruflich entfernen",
+                         type="primary", key="btn_del_all_trades",
+                         use_container_width=True):
+                _save_trades([])
+                st.rerun()
 
 # Filtern
 visible_trades = [
@@ -505,317 +546,36 @@ st.markdown(f"### 📊 Übersicht — {len(visible_trades)} Trades")
 st.caption("Balken = Laufzeit (Abschluss → Verfall, Füllung = verstrichene Zeit) · "
            "Farbe: 🟢 OK · 🟡 nah am Strike · 🔴 im Geld")
 
+_STAT_OPTIONS = ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"]
+
 with st.spinner("⏳ Live-Daten…"):
     for _t in visible_trades:
         st.html(_timeline_card_html(_t, CARD_BG2, TXT_MAIN, TXT_SUB, TXT_MUTED))
 
-st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
-st.markdown("#### 🔎 Details")
-
-# ── Live-Karten ────────────────────────────────────────────────────────────────
-for trade in visible_trades:
-    trade_id  = trade.get("trade_id", "")
-    cls       = trade.get("class", "–")
-    ticker    = trade.get("ticker", "–")
-    company   = trade.get("company", ticker)
-    strategy  = trade.get("strategy", "–")
-    strike    = float(trade.get("strike", 0))
-    expiry    = trade.get("expiry", "")
-    premium   = float(trade.get("premium", 0))
-    delta     = float(trade.get("delta", 0))
-    iv_pct    = float(trade.get("iv_pct", 0))
-    entry_px  = float(trade.get("price_at_entry", 0))
-    status    = trade.get("status", "AKTIV")
-    post_ts   = trade.get("post_ts", "–")
-    # Immer frisch im korrekten OCC-Format bauen (alte gespeicherte URLs könnten
-    # noch das veraltete Format haben); gespeicherte nur als Fallback.
-    opt_url   = _build_optionstrat_url(trade) or trade.get("optionstrat_url", "")
-    track_url = trade.get("tracking_url", "")
-    is_call   = "Call" in strategy
-
-    is_highlighted = (trade_id == highlight_id)
-    cls_colors = {"A": "#22c55e", "B": "#d4a843", "C": "#ef4444"}
-    cls_color  = cls_colors.get(cls, "#888")
-    stat_color = STATUS_COLORS.get(status, "#888")
-
-    dte = _dte_from_expiry(expiry)
-    dte_color = "#ef4444" if dte <= 7 else ("#f59e0b" if dte <= 21 else "#22c55e")
-    dte_icon  = "🔴" if dte <= 7 else ("🟡" if dte <= 21 else "🟢")
-
-    border_extra = "box-shadow:0 0 12px #d4a84366;" if is_highlighted else ""
-
-    with st.container():
-        header_exp = st.expander(
-            f"{'⭐ ' if is_highlighted else ''}"
-            f"Class {cls} · **{ticker}** · {strategy} · Strike ${strike:.0f} · "
-            f"{dte_icon} {dte}T bis Verfall · Status: {status}",
-            expanded=is_highlighted,
-        )
-        with header_exp:
-            # ── Live-Daten laden ────────────────────────────────────────────
-            with st.spinner(f"⏳ Live-Daten für {ticker}…"):
-                current_price = _fetch_current_price(ticker)
-                try:
-                    d_exp = pd.to_datetime(expiry)
-                    expiry_chain = d_exp.strftime("%Y-%m-%d")
-                except Exception:
-                    expiry_chain = expiry
-                current_opt_mid = _fetch_option_mid(ticker, expiry_chain, strike, is_call)
-
-            # ── P/L-Berechnung ──────────────────────────────────────────────
-            pnl_usd = 0.0
-            pnl_pct = 0.0
-            if premium > 0:
-                if current_opt_mid > 0:
-                    pnl_usd = (premium - current_opt_mid) * 100
-                    pnl_pct = (premium - current_opt_mid) / premium * 100
-                elif current_price > 0 and entry_px > 0:
-                    # Grobe Schätzung wenn keine Option gefunden
-                    px_chg = (current_price - entry_px) / entry_px
-                    pnl_pct = -px_chg * abs(delta) * 100 * (-1 if is_call else 1) + 10
-                    pnl_usd = pnl_pct / 100 * premium * 100
-
-            pl_color = _pnl_color(pnl_pct)
-
-            # ── Layout ──────────────────────────────────────────────────────
-            c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
-
-            _cp_str = f"${current_price:.2f}" if (current_price and current_price > 0) else "–"
-            with c1:
-                st.html(f"""
-                <div style='background:{CARD_BG};border:1px solid {cls_color}40;border-left:3px solid {cls_color};
-                            border-radius:8px;padding:10px 14px;{border_extra}'>
-                    <div style='font-size:0.6rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        Class {cls} · {company}</div>
-                    <div style='font-size:1.4rem;font-weight:700;color:{TXT_MAIN};font-family:sans-serif;
-                                margin:4px 0'>{ticker}</div>
-                    <div style='font-size:0.78rem;color:{TXT_SUB};font-family:sans-serif'>{strategy}</div>
-                    <div style='margin-top:6px'>
-                        <span style='background:{stat_color}22;color:{stat_color};border-radius:4px;
-                                     padding:2px 8px;font-size:0.7rem;font-weight:700'>{status}</span>
-                    </div>
-                </div>
-                """)
-
-            with c2:
-                st.html(f"""
-                <div style='background:{CARD_BG2};border:1px solid {CARD_BD};border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        Aktueller Kurs</div>
-                    <div style='font-size:1.2rem;font-weight:700;color:{TXT_MAIN};font-family:sans-serif'>
-                        {_cp_str}</div>
-                    <div style='margin-top:6px;font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;
-                                font-family:sans-serif'>Einstieg</div>
-                    <div style='font-size:0.88rem;color:{TXT_SUB};font-family:sans-serif'>
-                        ${entry_px:.2f}</div>
-                </div>
-                """)
-
-            with c3:
-                opt_price_str = f"${current_opt_mid:.2f}" if current_opt_mid > 0 else "–"
-                st.html(f"""
-                <div style='background:{CARD_BG3};border:1px solid {CARD_BD};border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        Option aktuell (Mid)</div>
-                    <div style='font-size:1.2rem;font-weight:700;color:#16a34a;font-family:sans-serif'>
-                        {opt_price_str}</div>
-                    <div style='margin-top:6px;font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;
-                                font-family:sans-serif'>Einstiegsprämie</div>
-                    <div style='font-size:0.88rem;color:{TXT_SUB};font-family:sans-serif'>
-                        ${premium:.2f}</div>
-                </div>
-                """)
-
-            with c4:
-                pnl_sign = "+" if pnl_usd >= 0 else ""
-                st.html(f"""
-                <div style='background:{CARD_BG2};border:1px solid {pl_color}40;border-radius:8px;padding:10px 14px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        P/L (1 Kontrakt)</div>
-                    <div style='font-size:1.4rem;font-weight:700;color:{pl_color};font-family:sans-serif'>
-                        {pnl_sign}{pnl_usd:.0f} USD</div>
-                    <div style='font-size:0.9rem;color:{pl_color};font-family:sans-serif'>
-                        {pnl_sign}{pnl_pct:.1f}% der Prämie</div>
-                    <div style='margin-top:4px;font-size:0.7rem;color:{TXT_MUTED};font-family:sans-serif'>
-                        {'💡 TP bei 50%' if pnl_pct >= 50 else '⏳ Läuft noch' if pnl_pct >= 0 else '⚠️ Im Minus'}</div>
-                </div>
-                """)
-
-            # ── DTE + Strike-Abstand ─────────────────────────────────────────
-            st.markdown("---")
-            d1, d2, d3 = st.columns(3)
-            with d1:
-                try:
-                    exp_fmt = pd.to_datetime(expiry).strftime("%d. %b %Y")
-                except Exception:
-                    exp_fmt = expiry
-                st.html(f"""
-                <div style='background:{CARD_BG};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        📅 Verfall</div>
-                    <div style='font-size:1rem;font-weight:700;color:{"#b8902f" if _IS_GREEN else "#d4a843"};font-family:sans-serif'>
-                        {exp_fmt}</div>
-                    <div style='font-size:1.8rem;font-weight:900;color:{dte_color};font-family:sans-serif'>
-                        {dte_icon} {dte} <span style='font-size:0.7rem;color:{TXT_SUB}'>Tage</span></div>
-                </div>
-                """)
-
-            with d2:
-                if current_price > 0 and strike > 0:
-                    dist_pct = (current_price - strike) / current_price * 100
-                    dist_label = f"{'OTM' if (dist_pct > 0 and not is_call) or (dist_pct < 0 and is_call) else '⚠️ ITM'}"
-                    dist_color = "#22c55e" if "OTM" in dist_label else "#ef4444"
-                else:
-                    dist_pct, dist_label, dist_color = 0.0, "–", TXT_SUB
-                st.html(f"""
-                <div style='background:{CARD_BG2};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        Strike-Abstand</div>
-                    <div style='font-size:1rem;font-weight:700;color:{dist_color};font-family:sans-serif'>
-                        {_fmt_num(abs(dist_pct), 1)}% {dist_label}</div>
-                    <div style='font-size:0.78rem;color:{TXT_SUB};font-family:sans-serif'>
-                        Strike ${strike:.0f} · Delta {delta:.2f}</div>
-                </div>
-                """)
-
-            with d3:
-                tp50 = premium * 0.50
-                tp70 = premium * 0.30  # 70% Gewinn → Option noch 30% des Preises wert
-                capital_basis = entry_px if is_call and entry_px > 0 else (strike if strike > 0 else premium)
-                rend_lz_pct = premium / capital_basis * 100 if capital_basis > 0 else 0
-                basis_label = "Aktienkurs" if is_call else "Strike/Cash"
-                _tp_green = "#16a34a" if _IS_GREEN else "#4ade80"
-                st.html(f"""
-                <div style='background:{CARD_BG3};border:1px solid {CARD_BD};border-radius:6px;padding:8px 12px'>
-                    <div style='font-size:0.58rem;color:{TXT_MUTED};text-transform:uppercase;font-family:sans-serif'>
-                        Take Profit Ziele</div>
-                    <div style='font-size:0.82rem;color:{_tp_green};font-family:sans-serif'>
-                        50% → Prämie &lt; ${tp50:.2f} → schließen</div>
-                    <div style='font-size:0.82rem;color:#16a34a;font-family:sans-serif'>
-                        70% → Prämie &lt; ${tp70:.2f} → schließen</div>
-                    <div style='font-size:0.72rem;color:{_tp_green};margin-top:4px;font-family:sans-serif'>
-                        Rendite: {rend_lz_pct:.2f}% ({basis_label})</div>
-                    <div style='font-size:0.7rem;color:{TXT_MUTED};margin-top:2px;font-family:sans-serif'>
-                        Post: {post_ts}</div>
-                </div>
-                """)
-
-            # ── Trade Management Empfehlungen ────────────────────────────────
-            st.markdown("---")
-            st.markdown("**🎯 Trade Management**")
-            _mgmt_items = []
-
-            # P/L basierte Empfehlungen
-            if pnl_pct >= 70:
-                _mgmt_items.append(("🏆", "#22c55e",
-                    f"**70% Take Profit erreicht!** → Position jetzt schließen "
-                    f"(Prämie < ${premium * 0.30:.2f})"))
-            elif pnl_pct >= 50:
-                _mgmt_items.append(("✅", "#4ade80",
-                    f"**50% Take Profit erreicht** → Schließen empfohlen "
-                    f"(Prämie < ${premium * 0.50:.2f})"))
-            elif pnl_pct >= 25:
-                _mgmt_items.append(("📈", "#86efac",
-                    f"Position läuft gut ({pnl_pct:.0f}% der Prämie verdient) — weiter halten"))
-            elif pnl_pct < -50:
-                _mgmt_items.append(("🚨", "#ef4444",
-                    f"**Verlust > 50%** → Position sofort schließen oder rollen! "
-                    f"Prämie verdoppelt sich — keine weiteren Verluste riskieren"))
-            elif pnl_pct < -20:
-                _mgmt_items.append(("⚠️", "#f59e0b",
-                    f"Position im Minus ({pnl_pct:.0f}%) → Engmaschig beobachten"))
-            else:
-                _mgmt_items.append(("⏳", "#888",
-                    f"Position neutral ({pnl_pct:.0f}%) — weiter laufen lassen"))
-
-            # DTE-basierte Empfehlungen
-            if dte == 0:
-                _mgmt_items.append(("⏰", "#ef4444",
-                    "**Verfall heute!** → Option verfällt wertlos oder wird ausgeübt"))
-            elif dte <= 3:
-                _mgmt_items.append(("⏰", "#ef4444",
-                    f"**Nur noch {dte} Tage bis Verfall** → "
-                    f"Position schließen oder auf nächsten Monat rollen"))
-            elif dte <= 7:
-                _mgmt_items.append(("📅", "#f59e0b",
-                    f"{dte} Tage verbleibend — Rollen prüfen wenn Strike unter Druck"))
-
-            # Strike-Abstand / ITM-Warnung
-            if current_price > 0 and strike > 0:
-                dist_abs = current_price - strike if not is_call else strike - current_price
-                if dist_abs < 0:
-                    _mgmt_items.append(("🔴", "#ef4444",
-                        f"**Strike ITM!** Kurs ${current_price:.2f} hat Strike ${strike:.0f} "
-                        f"{'unterschritten' if not is_call else 'überschritten'} → "
-                        f"Rollen auf niedrigeren Strike oder schließen"))
-                elif dist_abs < strike * 0.03:
-                    _mgmt_items.append(("🟡", "#f59e0b",
-                        f"Strike nahe am Geld (nur {dist_abs:.2f} USD Puffer) → "
-                        f"Erhöhte Aufmerksamkeit, Rollen vorbereiten"))
-
-            # Covered Call: Aufwertung / Rückkauf bei Kursrückgang
-            if is_call and current_price > 0 and entry_px > 0:
-                cc_chg = (current_price - entry_px) / entry_px * 100
-                if cc_chg < -10:
-                    _mgmt_items.append(("📉", "#a78bfa",
-                        f"Aktie {cc_chg:.1f}% gefallen → CALL günstig zurückzukaufen, "
-                        f"Strike nach unten rollen für mehr Prämie"))
-
-            for icon, color, text in _mgmt_items:
-                st.html(
-                    f"<div style='display:flex;gap:10px;align-items:flex-start;"
-                    f"background:{CARD_BG};border:1px solid {CARD_BD};border-left:3px solid {color};"
-                    f"border-radius:0 6px 6px 0;"
-                    f"padding:8px 12px;margin:4px 0;font-family:sans-serif'>"
-                    f"<span style='font-size:1.1rem'>{icon}</span>"
-                    f"<span style='font-size:0.82rem;color:{TXT_MAIN};line-height:1.5'>{text}</span>"
-                    f"</div>"
+        # ── Verwaltung direkt an der Karte (nur Admin) ────────────────────────
+        if _is_owner:
+            _tid    = _t.get("trade_id", "")
+            _tkr    = _t.get("ticker", "–")
+            _status = _t.get("status", "AKTIV")
+            with st.popover(f"⚙️ {_tkr} verwalten", use_container_width=False):
+                _ns = st.selectbox(
+                    "Status", _STAT_OPTIONS,
+                    index=_STAT_OPTIONS.index(_status) if _status in _STAT_OPTIONS else 0,
+                    key=f"ov_ns_{_tid}",
                 )
-
-            # ── Links ────────────────────────────────────────────────────────
-            if opt_url or track_url:
-                st.markdown("**🔗 Links**")
-                lc1, lc2 = st.columns(2)
-                with lc1:
-                    if opt_url:
-                        st.markdown(f"[📊 OptionStrat öffnen]({opt_url})")
-                with lc2:
-                    if track_url:
-                        st.markdown(f"[📡 Dieser Trade (Link für Post)]({track_url})")
-
-            # ── Status-Steuerung (nur Admin) ─────────────────────────────────
-            if _is_owner:
-                st.markdown("**⚙️ Status aktualisieren / Trade schließen**")
-                sc1, sc2, sc3, sc4 = st.columns([2, 2, 2, 2])
-                _STAT = ["AKTIV", "WATCH", "WARNING", "ROLL", "CLOSE", "EXPIRED", "CANCELLED"]
-                with sc1:
-                    new_status = st.selectbox(
-                        "Neuer Status", _STAT,
-                        index=_STAT.index(status) if status in _STAT else 0,
-                        key=f"ns_{trade_id}", label_visibility="collapsed",
-                    )
-                with sc2:
-                    status_note = st.text_input(
-                        "Notiz", placeholder="z.B. Strike bedroht, rollen…",
-                        key=f"note_{trade_id}", label_visibility="collapsed",
-                    )
-                with sc3:
-                    if st.button("💾 Status speichern", key=f"save_{trade_id}",
+                _note = st.text_input("Notiz", placeholder="z.B. Strike bedroht, rollen…",
+                                      key=f"ov_note_{_tid}")
+                _b1, _b2 = st.columns(2)
+                with _b1:
+                    if st.button("💾 Status speichern", key=f"ov_save_{_tid}",
                                  use_container_width=True):
-                        _update_trade_status(trade_id, new_status, status_note)
-                        st.success(f"Status auf **{new_status}** gesetzt.")
+                        _update_trade_status(_tid, _ns, _note)
                         st.rerun()
-                with sc4:
-                    if st.button("✕ Trade entfernen", key=f"del_{trade_id}",
-                                 use_container_width=True,
-                                 help="Entfernt diesen Trade dauerhaft aus dem Monitor"):
-                        _delete_trade(trade_id)
-                        st.success("Trade entfernt.")
+                with _b2:
+                    if st.button("✕ Trade entfernen", key=f"ov_del_{_tid}",
+                                 use_container_width=True):
+                        _delete_trade(_tid)
                         st.rerun()
-            else:
-                st.caption("🔒 Status & Schließen nur für den Ersteller.")
-
-    st.html("<div style='height:8px'></div>")
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
