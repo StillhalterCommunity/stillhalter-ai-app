@@ -125,6 +125,7 @@ def render_sidebar(allow_public: bool = False):
             ("pages/18_Markt_Newsletter.py",    "18 · Markt Newsletter",    "📰"),
             ("pages/19_Signal_Pipeline.py",     "19 · Signal Pipeline",     "🛰️"),
             ("pages/20_Trade_Monitor.py",       "20 · Trade Monitor",       "📡"),
+            ("pages/21_Research.py",            "21 · Research",            "🔬"),
         ]
         _GUEST_ALLOWED = {"pages/20_Trade_Monitor.py"}
         for _path, _label, _icon in _PAGES:
