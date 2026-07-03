@@ -1093,16 +1093,51 @@ def _text_to_html(text: str) -> str:
 
 
 def _to_circle_text(text: str) -> str:
-    """Wandelt einen WhatsApp-Post in Circle-taugliches Format zum Einfügen:
-    - *fett* (WhatsApp) → **fett** (Markdown — Circles Editor übernimmt das
-      beim Einfügen als echtes Fett).
-    - Leerzeilen entfernen: Circles Editor macht aus JEDER Zeile einen Absatz
-      mit eigenem Abstand — die WhatsApp-Leerzeilen ergäben doppelte Lücken
-      (zu großer Zeilenabstand). Die Absatz-Optik übernimmt Circle selbst."""
+    """Fallback-Text für manuelles Kopieren: *fett* (WhatsApp) → **fett**
+    (Markdown). Blöcke/Leerzeilen bleiben erhalten."""
     import re as _re
-    out = _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"**\1**", text)
-    out = _re.sub(r"\n\s*\n+", "\n", out)   # Leerzeilen raus
-    return out.strip()
+    return _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"**\1**", text)
+
+
+def _circle_copy_button(text: str, key: str) -> None:
+    """Kopier-Button, der den Post als FORMATIERTES HTML in die Zwischenablage
+    legt (text/html: <strong> + <br>). Circles Editor übernimmt beim Einfügen
+    dann Fett + Zeilenumbrüche exakt — ohne Extra-Leerzeile zwischen den Zeilen
+    (reiner Text würde je Zeilenumbruch einen eigenen Absatz mit Abstand erzeugen)."""
+    import json as _json
+    import streamlit.components.v1 as _components
+    html_payload = _json.dumps(_text_to_html(text))
+    plain_payload = _json.dumps(text)
+    _components.html(f"""
+<div style="font-family:sans-serif">
+  <button id="cb_{key}" style="background:#1b4332;color:#fff;border:none;border-radius:8px;
+      padding:8px 18px;font-size:0.9rem;font-weight:600;cursor:pointer">
+    📋 Für Circle kopieren (mit Formatierung)
+  </button>
+  <span id="cs_{key}" style="margin-left:10px;color:#22c55e;font-size:0.85rem"></span>
+</div>
+<script>
+document.getElementById("cb_{key}").addEventListener("click", async () => {{
+  const html = {html_payload};
+  const plain = {plain_payload};
+  const st = document.getElementById("cs_{key}");
+  try {{
+    await navigator.clipboard.write([new ClipboardItem({{
+      "text/html":  new Blob([html],  {{type: "text/html"}}),
+      "text/plain": new Blob([plain], {{type: "text/plain"}}),
+    }})]);
+    st.textContent = "✅ kopiert — jetzt in Circle einfügen";
+  }} catch (e) {{
+    try {{
+      await navigator.clipboard.writeText(plain);
+      st.textContent = "✅ kopiert (nur Text — Browser erlaubt kein HTML)";
+    }} catch (e2) {{
+      st.textContent = "⚠️ Kopieren blockiert — Text unten manuell kopieren";
+    }}
+  }}
+}});
+</script>
+""", height=48)
 
 
 def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
@@ -1757,16 +1792,22 @@ with tab1:
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
         st.markdown("## 🌐 Circle-Version (kopieren & einfügen)")
         st.caption(
-            "Formatierung für Circle: **fett** statt WhatsApp-*fett*. "
-            "Text kopieren → in den Circle-Editor einfügen → Fett wird automatisch übernommen."
+            "**Wichtig:** Den grünen Button nutzen — er kopiert den Post mit echter "
+            "Formatierung (Fett + korrekte Zeilenumbrüche). Beim Kopieren aus dem "
+            "Textfeld darunter würde Circle aus jeder Zeile einen eigenen Absatz "
+            "machen (Extra-Leerzeilen)."
         )
         ci_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()]
                           + [f"Alle {len(gen)} zusammen"])
         for (cls, d), ctab in zip(gen.items(), ci_tabs[:-1]):
             with ctab:
-                st.code(_to_circle_text(d["wa_long"]), language="text")
+                _circle_copy_button(d["wa_long"], key=f"ci_{cls}")
+                with st.expander("Text ansehen (Fallback)"):
+                    st.code(_to_circle_text(d["wa_long"]), language="text")
         with ci_tabs[-1]:
-            st.code(_to_circle_text(combined_long), language="text")
+            _circle_copy_button(combined_long, key="ci_all")
+            with st.expander("Text ansehen (Fallback)"):
+                st.code(_to_circle_text(combined_long), language="text")
 
         # ── Circle-Sammelpost (Masterclass) + WhatsApp-Sammel-Kurzpost ────────
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
