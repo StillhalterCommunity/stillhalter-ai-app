@@ -1092,6 +1092,14 @@ def _text_to_html(text: str) -> str:
     return "<br>\n".join(out)
 
 
+def _to_circle_text(text: str) -> str:
+    """Wandelt einen WhatsApp-Post in Circle-taugliches Format zum Einfügen:
+    *fett* (WhatsApp) → **fett** (Markdown — Circles Editor wandelt das beim
+    Einfügen/Tippen in echtes Fett um). Rest bleibt unverändert."""
+    import re as _re
+    return _re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"**\1**", text)
+
+
 def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
     """WhatsApp-Sammel-Kurzpost: alle Trades kompakt + EIN Circle-Link zur Langversion.
     post_ts = aktueller Zeitstempel (Berlin) im Kopf."""
@@ -1733,6 +1741,23 @@ with tab1:
         st.markdown(f"### 📤 Alle {len(gen)} zusammen (Langversion)")
         combined_long = f"\n\n{'─' * 30}\n\n".join(d["wa_long"] for d in gen.values())
         st.code(combined_long, language="text")
+
+        # ── Circle-Version zum manuellen Kopieren ─────────────────────────────
+        # WhatsApp-*fett* wirkt auf Circle nicht — hier als **Markdown-Fett**,
+        # das Circles Editor beim Einfügen in echtes Fett umwandelt.
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+        st.markdown("## 🌐 Circle-Version (kopieren & einfügen)")
+        st.caption(
+            "Formatierung für Circle: **fett** statt WhatsApp-*fett*. "
+            "Text kopieren → in den Circle-Editor einfügen → Fett wird automatisch übernommen."
+        )
+        ci_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()]
+                          + [f"Alle {len(gen)} zusammen"])
+        for (cls, d), ctab in zip(gen.items(), ci_tabs[:-1]):
+            with ctab:
+                st.code(_to_circle_text(d["wa_long"]), language="text")
+        with ci_tabs[-1]:
+            st.code(_to_circle_text(combined_long), language="text")
 
         # ── Circle-Sammelpost (Masterclass) + WhatsApp-Sammel-Kurzpost ────────
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)

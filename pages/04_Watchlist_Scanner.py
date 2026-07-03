@@ -1262,6 +1262,58 @@ else:
         st.session_state.scan_results = results
         st.session_state.tf_results = {**(st.session_state.get("tf_results") or {}), **(_cached_tf or {})}
 
+    # ── 🎯 Stillhalter-Setup-Score (Trend BT · MACD Pro · Dual Stochastik) ────
+    # Strategieabhängige Verfallswahrscheinlichkeit: Short Put → Aktie soll
+    # NICHT fallen (bullisch/überverkauft) · Covered Call → NICHT steigen
+    # (bärisch/überkauft) · Strangle → seitwärts/neutral. Basis: 1D-Signale.
+    if "Setup-Score" not in results.columns and "Ticker" in results.columns:
+        _stf = st.session_state.get("tf_results") or {}
+        _s_missing = [t for t in results["Ticker"].unique() if t not in _stf]
+        if _s_missing:
+            _sph = st.empty()
+            _sph.caption(f"🎯 Berechne Stillhalter-Setup für {len(_s_missing)} Ticker...")
+            for _mt in _s_missing:
+                try:
+                    _stf[_mt] = analyze_multi_timeframe(_mt)
+                except Exception:
+                    _stf[_mt] = None
+            _sph.empty()
+            st.session_state.tf_results = _stf
+
+        _scan_strat_name = meta.get("strategy", scan_strategy)
+
+        def _setup_for(ticker: str):
+            m = _stf.get(ticker)
+            sig = getattr(m, "tf_1d", None) if m else None
+            if not sig:
+                return (None, "–")
+            trend_bull = bool(getattr(sig, "ema_bullish", False))
+            macd_bull  = bool(getattr(sig, "macd_bullish", False))
+            st_os = bool(getattr(sig, "stoch_oversold", False) or getattr(sig, "stoch_slow_oversold", False))
+            st_ob = bool(getattr(sig, "stoch_overbought", False) or getattr(sig, "stoch_slow_overbought", False))
+            if "Call" in _scan_strat_name:            # Covered Call
+                s_t = 1.0 if not trend_bull else 0.0
+                s_m = 1.0 if not macd_bull  else 0.0
+                s_s = 1.0 if st_ob else (0.0 if st_os else 0.5)
+            elif "Strangle" in _scan_strat_name:      # neutral erwünscht
+                _mixed = trend_bull != macd_bull
+                s_t = 1.0 if _mixed else 0.5
+                s_m = 1.0 if _mixed else 0.5
+                s_s = 1.0 if (not st_os and not st_ob) else 0.0
+            else:                                     # Short Put / CSP
+                s_t = 1.0 if trend_bull else 0.0
+                s_m = 1.0 if macd_bull  else 0.0
+                s_s = 1.0 if st_os else (0.0 if st_ob else 0.5)
+            def _a(v):
+                return "🟢" if v >= 1.0 else ("🟡" if v >= 0.5 else "🔴")
+            total = round(s_t + s_m + s_s, 1)
+            return (total, f"{_a(s_t)}{_a(s_m)}{_a(s_s)} {total:g}/3")
+
+        _sm = {t: _setup_for(t) for t in results["Ticker"].unique()}
+        results["Setup-Score"] = results["Ticker"].map(lambda t: _sm.get(t, (None, "–"))[0])
+        results["🎯 Setup"]    = results["Ticker"].map(lambda t: _sm.get(t, (None, "–"))[1])
+        st.session_state.scan_results = results
+
     # ── Kennzahlen ─────────────────────────────────────────────────────────
     n_tickers_found = results["Ticker"].nunique() if "Ticker" in results.columns else 0
     avg_crv  = results["CRV Score"].mean() if "CRV Score" in results.columns else 0
@@ -1334,9 +1386,19 @@ else:
             """)
 
     # ── Filter-Zeile ───────────────────────────────────────────────────────
-    fc1, fc2, fc3 = st.columns([4, 3, 3])
+    fc1, fc2, fc3, fc4 = st.columns([4, 3, 3, 3])
     with fc1:
         trend_f = st.radio("Trend-Filter (1D)", ["Alle", "↑ Aufwärts", "→ Seitwärts", "↓ Abwärts"], horizontal=True)
+    with fc4:
+        setup_f = st.selectbox(
+            "🎯 Stillhalter-Setup",
+            ["Aus", "≥ 2 von 3", "≥ 2.5 von 3", "3 von 3"],
+            key="setup_filter",
+            help="Filtert nach den 3 Stillhalter-Indikatoren (Trend BT · MACD Pro · "
+                 "Dual Stochastik), strategieabhängig auf hohe Verfallswahrscheinlichkeit: "
+                 "Short Put → bullisch/überverkauft · Covered Call → bärisch/überkauft · "
+                 "Strangle → neutral.",
+        )
     with fc2:
         if sort_by == "|Delta|" and "Delta" in results.columns:
             display_df = results.copy()
@@ -1357,6 +1419,13 @@ else:
         display_df = display_df[display_df["Trend"].str.contains(t_map.get(trend_f, ""), na=False)]
     if sector_f and "Sektor" in display_df.columns:
         display_df = display_df[display_df["Sektor"].isin(sector_f)]
+    if setup_f != "Aus" and "Setup-Score" in display_df.columns:
+        _setup_min = {"≥ 2 von 3": 2.0, "≥ 2.5 von 3": 2.5, "3 von 3": 3.0}[setup_f]
+        _n_before = len(display_df)
+        display_df = display_df[display_df["Setup-Score"].fillna(-1) >= _setup_min]
+        if display_df.empty and _n_before > 0:
+            st.warning(f"🎯 Kein Treffer erfüllt das Stillhalter-Setup ({setup_f}). "
+                       f"Filter lockern oder 'Aus' wählen — {_n_before} Treffer ohne Setup-Filter.")
 
     display_df["Rang"] = range(1, len(display_df) + 1)
 
@@ -1380,7 +1449,7 @@ else:
     # Spalten je nach Strategie — Top + Liq. immer zuerst
     is_strangle = "Strangle" in meta.get("strategy", scan_strategy)
     if is_strangle and "Strike PUT" in display_df.columns:
-        base_cols = ["OptionStrat", "Top", "Liq.", "Ticker", "Sektor", "Kurs",
+        base_cols = ["OptionStrat", "Top", "Liq.", "🎯 Setup", "Ticker", "Sektor", "Kurs",
                      "Strike PUT", "Strike CALL", "OTM% PUT", "OTM% CALL", "Range %",
                      "Verfall", "DTE",
                      "Prämie gesamt", "Prämie PUT", "Prämie CALL", "Prämie/Tag",
@@ -1389,7 +1458,7 @@ else:
                      "Break-even Low", "Break-even High",
                      "Trend", "⚠️ Earnings"]
     else:
-        base_cols = ["OptionStrat", "Top", "Liq.", "Ticker", "Sektor", "Kurs", "Strike", "OTM %",
+        base_cols = ["OptionStrat", "Top", "Liq.", "🎯 Setup", "Ticker", "Sektor", "Kurs", "Strike", "OTM %",
                      "Verfall", "DTE", "Prämie", "Bid", "Ask", "Kursquelle", "Spread %",
                      "Prämie/Tag", "Rendite ann. %", "Rendite % Laufzeit", "Rendite %/Tag",
                      "Delta", "Theta/Tag", "IV %", "IV Rank", "OI", "Volumen",
@@ -1426,6 +1495,8 @@ else:
         "IV %":          st.column_config.NumberColumn("IV %", format="%.1f%%"),
         "TF-Align":      st.column_config.ProgressColumn("TF Score", min_value=0, max_value=100, format="%.0f"),
         "⭐ CRV":        st.column_config.TextColumn("⭐ CRV", width="medium"),
+        "🎯 Setup":      st.column_config.TextColumn("🎯 Setup", width="small",
+            help="Stillhalter-Setup: Trend BT · MACD Pro · Dual Stochastik (strategieabhängig)"),
         "Kursquelle":   st.column_config.TextColumn("Kurs", width="small",
                                                        help="Mid = Bid/Ask Midprice (echt) · Last = letzter Handel (geschätzt, Off-Hours)"),
         "Spread %":     st.column_config.NumberColumn("Spread %", format="%.1f%%",

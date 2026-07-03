@@ -80,6 +80,11 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ── Ab hier: nur für eingeloggte Nutzer ──────────────────────────────────────
+# Gast-Zugang (0000): direkt zum Trade Monitor — Startseite ist gesperrt.
+from data.auth import is_monitor_only as _is_mon_only
+if _is_mon_only(st.session_state.get("auth_user", "")):
+    st.switch_page("pages/20_Trade_Monitor.py")
+
 from ui.sidebar import render_sidebar
 
 # _is_green muss VOR dem Page-Link-CSS bekannt sein

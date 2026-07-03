@@ -23,7 +23,19 @@ USERS: dict[str, str] = {
     "Jan-Sth-02":       "Jan Bechler",
     "Leon-Sth-03":      "Leon Benedens",
     "Tobias-Sth-04":    "Tobias Mayer",
+
+    # ── Externe (eingeschränkter Zugang) ──────────────────────────────────────
+    "0000":             "Gast (Trade Monitor)",   # NUR Trade Monitor; Rest gesperrt
 }
+
+# Nutzer, die ausschließlich den Trade Monitor nutzen dürfen. Alle anderen
+# Seiten erscheinen in der Navigation nur als gesperrte Vorschau (🔒).
+MONITOR_ONLY_USERS: set[str] = {"Gast (Trade Monitor)"}
+
+
+def is_monitor_only(username: str) -> bool:
+    """True, wenn der Nutzer nur den Trade Monitor nutzen darf."""
+    return username in MONITOR_ONLY_USERS
 
 # ── Log-Datei ────────────────────────────────────────────────────────────────
 _LOG_PATH = os.path.join(os.path.dirname(__file__), "login_log.csv")

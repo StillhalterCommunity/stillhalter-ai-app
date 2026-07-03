@@ -1,0 +1,72 @@
+[
+  {
+    "ts": "2026-07-03T16:09:35.089253",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-06-30T18:02:12.063320",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-06-30T18:01:47.617395",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 10
+  },
+  {
+    "ts": "2026-06-30T17:59:32.527144",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  },
+  {
+    "ts": "2026-06-30T17:58:38.443435",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  },
+  {
+    "ts": "2026-06-30T17:58:27.364303",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-06-30T17:57:31.884118",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  },
+  {
+    "ts": "2026-06-30T17:56:49.950571",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  },
+  {
+    "ts": "2026-06-30T17:56:09.450606",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  },
+  {
+    "ts": "2026-06-30T17:54:22.817440",
+    "strategy": "Short Strangle",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 0
+  }
+]
