@@ -163,6 +163,16 @@ def _fetch_option_mid(ticker: str, expiry_str: str, strike: float, is_call: bool
         return 0.0
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_earnings(ticker: str):
+    """Nächster Earnings-Termin (YYYY-MM-DD) oder None."""
+    try:
+        from data.fetcher import fetch_earnings_date
+        return fetch_earnings_date(ticker)
+    except Exception:
+        return None
+
+
 def _fmt_num(val: float, dec: int = 2) -> str:
     return f"{{:.{dec}f}}".format(val).replace(".", ",")
 
@@ -285,15 +295,38 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
 
     decay = ((premium - opt_mid) / premium * 100) if (premium > 0 and opt_mid > 0) else None
 
-    # Handlungsempfehlung (kurz)
-    if itm:
-        action = "⚠️ Im Geld — beobachten oder rollen"
-    elif dte <= 3:
-        action = "⏳ Verfall nah — schließen oder auf nächsten Monat rollen"
+    # Handlungsempfehlung — gleiche 5-Status-Logik wie im Trade Management
+    if dte <= 0:
+        action = ("📋 Abgelaufen — wertlos verfallen ✅" if not itm
+                  else "📋 Abgelaufen — Einbuchung prüfen")
+    elif itm:
+        action = ("👀 ITM — Gegenbewegung abwarten" if dte > 21
+                  else "🔄 Rollen oder Einbuchen prüfen")
+    elif abs(otm) < 5:
+        action = "⚠️ Am Geld — Entscheidung nötig"
+    elif decay is not None and decay >= 70:
+        action = "💰 70%-Ziel erreicht — schließen"
     elif decay is not None and decay >= 50:
-        action = "💡 50%+ Gewinn — Schließen erwägen (Take Profit)"
+        action = "💰 50%+ der Prämie verdient — Schließen erwägen"
+    elif abs(otm) < 8:
+        action = "👀 OTM-Abstand gering — beobachten"
     else:
-        action = "✅ läuft — alles in Ordnung"
+        action = "✅ Nach Plan — laufen lassen"
+
+    # Earnings-Warnung: Termin innerhalb der Restlaufzeit?
+    earnings_badge = ""
+    try:
+        _edate = _fetch_earnings(ticker)
+        if _edate:
+            _ed = pd.to_datetime(_edate).date()
+            if date.today() <= _ed <= end:
+                earnings_badge = (
+                    f"<span style='background:#f59e0b22;color:#f59e0b;font-size:0.78rem;"
+                    f"font-weight:700;padding:3px 10px;border-radius:6px'>"
+                    f"⚠️ Earnings {_ed.strftime('%d.%m.')}</span>"
+                )
+    except Exception:
+        pass
 
     _price_str = f"${price:.2f}" if price > 0 else "–"
     _opt_str   = f"${opt_mid:.2f}" if opt_mid > 0 else "–"
@@ -363,6 +396,7 @@ def _timeline_card_html(trade: dict, track_bg: str, txt_main: str,
       <span style='background:{col}2a;color:{col};font-size:0.85rem;font-weight:700;
                    padding:3px 10px;border-radius:6px'>{strategy} ${strike:g}</span>
       <span style='color:{txt_sub};font-size:0.82rem;font-weight:600'>Class {cls}</span>
+      {earnings_badge}
     </div>
     <span style='background:{col};color:#fff;font-size:0.9rem;font-weight:700;
                  padding:5px 16px;border-radius:20px;white-space:nowrap'>{word}</span>

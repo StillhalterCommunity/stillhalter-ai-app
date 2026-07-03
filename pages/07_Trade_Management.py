@@ -1547,153 +1547,130 @@ else:
         position_dir = "Short" if menge < 0 else "Long"
         strategy_lbl = f"{position_dir} {typ}"
 
-        # Expander-Icon: Long OTM near expiry = ✅, sonst nach Risiko
-        if is_long and (otm_pct or 0) >= 5 and dte is not None and dte <= 14:
-            exp_icon = "✅"
-        elif is_long and (otm_pct or 0) < 0:
-            exp_icon = "🛡️"
-        elif dte is not None and dte <= 1 and not is_long:
-            exp_icon = "🚨"
-        elif risiko > 45:
-            exp_icon = "⚠️"
-        elif risiko <= 15:
-            exp_icon = "✅"
+        # ── Monitor-Style-Karte (einheitliches Layout wie Trade Monitor) ──────
+        _is_green_tm = st.session_state.get("app_theme", "dark") == "green"
+        if _is_green_tm:
+            _bg, _tmain, _tsub = "#eef8f5", "#0a1628", "#475569"
         else:
-            exp_icon = "🔵"
+            _bg, _tmain, _tsub = "#0e0e0e", "#ffffff", "#ffffff"
 
-        with st.expander(
-            f"{exp_icon} **{ticker}** {strategy_lbl} @{strike:.0f} | Verfall {verfall_fmt} "
-            f"({dte_icon} {dte}T) | {empf}",
-            expanded=(dte is not None and dte <= 2) or (risiko > 45 and not results)
-        ):
-            pc1, pc2, pc3 = st.columns([2, 2, 3])
+        G_, R_ = "#22c55e", "#ef4444"
+        dte_v = dte if dte is not None else 0
+        # Restlaufzeit-Balken (kein Einstiegsdatum in CSV/IBKR → DTE-Referenz 45T)
+        _bar_col = G_ if dte_v > 21 else ("#f59e0b" if dte_v > 7 else R_)
+        _bar_pct = int(min(1.0, dte_v / 45) * 100)
 
-            with pc1:
-                st.html(f"""
-<div style='background:#111;border:1px solid #1e1e1e;border-radius:10px;
-            padding:14px;border-top:3px solid {empf_col}'>
-    <div style='font-size:1.1rem;font-weight:700;color:#f0f0f0;
-                font-family:sans-serif;margin-bottom:4px'>
-        {ticker} &nbsp;
-        <span style='font-size:0.78rem;color:#555;font-weight:400'>{sektor}</span>
+        # Kurs↔Strike-Skala — grüne Seite = gut für DIESE Position (Short/Long)
+        is_call_tm = (typ == "CALL")
+        _lo, _hi = strike * 0.85, strike * 1.15
+        _ppos = ((kurs - _lo) / (_hi - _lo) * 100) if (kurs and _hi > _lo) else 50.0
+        _ppos = max(4, min(96, _ppos))
+        _good_right = (not is_call_tm)          # Short Put: über Strike = OTM = gut
+        if is_long:
+            _good_right = not _good_right       # Long: invertiert (ITM = Schutz greift)
+        if _good_right:
+            _zone = f"linear-gradient(90deg,{R_}33 0%,{R_}1f 49%,{G_}1f 51%,{G_}33 100%)"
+        else:
+            _zone = f"linear-gradient(90deg,{G_}33 0%,{G_}1f 49%,{R_}1f 51%,{R_}33 100%)"
+
+        def _tm_tile(label, value, vcolor, sub=""):
+            sub_html = (f"<div style='font-size:0.7rem;color:{_tsub};margin-top:1px'>{sub}</div>"
+                        if sub else "")
+            return (f"<div style='flex:1;min-width:74px;background:{_bg};border:1px solid {_tsub}55;"
+                    f"border-radius:8px;padding:8px;text-align:center'>"
+                    f"<div style='font-size:0.72rem;color:{_tsub};text-transform:uppercase;"
+                    f"letter-spacing:0.04em'>{label}</div>"
+                    f"<div style='font-size:1.12rem;font-weight:700;color:{vcolor};margin-top:2px'>{value}</div>"
+                    f"{sub_html}</div>")
+
+        _otm_lbl_tm = "OTM" if (otm_pct or 0) >= 0 else "ITM"
+        tiles_tm = (
+            _tm_tile("Abstand", (f"{otm_pct:+.1f}% {_otm_lbl_tm}" if otm_pct is not None else "–"), otm_color)
+            + _tm_tile("Option", (f"${p_akt:.2f}" if p_akt is not None else "–"), _tmain,
+                       sub=(f"Einstieg ${p_ein:.2f}" if p_ein > 0 else ""))
+            + _tm_tile("P&L", pnl_usd_str or "–", pnl_color,
+                       sub=(pnl_str if pnl_pct is not None else ""))
+            + _tm_tile("Rest", f"{dte_v} T", _tmain, sub=verfall_fmt)
+        )
+
+        # OptionStrat-Link (aus Ticker/Strike/Verfall generiert)
+        try:
+            from analysis.batch_screener import _optionstrat_url as _tm_os_url
+            _os = _tm_os_url(ticker, strike, verfall_str, is_call_tm) if verfall_str else ""
+        except Exception:
+            _os = ""
+        _os_html = (f"<a href='{_os}' target='_blank' style='color:{empf_col};"
+                    f"text-decoration:none;font-weight:600'>📊 OptionStrat ↗</a>" if _os else "")
+
+        _details_html = ""
+        if details:
+            _dt_line = " &nbsp;·&nbsp; ".join(f"{icon} {text}" for icon, text in details[:4])
+            _details_html = (f"<div style='font-size:0.78rem;color:{_tsub};margin-top:8px;"
+                             f"line-height:1.6;opacity:0.9'>{_dt_line}</div>")
+        _notiz_html = (f"<div style='font-size:0.78rem;color:{_tsub};margin-top:4px'>📝 {notiz}</div>"
+                       if notiz else "")
+        _ibkr_html = ("<span style='font-size:0.72rem;color:#60a5fa;font-weight:600'>⬡ IBKR</span>"
+                      if is_ibkr else "")
+
+        st.html(f"""
+<div style='background:{_bg};border:1px solid {empf_col}40;border-radius:14px;
+            padding:14px 16px;margin-bottom:4px;box-shadow:0 1px 4px rgba(0,0,0,0.18);
+            font-family:RedRose,sans-serif'>
+  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:12px'>
+    <div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>
+      <span style='font-weight:700;font-size:1.4rem;color:{_tmain};letter-spacing:0.02em'>{ticker}</span>
+      <span style='background:{empf_col}2a;color:{empf_col};font-size:0.85rem;font-weight:700;
+                   padding:3px 10px;border-radius:6px'>{strategy_lbl} ${strike:g} · {kontrakts}x</span>
+      <span style='color:{_tsub};font-size:0.82rem'>{sektor}</span>
+      {_ibkr_html}
     </div>
-    <div style='font-size:0.82rem;color:#888;font-family:sans-serif;
-                margin-bottom:12px'>{strategy_lbl} · {kontrakts}x Kontrakt</div>
-    <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px'>
-        <div style='background:#0e0e0e;border-radius:6px;padding:6px 10px'>
-            <div style='font-size:0.62rem;color:#555;font-family:sans-serif'>Kurs aktuell</div>
-            <div style='font-size:1rem;font-weight:600;color:#e0e0e0;font-family:sans-serif'>
-                {'USD ' + str(kurs) if kurs else '–'}</div>
-        </div>
-        <div style='background:#0e0e0e;border-radius:6px;padding:6px 10px'>
-            <div style='font-size:0.62rem;color:#555;font-family:sans-serif'>Strike</div>
-            <div style='font-size:1rem;font-weight:600;color:#e0e0e0;font-family:sans-serif'>
-                USD {strike:.2f}</div>
-        </div>
-        <div style='background:#0e1a12;border-radius:6px;padding:6px 10px'>
-            <div style='font-size:0.62rem;color:#555;font-family:sans-serif'>📅 Verfall</div>
-            <div style='font-size:0.95rem;font-weight:700;color:#d4a843;font-family:sans-serif'>
-                {verfall_fmt}</div>
-        </div>
-        <div style='background:#0e1a12;border-radius:6px;padding:6px 10px'>
-            <div style='font-size:0.62rem;color:#555;font-family:sans-serif'>Restlaufzeit</div>
-            <div style='font-size:1.3rem;font-weight:900;color:{dte_color};font-family:sans-serif'>
-                {dte_icon} {dte if dte is not None else '–'}
-                <span style='font-size:0.7rem;font-weight:400;color:#888'> T</span>
-            </div>
-        </div>
-    </div>
-    {"<div style='margin-top:8px;background:#0e0e0e;border-radius:6px;padding:6px 10px;font-size:0.78rem;color:#555;font-family:sans-serif'>" + notiz + "</div>" if notiz else ""}
+    <span style='background:{empf_col};color:#fff;font-size:0.9rem;font-weight:700;
+                 padding:5px 16px;border-radius:20px;white-space:nowrap'>{empf}</span>
+  </div>
+
+  <div style='display:flex;justify-content:space-between;font-size:0.78rem;color:{_tsub};margin-bottom:5px'>
+    <span>⏳ Restlaufzeit</span>
+    <span style='font-weight:700;color:{_tmain}'>{dte_icon} noch {dte_v} Tage · 🏁 Verfall {verfall_fmt}</span>
+  </div>
+  <div style='position:relative;height:12px;background:{_tsub}22;border-radius:6px;overflow:hidden'>
+    <div style='position:absolute;left:0;top:0;height:100%;width:{_bar_pct}%;
+                background:linear-gradient(90deg,{_bar_col}88,{_bar_col});border-radius:6px'></div>
+  </div>
+
+  <div style='display:flex;justify-content:space-between;font-size:0.74rem;color:{_tsub};margin:12px 0 3px'>
+    <span style='font-weight:600'>Kurs ↔ Strike</span>
+  </div>
+  <div style='position:relative;height:14px;border-radius:7px;background:{_zone}'>
+    <div style='position:absolute;left:50%;top:-2px;height:18px;width:2px;background:{_tmain};opacity:0.55'></div>
+    <div style='position:absolute;left:{_ppos}%;top:-4px;width:0;height:0;
+                border-left:6px solid transparent;border-right:6px solid transparent;
+                border-top:9px solid {empf_col};transform:translateX(-6px)'></div>
+  </div>
+  <div style='display:flex;justify-content:space-between;font-size:0.82rem;color:{_tsub};
+              font-weight:600;margin-top:4px'>
+    <span>💵 Kurs {("$%.2f" % kurs) if kurs else "–"}</span><span>🎯 Strike ${strike:g}</span>
+  </div>
+
+  <div style='display:flex;gap:8px;margin-top:12px'>{tiles_tm}</div>
+
+  <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;
+              gap:6px;margin-top:10px'>
+    <span style='font-size:0.9rem;color:{_tmain};font-weight:600'>→ {empf}</span>
+    <span style='font-size:0.78rem'>{_os_html}</span>
+  </div>
+  {_details_html}
+  {_notiz_html}
 </div>
 """)
 
-            with pc2:
-                ibkr_hinweis = (
-                    "<div style='font-size:0.62rem;color:#60a5fa;font-family:sans-serif;margin-bottom:6px'>"
-                    "⬡ Daten direkt aus IBKR Import</div>"
-                    if is_ibkr else ""
-                )
-                st.html(f"""
-<div style='background:#111;border:1px solid #1e1e1e;border-radius:10px;
-            padding:14px;height:100%'>
-    {ibkr_hinweis}
-    <div style='margin-bottom:10px'>
-        <div style='font-size:0.65rem;color:#555;text-transform:uppercase;
-                    letter-spacing:0.06em;font-family:sans-serif;margin-bottom:4px'>Prämie</div>
-        <div style='display:flex;justify-content:space-between'>
-            <span style='font-size:0.75rem;color:#666;font-family:sans-serif'>Einstieg</span>
-            <span style='font-size:0.9rem;font-weight:600;color:#ccc;font-family:sans-serif'>
-                {p_ein:.2f} USD</span>
-        </div>
-        <div style='display:flex;justify-content:space-between'>
-            <span style='font-size:0.75rem;color:#666;font-family:sans-serif'>Aktuell</span>
-            <span style='font-size:0.9rem;font-weight:600;color:#ccc;font-family:sans-serif'>
-                {'%.2f USD' % p_akt if p_akt is not None else '–'}</span>
-        </div>
-        {intrinsic_str}{zeitwert_row}
-    </div>
-    <div style='background:{pnl_bg};border:1px solid {pnl_border};border-radius:8px;
-                padding:8px 12px;margin-bottom:10px'>
-        <div style='font-size:0.65rem;color:#555;text-transform:uppercase;
-                    letter-spacing:0.06em;font-family:sans-serif;margin-bottom:4px'>
-            {pnl_label}</div>
-        <div style='font-size:1.6rem;font-weight:900;color:{pnl_color};
-                    font-family:sans-serif;line-height:1.1'>{pnl_str}</div>
-        <div style='font-size:0.82rem;color:{pnl_color};font-family:sans-serif'>
-            {pnl_usd_str}
-            {'(' + str(kontrakts) + 'x Kontrakt)' if kontrakts > 1 else '(1 Kontrakt)'}</div>
-    </div>
-    <div style='display:flex;justify-content:space-between;align-items:center;
-                background:#0e0e0e;border-radius:6px;padding:6px 12px'>
-        <span style='font-size:0.72rem;color:#555;font-family:sans-serif'>OTM-Abstand</span>
-        <span style='font-size:0.95rem;font-weight:700;color:{otm_color};font-family:sans-serif'>
-            {'%.1f%%' % otm_pct if otm_pct is not None else '–'}
-            {'&nbsp;✅' if (otm_pct or 0) >= 10 else ('&nbsp;⚠️' if (otm_pct or 0) >= 0 else '&nbsp;🔴')}
-        </span>
-    </div>
-    <div style='margin-top:10px;background:#0c0c0c;border:2px solid {empf_col};
-                border-radius:8px;padding:10px 14px;text-align:center'>
-        <div style='font-size:0.65rem;color:#555;text-transform:uppercase;
-                    letter-spacing:0.06em;font-family:sans-serif;margin-bottom:3px'>
-            Empfehlung</div>
-        <div style='font-size:1.05rem;font-weight:700;color:{empf_col};font-family:sans-serif'>
-            {empf}</div>
-    </div>
-</div>
-""")
-
-            with pc3:
-                if details:
-                    detail_html = "".join(
-                        f"<div style='display:flex;gap:8px;align-items:flex-start;"
-                        f"padding:5px 0;border-bottom:1px solid #1a1a1a;font-family:sans-serif'>"
-                        f"<span style='font-size:1rem;flex-shrink:0'>{icon}</span>"
-                        f"<span style='font-size:0.78rem;color:#aaa;line-height:1.4'>{text}</span>"
-                        f"</div>"
-                        for icon, text in details
-                    )
-                    st.html(f"""
-<div style='background:#111;border:1px solid #1e1e1e;border-radius:10px;padding:14px'>
-    <div style='font-size:0.65rem;color:#555;text-transform:uppercase;
-                letter-spacing:0.06em;font-family:sans-serif;margin-bottom:8px'>
-        🔍 Analyse-Details &amp; Handlungsempfehlungen
-    </div>
-    {detail_html}
-</div>
-""")
-                elif results:
-                    st.markdown("*Keine Details verfügbar*")
-                else:
-                    st.markdown("*Position noch nicht bewertet — klicke 'Alle Positionen bewerten'*")
-
-            del_col, _ = st.columns([1, 5])
-            with del_col:
-                if st.button(f"🗑️ Position löschen", key=f"del_{i}_{ticker}",
-                             use_container_width=True):
-                    st.session_state.tm_positions = positions.drop(index=_).reset_index(drop=True)
-                    if i in st.session_state.tm_results:
-                        del st.session_state.tm_results[i]
-                    st.rerun()
+        # Verwaltung an der Karte — Position aus der Liste entfernen
+        with st.popover(f"⚙️ {ticker} verwalten"):
+            if st.button("🗑️ Position löschen", key=f"del_{i}_{ticker}",
+                         use_container_width=True):
+                st.session_state.tm_positions = positions.drop(index=_).reset_index(drop=True)
+                if i in st.session_state.tm_results:
+                    del st.session_state.tm_results[i]
+                st.rerun()
 
     # ── Gesamt-Übersicht ───────────────────────────────────────────────────────
     if results and len(results) > 1:
