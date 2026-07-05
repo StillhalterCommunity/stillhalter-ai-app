@@ -639,8 +639,19 @@ for _k in ["scan_results", "scan_meta", "tf_results", "scan_running"]:
     if _k not in st.session_state:
         st.session_state[_k] = None
 
+# ── Unterbrochenen Scan erkennen (Doppelklick / Interaktion während Scan) ────
+# scan_running=True bei Seitenstart = der letzte Vordergrund-Scan wurde mitten-
+# drin abgebrochen (zweiter Klick auf 'Scan starten', Filteränderung, Seiten-
+# wechsel). Früher wurden hier die Ergebnisse GELÖSCHT und der Volume-Restore
+# lief davor (wurde also übersprungen) → leere Tabelle, 'Scanner geht nicht'.
+# Jetzt: nur Flag zurücksetzen — der Restore direkt darunter lädt den letzten
+# gespeicherten Stand, und der Nutzer bekommt eine klare Meldung.
+_scan_was_interrupted = bool(st.session_state.get("scan_running"))
+if _scan_was_interrupted:
+    st.session_state.scan_running = False
+
 # ── Letzten Scan aus Cache wiederherstellen (nach Browser-Refresh) ────────────
-# Quelle 1: persistenter Tages-Prefetch-Scan (Volume), Quelle 2: lokaler pkl-Cache
+# Quelle 1: persistenter Tages-Prefetch-Scan (Volume), Quelle 2: letzter Scan (Volume)
 if st.session_state.scan_results is None and not st.session_state.get("scan_running"):
     import datetime as _dt
     _restored = False
@@ -660,11 +671,12 @@ if st.session_state.scan_results is None and not st.session_state.get("scan_runn
             _restored = True
     except Exception:
         pass
-    # 2) Fallback: lokaler pkl-Cache vom letzten manuellen Scan
+    # 2) Fallback: letzter Scan aus dem Volume (persistiert von scan_watchlist)
     if not _restored:
         try:
             import pickle as _pickle
-            _cache_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "last_scan_cache.pkl")
+            from data._persistent_cache import scan_cache_path as _scp
+            _cache_path = _scp()
             if os.path.exists(_cache_path):
                 with open(_cache_path, "rb") as _f:
                     _cached = _pickle.load(_f)
@@ -680,13 +692,22 @@ if st.session_state.scan_results is None and not st.session_state.get("scan_runn
         except Exception:
             pass
 
-# ── Unterbrochenen Scan aufräumen ─────────────────────────────────────────────
-# Wenn scan_running=True aber der Button nicht geklickt wurde, wurde der
-# Scan durch eine Filteränderung unterbrochen → State zurücksetzen damit
-# der Benutzer ohne Seitenaktualisierung neu starten kann.
-if st.session_state.get("scan_running"):
-    st.session_state.scan_running = False
-    st.session_state.scan_results = None
+# ── Meldung nach Unterbrechung (Ergebnisse werden NICHT mehr gelöscht) ────────
+if _scan_was_interrupted:
+    _sr = st.session_state.get("scan_results")
+    if _sr is not None and not getattr(_sr, "empty", True):
+        st.warning(
+            "⚠️ **Der letzte Scan wurde unterbrochen** (z. B. Doppelklick auf "
+            "„Scan starten\" oder Interaktion während des Scans). Es wird der "
+            "**letzte gespeicherte Stand** angezeigt — für frische Daten einfach "
+            "einmal neu scannen."
+        )
+    else:
+        st.warning(
+            "⚠️ **Der letzte Scan wurde unterbrochen** und es liegt noch kein "
+            "gespeicherter Stand vor — bitte einmal **🚀 Scan starten** klicken "
+            "(nur einmal klicken, der Fortschrittsbalken erscheint sofort)."
+        )
 
 # ── Hintergrund-Scan Status anzeigen ─────────────────────────────────────────
 import data.background_scan as bg_scan

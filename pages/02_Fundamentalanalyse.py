@@ -361,6 +361,57 @@ else:
         pef_col = pd.to_numeric(view["_pe_fwd_raw"], errors="coerce")
         view = view[pef_col.isna() | ((pef_col > 0) & (pef_col <= max_pe_fwd))]
 
+    # ── Filter-Diagnose: Warum ist die Tabelle leer? ───────────────────────
+    # Kennzahlen + Top-3-Karten zeigen bewusst den UNGEFILTERTEN Scan; die
+    # Tabelle wendet die Filter an. Wenn die Kombination alles wegfiltert,
+    # zeigen wir je Filter, wie viele Aktien er EINZELN durchlassen würde.
+    if view.empty and not df.empty:
+        _diag = []
+        if min_score > 0:
+            _diag.append((f"Mind. Value Score ≥ {min_score}",
+                          int((df["⭐ Value Score"] >= min_score).sum())))
+        if grade_filter:
+            _diag.append((f"Qualitätsklasse {'/'.join(grade_filter)}",
+                          int(df["Klasse"].isin(grade_filter).sum())))
+        if iv_class_filter:
+            _diag.append((f"IV-Klasse {'/'.join(iv_class_filter)}",
+                          int(df["_iv_class"].isin(iv_class_filter).sum())))
+        if max_peg > 0:
+            _p = pd.to_numeric(df["_peg_raw"], errors="coerce")
+            _diag.append((f"Max. PEG ≤ {max_peg:g}",
+                          int((_p.isna() | ((_p > 0) & (_p <= max_peg))).sum())))
+        if min_growth != 0:
+            _g = pd.to_numeric(df["_growth_raw"], errors="coerce")
+            _diag.append((f"Earnings Growth ≥ {min_growth:g}%",
+                          int((_g.isna() | (_g >= min_growth)).sum())))
+        if min_mktcap > 0:
+            _m = pd.to_numeric(df["_mktcap_raw"], errors="coerce")
+            _diag.append((f"Market Cap ≥ {min_mktcap:g} Mrd.",
+                          int((_m.notna() & (_m >= min_mktcap * 1e9)).sum())))
+        if max_pe > 0:
+            _pe = pd.to_numeric(df["_pe_trail_raw"], errors="coerce")
+            _diag.append((f"Max. KGV ≤ {max_pe:g}",
+                          int((_pe.isna() | ((_pe > 0) & (_pe <= max_pe))).sum())))
+        if max_pe_fwd > 0:
+            _pf = pd.to_numeric(df["_pe_fwd_raw"], errors="coerce")
+            _diag.append((f"Max. KGV (fwd) ≤ {max_pe_fwd:g}",
+                          int((_pf.isna() | ((_pf > 0) & (_pf <= max_pe_fwd))).sum())))
+        st.error(
+            f"🚫 **Die Filter-Kombination lässt keine der {len(df)} analysierten "
+            f"Aktien durch** — deshalb ist die Tabelle leer. Die Kennzahlen und "
+            f"die Top-3-Karten zeigen den ungefilterten Scan."
+        )
+        if _diag:
+            _diag_sorted = sorted(_diag, key=lambda x: x[1])
+            _lines = " · ".join(f"**{name}** → {n}/{len(df)}" for name, n in _diag_sorted)
+            st.markdown(f"Einzeln würden durchlassen: {_lines}")
+            _strict = _diag_sorted[0]
+            st.info(f"💡 Der strengste Filter ist **{_strict[0]}** "
+                    f"({_strict[1]} von {len(df)} Aktien) — diesen zuerst lockern.")
+    elif len(view) < len(df):
+        st.caption(f"🔎 Filter aktiv: Tabelle zeigt **{len(view)} von {len(df)}** "
+                   f"analysierten Aktien (Kennzahlen & Top-3 = ungefiltert).")
+
     # ── KPI-Kacheln ───────────────────────────────────────────────────────
     n_a    = len(df[df["_grade"] == "A"])
     n_b    = len(df[df["_grade"] == "B"])
@@ -769,16 +820,21 @@ else:
     st.markdown("---")
     st.markdown("""
     <div style='font-family:RedRose,sans-serif;font-weight:700;font-size:1.2rem;
-                color:#d4a843;letter-spacing:0.05em;margin-bottom:12px'>
+                color:#d4a843;letter-spacing:0.05em;margin-bottom:4px'>
         🏆 TOP 3 JE QUALITÄTSKLASSE
     </div>
     """, unsafe_allow_html=True)
+    st.caption(
+        "**Qualitätsklasse = Value Score aus Fundamentaldaten** (A ≥ 75 · B 55–74 · C < 55) — "
+        "sie sagt nichts über das Options-Risiko. Die **IV** steht separat auf jeder Karte "
+        "(🟢 <30 % · 🟡 30–60 % · 🔴 >60 %): auch eine Klasse-A-Aktie kann hohe IV haben."
+    )
 
     cols_top = st.columns(3)
-    for gi, (grade_key, grade_title, gcolor, gemoji) in enumerate([
-        ("A", "KLASSE A — Top Quality",  "#22c55e", "💎"),
-        ("B", "KLASSE B — Solide",       "#f59e0b", "🥇"),
-        ("C", "KLASSE C — Spekulativ",   "#ef4444", "🎯"),
+    for gi, (grade_key, grade_title, grade_sub, gcolor, gemoji) in enumerate([
+        ("A", "KLASSE A — Top Quality", "Value Score ≥ 75",   "#22c55e", "💎"),
+        ("B", "KLASSE B — Solide",      "Value Score 55–74",  "#f59e0b", "🥇"),
+        ("C", "KLASSE C — Spekulativ",  "Value Score < 55",   "#ef4444", "🎯"),
     ]):
         top3 = df[df["_grade"] == grade_key].head(3)
         with cols_top[gi]:
@@ -786,8 +842,9 @@ else:
             <div style='border-top:3px solid {gcolor};background:#0f0f0f;
                         border-radius:10px;padding:16px;margin-bottom:8px'>
                 <div style='font-family:RedRose,sans-serif;font-weight:700;
-                            font-size:0.85rem;color:{gcolor};letter-spacing:0.06em;
-                            margin-bottom:12px'>{gemoji} {grade_title}</div>
+                            font-size:0.85rem;color:{gcolor};letter-spacing:0.06em'>{gemoji} {grade_title}</div>
+                <div style='font-family:RedRose,sans-serif;font-size:0.7rem;
+                            color:#888;margin-bottom:12px'>{grade_sub}</div>
             """, unsafe_allow_html=True)
             if top3.empty:
                 st.caption("Keine Aktien in dieser Klasse.")
@@ -800,6 +857,15 @@ else:
                 up = row.get("Upside %")
                 up_str = f"+{up:.1f}%" if pd.notna(up) and up and up > 0 else (f"{up:.1f}%" if pd.notna(up) and up else "–")
                 up_color = "#22c55e" if (up and up > 0) else "#ef4444"
+                # IV-Ampel: Risiko unabhängig von der Qualitätsklasse zeigen
+                _ivv = row.get("IV %")
+                _ivc = str(row.get("_iv_class", "") or "")
+                if pd.notna(_ivv) and _ivv is not None:
+                    _iv_dot = "🟢" if "Low" in _ivc else ("🔴" if "High" in _ivc else "🟡")
+                    _iv_col = "#22c55e" if "Low" in _ivc else ("#ef4444" if "High" in _ivc else "#f59e0b")
+                    iv_str  = f"{_iv_dot} {_ivv:.0f}%"
+                else:
+                    _iv_col, iv_str = "#888", "–"
                 st.markdown(f"""
                 <div style='background:#161616;border:1px solid #222;border-radius:8px;
                             padding:12px 14px;margin-bottom:8px'>
@@ -821,6 +887,8 @@ else:
                         <div style='font-size:0.75rem;color:#22c55e;text-align:right'>{eg_str}</div>
                         <div style='font-size:0.75rem;color:#888'>Kursziel Upside</div>
                         <div style='font-size:0.75rem;color:{up_color};text-align:right'>{up_str}</div>
+                        <div style='font-size:0.75rem;color:#888'>IV (Risiko)</div>
+                        <div style='font-size:0.75rem;color:{_iv_col};text-align:right;font-weight:700'>{iv_str}</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
