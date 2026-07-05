@@ -1330,6 +1330,36 @@ else:
     mc[4].metric("Ø Rendite ann.",      f"{avg_yield:.1f}%")
     mc[5].metric("⚡ Best Convergence", f"{best_conv:.0f}/100" if best_conv is not None else "–")
 
+    # ── Datenqualität: was wurde bei der Plausibilisierung verworfen? ─────────
+    try:
+        from analysis.batch_screener import get_plaus_stats
+        _pst = get_plaus_stats()
+        _dropped = _pst.get("no_quote", 0) + _pst.get("wide_spread", 0) \
+                   + _pst.get("below_intrinsic", 0) + _pst.get("bad_iv", 0)
+        if _dropped > 0 or _pst.get("kept", 0) > 0:
+            with st.expander(
+                f"🔎 Datenqualität — {_dropped} Optionen verworfen · "
+                f"{_pst.get('kept', 0)} plausibel", expanded=False,
+            ):
+                _q1, _q2, _q3, _q4 = st.columns(4)
+                _q1.metric("Ohne Bid/Ask", _pst.get("no_quote", 0),
+                           help="Kein zweiseitiger Markt — während der Handelszeiten "
+                                "werden diese strikt verworfen (kein Last-Price-Ersatz).")
+                _q2.metric("Spread zu groß", _pst.get("wide_spread", 0),
+                           help="Bid/Ask-Spread über dem Max.-Spread-Filter.")
+                _q3.metric("Unter innerem Wert", _pst.get("below_intrinsic", 0),
+                           help="Mid-Preis unter dem inneren Wert = unmöglicher Preis "
+                                "→ stale oder gekreuzte Quote.")
+                _q4.metric("IV unplausibel", _pst.get("bad_iv", 0),
+                           help="Implizite Volatilität ≤0.5% oder >400%.")
+                st.caption(
+                    "Während der Handelszeiten gilt: nur Optionen mit echtem "
+                    "zweiseitigen Bid/Ask und Spread im Limit. Bei geschlossenem "
+                    "Markt ist Last Price als Näherung erlaubt (Kursquelle-Spalte)."
+                )
+    except Exception:
+        pass
+
     # CRV, TF-Alignment & Konvergenz-Erklärung
     with st.expander("ℹ️ **Wie werden CRV Score, TF-Alignment & Best Convergence berechnet?**", expanded=False):
         icol1, icol2, icol3 = st.columns(3)

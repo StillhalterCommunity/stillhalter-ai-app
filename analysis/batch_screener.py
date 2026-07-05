@@ -77,6 +77,81 @@ def _optionstrat_url_strangle(
         return ""
 
 
+# ── Plausibilisierung (Datenqualität) ─────────────────────────────────────────
+# Verhindert falsche Ergebnisse durch fehlende/stale Quotes und unmögliche
+# Preise. Zählt transparent, WARUM Optionen verworfen wurden (für die UI).
+
+_PLAUS_LOCK  = threading.Lock()
+_PLAUS_STATS = {"no_quote": 0, "wide_spread": 0, "below_intrinsic": 0,
+                "bad_iv": 0, "kept": 0}
+
+
+def reset_plaus_stats() -> None:
+    with _PLAUS_LOCK:
+        for k in _PLAUS_STATS:
+            _PLAUS_STATS[k] = 0
+
+
+def get_plaus_stats() -> dict:
+    with _PLAUS_LOCK:
+        return dict(_PLAUS_STATS)
+
+
+def _plaus_count(**kw) -> None:
+    with _PLAUS_LOCK:
+        for k, v in kw.items():
+            _PLAUS_STATS[k] = _PLAUS_STATS.get(k, 0) + int(v)
+
+
+def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
+                      max_spread_pct: float, strict: bool) -> pd.Series:
+    """
+    Plausibilitäts-Maske für eine Optionsseite. Erwartet Spalten:
+    bid, ask, lastPrice, mid_price, _has_market, _spread_pct, strike.
+
+    strict=True (Handelszeiten):
+      • NUR echte zweiseitige Quotes (bid>0 UND ask>0) — kein lastPrice-Fallback
+      • Spread ≤ max_spread_pct ist PFLICHT (quote-lose können nicht durchrutschen)
+    strict=False (Markt geschlossen):
+      • lastPrice als Fallback erlaubt; wo Quotes existieren, gilt das Spread-Limit
+    Immer:
+      • Mid ≥ innerer Wert − Toleranz (Preis unter innerem Wert ist unmöglich
+        → stale/gekreuzte Quote → verwerfen)
+      • IV-Sanity: falls vorhanden, 0.5%–400% (fehlende IV wird NICHT verworfen)
+    Nebenbei werden die globalen Verwerfungs-Statistiken gezählt.
+    """
+    strike = df["strike"].astype(float)
+    if opt_type == "put":
+        intrinsic = (strike - current_price).clip(lower=0)
+    else:
+        intrinsic = (current_price - strike).clip(lower=0)
+
+    if strict:
+        market_ok = df["_has_market"]
+        spread_ok = df["_spread_pct"].notna() & (df["_spread_pct"] <= max_spread_pct)
+    else:
+        market_ok = df["_has_market"] | (df["lastPrice"] > 0)
+        spread_ok = (~df["_has_market"]) | (df["_spread_pct"] <= max_spread_pct)
+
+    intr_ok = df["mid_price"] >= (intrinsic * 0.98 - 0.02)
+
+    if "impliedVolatility" in df.columns:
+        _iv = pd.to_numeric(df["impliedVolatility"], errors="coerce")
+        iv_ok = _iv.isna() | ((_iv > 0.005) & (_iv < 4.0))
+    else:
+        iv_ok = pd.Series(True, index=df.index)
+
+    mask = market_ok & spread_ok & intr_ok & iv_ok
+    _plaus_count(
+        no_quote=int((~market_ok).sum()),
+        wide_spread=int((market_ok & ~spread_ok).sum()),
+        below_intrinsic=int((market_ok & spread_ok & ~intr_ok).sum()),
+        bad_iv=int((market_ok & spread_ok & intr_ok & ~iv_ok).sum()),
+        kept=int(mask.sum()),
+    )
+    return mask
+
+
 # ── CRV Score ─────────────────────────────────────────────────────────────────
 
 def calculate_crv_score(
@@ -250,18 +325,12 @@ def scan_strangle(
             p_exp["_has_market"] = (p_exp["bid"] > 0) & (p_exp["ask"] > 0) & (p_exp["ask"] >= p_exp["bid"])
             c_exp["_has_market"] = (c_exp["bid"] > 0) & (c_exp["ask"] > 0) & (c_exp["ask"] >= c_exp["bid"])
 
-            # Sparse-Market-Erkennung (off-hours: kaum echte Bid/Ask vorhanden)
-            p_sparse = p_exp["_has_market"].mean() < 0.20
-            c_sparse = c_exp["_has_market"].mean() < 0.20
-
-            # lastPrice als Preis-Fallback erlauben, wenn off-hours
-            # (require_valid_market=False) ODER der Markt sparse ist — exakt wie
-            # scan_ticker beim CSP. Sonst findet der Strangle off-hours NICHTS,
-            # weil Bid/Ask dann 0 sind (Bug: CSP ging, Strangle nicht).
-            _p_last_ok = (not require_valid_market) or p_sparse
-            _c_last_ok = (not require_valid_market) or c_sparse
-            _p_fallback = p_exp["lastPrice"] if _p_last_ok else 0.0
-            _c_fallback = c_exp["lastPrice"] if _c_last_ok else 0.0
+            # Preis: Handelszeiten STRIKT nur aus zweiseitigen Quotes; lastPrice-
+            # Fallback ausschließlich bei geschlossenem Markt (require_valid_
+            # market=False). Der frühere Sparse-Fallback während der Handels-
+            # zeiten brachte stale Prämien → falsche Ergebnisse.
+            _p_fallback = p_exp["lastPrice"] if not require_valid_market else 0.0
+            _c_fallback = c_exp["lastPrice"] if not require_valid_market else 0.0
             p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, _p_fallback)
             c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, _c_fallback)
 
@@ -277,22 +346,17 @@ def scan_strangle(
             p_exp["otm_pct"] = ((current_price - p_exp["strike"].astype(float)) / current_price * 100).clip(lower=0)
             c_exp["otm_pct"] = ((c_exp["strike"].astype(float) - current_price) / current_price * 100).clip(lower=0)
 
-            # Filter anwenden. last_ok=True (off-hours ODER sparse): lastPrice-
-            # Optionen erlaubt, Spread-Filter nur wo echter Markt existiert.
-            # last_ok=False (echter Markt): Bid UND Ask Pflicht + Spread-Filter.
-            def _apply_filters(df_, last_ok: bool) -> pd.DataFrame:
+            # Filter: Plausibilisierung (Quotes/Spread/innerer Wert/IV-Sanity)
+            # + fachliche Kriterien (OTM-Fenster, Mindestprämie, IV, OI).
+            def _apply_filters(df_, side: str) -> pd.DataFrame:
                 iv_col = df_.get("impliedVolatility", pd.Series([1.0]*len(df_), index=df_.index)).fillna(0)
                 oi_col = df_.get("openInterest",      pd.Series([min_oi]*len(df_), index=df_.index)).fillna(0)
-                if not last_ok:
-                    market_ok   = df_["_has_market"]
-                    spread_ok   = df_["_spread_pct"] <= max_spread_pct
-                else:
-                    market_ok   = df_["_has_market"] | (df_["lastPrice"] > 0)
-                    # Spread nur prüfen wo echter Markt existiert
-                    spread_ok   = (~df_["_has_market"]) | (df_["_spread_pct"] <= max_spread_pct)
+                plaus = plausibility_mask(
+                    df_, current_price, side,
+                    max_spread_pct=max_spread_pct, strict=require_valid_market,
+                )
                 mask = (
-                    market_ok &
-                    spread_ok &
+                    plaus &
                     (df_["otm_pct"] >= otm_min) &
                     (df_["otm_pct"] <= otm_max) &
                     (df_["mid_price"] >= premium_min) &
@@ -301,8 +365,8 @@ def scan_strangle(
                 )
                 return df_[mask]
 
-            p_filt = _apply_filters(p_exp, _p_last_ok)
-            c_filt = _apply_filters(c_exp, _c_last_ok)
+            p_filt = _apply_filters(p_exp, "put")
+            c_filt = _apply_filters(c_exp, "call")
 
             if p_filt.empty or c_filt.empty:
                 continue
@@ -503,31 +567,22 @@ def scan_ticker(
         if "impliedVolatility" in df.columns:
             mask &= df["impliedVolatility"].fillna(0) >= iv_min
 
-        # ── Liquiditäts-Filter ────────────────────────────────────────────────
-        bid_ask_rate = df["_has_market"].mean() if len(df) > 0 else 0.0
-        sparse_market = bid_ask_rate < 0.20
-
+        # ── Plausibilisierung (Datenqualität) ─────────────────────────────────
+        # Handelszeiten (require_valid_market=True): STRIKT — nur zweiseitige
+        # Quotes, Spread-Limit Pflicht. Der frühere Sparse-Markt-Fallback auf
+        # lastPrice lieferte während der Handelszeiten stale Prämien → falsche
+        # Renditen; er gilt jetzt nur noch bei geschlossenem Markt.
         if require_valid_market:
-            if not sparse_market:
-                # Normalmodus: nur echte Bid/Ask-Optionen
-                mask &= df["_has_market"]
-                # Mid-Preis NUR aus Bid/Ask
-                df["mid_price"] = np.where(df["_has_market"],
-                                            (df["bid"] + df["ask"]) / 2, 0.0)
-            else:
-                # Sparse-Markt: lastPrice als Fallback erlauben, aber Mid bevorzugen
-                mask &= (df["_has_market"] | (df["lastPrice"] > 0))
-                df["mid_price"] = np.where(
-                    df["_has_market"],
-                    (df["bid"] + df["ask"]) / 2,  # echter Markt → Mid
-                    df["lastPrice"]                 # Fallback → Last
-                )
-
-        # Spread-Filter: immer anwenden (nur auf Optionen mit echtem Markt)
-        if max_spread_pct < 999.0:
-            valid_spread = df["_spread_pct"].notna() & (df["_spread_pct"] <= max_spread_pct)
-            no_spread    = df["_spread_pct"].isna()
-            mask &= (valid_spread | no_spread)
+            df["mid_price"] = np.where(df["_has_market"],
+                                        (df["bid"] + df["ask"]) / 2, 0.0)
+        else:
+            df["mid_price"] = np.where(df["_has_market"],
+                                        (df["bid"] + df["ask"]) / 2,
+                                        df["lastPrice"])
+        mask &= plausibility_mask(
+            df, current_price, opt_type,
+            max_spread_pct=max_spread_pct, strict=require_valid_market,
+        )
 
         df = df[mask].copy()
 
@@ -730,6 +785,7 @@ def scan_watchlist(
     all_results = []
     total = len(tickers)
     completed = 0
+    reset_plaus_stats()   # Datenqualitäts-Zähler je Scan-Lauf frisch
 
     scan_kwargs = dict(
         strategy=strategy, delta_min=delta_min, delta_max=delta_max,
