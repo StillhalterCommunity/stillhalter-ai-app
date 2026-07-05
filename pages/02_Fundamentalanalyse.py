@@ -50,35 +50,89 @@ NDX100_TICKERS = [
 ]
 
 
+# Nasdaq Next Generation 100 — der „kleine Bruder" des Nasdaq 100:
+# die nächsten 100 größten Nasdaq-Werte NACH den Top 100 (Plätze ~101–200,
+# ohne Finanzwerte; ETF darauf: QQQJ). Statische Liste wie NDX100_TICKERS,
+# Stand: Anfang 2026 — der Index rebalanciert halbjährlich, ohne Gewähr.
+NEXTGEN100_TICKERS = [
+    "AFRM","AKAM","ALAB","ALGN","ALNY","APPF","ASTS","AUR","AVAV","BMRN",
+    "BSY","CART","CASY","CELH","CFLT","CGNX","CHKP","CHRW","COKE","CROX",
+    "CRSP","CYBR","DKNG","DOCU","DOX","DUOL","EBAY","ENTG","ETSY","EXAS",
+    "EXEL","EXPE","FFIV","FIVE","FLEX","FSLR","GEN","GNTX","GRAB","HAS",
+    "ICLR","INCY","INSM","IONS","JBHT","LCID","LNT","LOGI","LSCC","MANH",
+    "MASI","MBLY","MEDP","MKSI","MRNA","MTCH","NBIX","NICE","NTAP","NTNX",
+    "NTRA","OKTA","OLED","PARA","PEGA","POOL","PTC","QRVO","RGLD","RIVN",
+    "ROKU","RPRX","SAIA","SIRI","STX","SWKS","TECH","TER","TRMB","TTEK",
+    "TXRH","ULTA","UTHR","WING","WWD","ZBRA","ZG","ZI",
+]
+
+
 def _wiki_tickers(url: str) -> list:
-    """Holt Ticker-Symbole aus einer Wikipedia-Tabelle via urllib (kein lxml nötig)."""
+    """Holt Ticker aus der ersten Wikipedia-'wikitable' (kein lxml nötig).
+    Robust: findet die Symbol-/Ticker-SPALTE über den Tabellenkopf statt eine
+    feste Zeilenstruktur anzunehmen — die alte Regex scheiterte z. B. an der
+    S&P-600-Seite, weil deren <tr>-Tags Attribute tragen."""
     import urllib.request, re
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     raw = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", errors="ignore")
-    matches = re.findall(
-        r"<tr>\s*<td[^>]*>\s*(?:<a[^>]*>)?([A-Z]{1,5}(?:-[A-Z])?)(?:</a>)?\s*</td>",
-        raw,
-    )
-    return [t for t in matches if t]
+    m = re.search(r"<table[^>]*wikitable[^>]*>(.*?)</table>", raw, re.S)
+    if not m:
+        return []
+    rows = re.split(r"<tr[^>]*>", m.group(1))[1:]
+
+    def _cells(row: str, tag: str) -> list:
+        return [re.sub(r"<[^>]+>", "", c).strip()
+                for c in re.findall(rf"<{tag}[^>]*>(.*?)</{tag}>", row, re.S)]
+
+    sym_idx = 0
+    for r in rows:                                   # Kopfzeile: Symbol-Spalte suchen
+        heads = [h.lower() for h in _cells(r, "th")]
+        if heads:
+            for i, h in enumerate(heads):
+                if h in ("symbol", "ticker", "ticker symbol"):
+                    sym_idx = i
+                    break
+            break
+
+    pat = re.compile(r"^[A-Z]{1,6}(?:[.\-][A-Z]{1,2})?$")
+    out = []
+    for r in rows:
+        tds = _cells(r, "td")
+        if len(tds) > sym_idx:
+            t = tds[sym_idx].replace("&amp;", "&").strip()
+            if pat.match(t):
+                out.append(t.replace(".", "-"))      # BRK.B → BRK-B (Yahoo-Format)
+    return out
+
+
+def _fetch_index_tickers(cache_key: str, url: str) -> list:
+    """Wikipedia-Loader mit Volume-Fallback: erfolgreiche Abrufe werden
+    persistent gespeichert; scheitert Wikipedia, kommt der letzte Stand."""
+    from data import _persistent_cache as _dcx
+    try:
+        tickers = _wiki_tickers(url)
+    except Exception:
+        tickers = []
+    if len(tickers) >= 50:
+        _dcx.save(cache_key, tickers, ttl_hours=24 * 30)
+        return tickers
+    cached = _dcx.load_latest(cache_key)
+    return cached if cached else []
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _fetch_sp500_tickers() -> list:
-    """Holt S&P 500 Constituents von Wikipedia (gecacht 24h, kein lxml nötig)."""
-    try:
-        return _wiki_tickers("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
-    except Exception:
-        return []
+    """S&P 500 Constituents (Wikipedia, 24h-Cache, Volume-Fallback)."""
+    return _fetch_index_tickers(
+        "idx_sp500", "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def _fetch_sp600_tickers() -> list:
-    """Holt S&P 600 Small Cap Constituents von Wikipedia (gecacht 24h, kein lxml nötig).
+    """S&P 600 Small Cap Constituents (Wikipedia, 24h-Cache, Volume-Fallback).
     Bessere Datenqualität als Russell 2000: alle S&P 600 Werte erfüllen Liquiditätsanforderungen."""
-    try:
-        return _wiki_tickers("https://en.wikipedia.org/wiki/List_of_S%26P_600_companies")
-    except Exception:
-        return []
+    return _fetch_index_tickers(
+        "idx_sp600", "https://en.wikipedia.org/wiki/List_of_S%26P_600_companies")
 
 
 # ── Value Score Berechnung ─────────────────────────────────────────────────────
@@ -127,7 +181,8 @@ st.markdown("""
 with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
     universe = st.radio(
         "Aktien-Universum",
-        ["🗂️ Meine Watchlist", "📈 Dow Jones 30", "💹 NASDAQ 100", "📊 S&P 500", "📉 S&P 600 Small Cap"],
+        ["🗂️ Meine Watchlist", "📈 Dow Jones 30", "💹 NASDAQ 100", "🌱 Nasdaq Next Gen 100",
+         "📊 S&P 500", "📉 S&P 600 Small Cap"],
         horizontal=True,
         key="vs_universe",
     )
@@ -176,6 +231,8 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN**", expanded=True):
 _univ_warn = ""
 if "Dow Jones" in universe:
     scan_tickers = DOW30_TICKERS
+elif "Next Gen" in universe:
+    scan_tickers = NEXTGEN100_TICKERS
 elif "NASDAQ" in universe:
     scan_tickers = NDX100_TICKERS
 elif "S&P 500" in universe and "Small" not in universe:
