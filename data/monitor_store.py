@@ -35,13 +35,17 @@ def load_trades() -> List[dict]:
 
 
 def save_trades(trades: List[dict]) -> None:
+    """ATOMAR schreiben (tmp + os.replace) — schützt vor korrupten Dateien,
+    wenn mehrere Nutzer/Sessions gleichzeitig speichern."""
     path = trades_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except Exception:
         pass
-    with open(path, "w", encoding="utf-8") as f:
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(trades, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def new_trade_id(ticker: str, strategy: str = "") -> str:

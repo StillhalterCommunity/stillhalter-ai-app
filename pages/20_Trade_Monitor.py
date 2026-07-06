@@ -76,8 +76,11 @@ def _load_trades() -> list:
 
 
 def _save_trades(trades: list) -> None:
-    with open(MANUAL_TRADES_PATH, "w", encoding="utf-8") as f:
+    # Atomar (tmp + replace) — parallele Nutzer können sonst die Datei zerschießen
+    _tmp = f"{MANUAL_TRADES_PATH}.tmp.{os.getpid()}"
+    with open(_tmp, "w", encoding="utf-8") as f:
         json.dump(trades, f, ensure_ascii=False, indent=2)
+    os.replace(_tmp, MANUAL_TRADES_PATH)
 
 
 def _update_trade_status(trade_id: str, new_status: str, note: str = "") -> None:

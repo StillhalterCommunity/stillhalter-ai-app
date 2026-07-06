@@ -189,6 +189,16 @@ def _prefetch_worker(tickers: list) -> None:
             _state["running"] = False
             _state["progress"] = 1.0 if completed_all else _state.get("progress", 0.0)
             _state["done"] = done
+        # 🩺 Täglicher Selbsttest im Anschluss (läuft bereits im Hintergrund-
+        # Thread — blockiert niemanden). Ergebnis → health_last (App-Startseite).
+        try:
+            from data.health import run_light_check
+            _dc.save("health_last", {
+                "ts": datetime.now().isoformat(timespec="seconds"),
+                "results": run_light_check(),
+            }, ttl_hours=24)
+        except Exception:
+            pass
 
 
 def start_prefetch(tickers: list | None = None) -> bool:

@@ -396,10 +396,31 @@ def warm_option_chain(ticker: str) -> bool:
 
 def _chain_from_disk(ticker, dte_min, dte_max, max_expiries, option_types):
     """Lädt die breite Disk-Optionskette und filtert auf DTE-Fenster + Seite(n).
-    Gibt (puts_df, calls_df, expirations) oder None wenn kein frischer Cache."""
+    Gibt (puts_df, calls_df, expirations) oder None wenn kein frischer Cache.
+
+    WICHTIG (Root-Cause '0 Treffer während Handelszeiten'): Der Tages-Prefetch
+    läuft morgens deutscher Zeit — Stunden VOR US-Börsenöffnung. Die gecachten
+    Ketten enthalten dann bid/ask = 0 (kein Markt), gelten aber 18h. Bei
+    offenem Markt verwirft die Scanner-Plausibilisierung solche Quotes komplett
+    → systematisch 0 Treffer (CSP wie Strangle). Deshalb: Bei offenem Markt
+    wird eine Disk-Kette ohne echte zweiseitige Quotes verworfen → Live-Fetch."""
     combined = _dc.load(f"opt_chain_{ticker}", max_age_hours=18)
     if combined is None or getattr(combined, "empty", True):
         return None
+    try:
+        if is_market_open():
+            # Wurde die Kette VOR dem heutigen Börsenstart gespeichert
+            # (Morgen-Prefetch), enthält sie nur Vortagsdaten → live holen.
+            _age_h = _dc.age_hours(f"opt_chain_{ticker}")
+            if _age_h is not None:
+                _et = pytz.timezone("America/New_York")
+                _now_et = datetime.now(_et)
+                _open_et = _now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+                _hours_since_open = (_now_et - _open_et).total_seconds() / 3600
+                if _age_h > _hours_since_open:
+                    return None
+    except Exception:
+        pass
     try:
         df = combined.copy()
         df["_dte"] = df["expiration"].apply(calculate_dte)

@@ -50,17 +50,27 @@ def scan_cache_path() -> str:
 
 
 def save(key: str, data: Any, ttl_hours: float = 24.0) -> None:
-    """Speichert Daten persistent auf Disk."""
+    """Speichert Daten persistent auf Disk — ATOMAR (tmp + os.replace):
+    Bei parallelen Nutzern/Threads kann sonst ein halb geschriebenes Pickle
+    entstehen, das beim nächsten Laden als korrupt verworfen wird."""
+    path = _cache_path(key)
+    tmp = f"{path}.tmp.{os.getpid()}"
     try:
-        with open(_cache_path(key), "wb") as f:
+        with open(tmp, "wb") as f:
             pickle.dump({
                 "key": key,
                 "data": data,
                 "saved_at": datetime.now().isoformat(),
                 "ttl_hours": ttl_hours,
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp, path)
     except Exception as e:
         logger.debug(f"Disk-Cache save failed for {key}: {e}")
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 def load(key: str, max_age_hours: float = 24.0) -> Optional[Any]:

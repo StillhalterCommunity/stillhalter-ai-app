@@ -11,7 +11,18 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from typing import Any, List, Optional
 
-STORE_PATH = os.path.join(os.path.dirname(__file__), "trade_cards.json")
+# Persistent im Volume (überlebt Deploys/Neustarts); Fallback: Code-Ordner.
+# Migration: existiert nur die alte Datei im Code-Ordner, wird sie einmalig
+# ins Volume übernommen.
+_DATA_DIR = os.environ.get("STILLHALTER_DATA_DIR", "").strip()
+_LEGACY_PATH = os.path.join(os.path.dirname(__file__), "trade_cards.json")
+STORE_PATH = (os.path.join(_DATA_DIR, "trade_cards.json") if _DATA_DIR else _LEGACY_PATH)
+try:
+    if _DATA_DIR and not os.path.exists(STORE_PATH) and os.path.exists(_LEGACY_PATH):
+        import shutil as _sh
+        _sh.copy2(_LEGACY_PATH, STORE_PATH)
+except Exception:
+    pass
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
@@ -126,8 +137,11 @@ def _load_raw() -> List[dict]:
 
 
 def _save_raw(cards: List[dict]) -> None:
-    with open(STORE_PATH, "w", encoding="utf-8") as f:
+    # Atomar (tmp + replace) — schützt vor Korruption bei parallelen Nutzern
+    _tmp = f"{STORE_PATH}.tmp.{os.getpid()}"
+    with open(_tmp, "w", encoding="utf-8") as f:
         json.dump(cards, f, ensure_ascii=False, indent=2)
+    os.replace(_tmp, STORE_PATH)
 
 
 def load_all() -> List[TradeCard]:

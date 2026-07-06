@@ -298,6 +298,58 @@ with st.expander("⚙️ System", expanded=False):
                         _pf.start_prefetch()
                         st.rerun()
 
+        # ── 🩺 Selbsttest & Konsistenz (App prüft sich selbst — NICHT blockierend) ──
+        try:
+            # NUR Disk-Read (0 Netz-Calls): der eigentliche Check läuft im
+            # täglichen Prefetch-Thread bzw. über den Button unten. Ein
+            # Netz-Check beim Seitenload kann sich über cache_data-Locks
+            # mit dem Haupt-Thread verketten → App hängt (gesehen im Test).
+            from data.health import last_check
+            _hl = last_check()
+            if _hl and _hl.get("results"):
+                _fails = [c for c in _hl["results"] if not c["ok"]]
+                _hc_col = "#22c55e" if not _fails else "#ef4444"
+                _hc_lbl = ("alle Kernfunktionen ok" if not _fails else
+                           f"{len(_fails)} Problem(e): " + " · ".join(f["name"] for f in _fails))
+                st.markdown(
+                    f"<div style='font-size:0.78rem;margin:6px 0'>🩺 Selbsttest "
+                    f"({_hl.get('ts','?')[11:16]} Uhr): "
+                    f"<span style='color:{_hc_col};font-weight:700'>{_hc_lbl}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                if _fails:
+                    for f in _fails:
+                        st.warning(f"🩺 **{f['name']}**: {f['detail']}")
+            else:
+                st.markdown("<div style='font-size:0.78rem;margin:6px 0;color:#888'>"
+                            "🩺 Selbsttest läuft im Hintergrund — Ergebnis beim "
+                            "nächsten Seitenaufruf.</div>", unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        _hb1, _hb2, _hbpad = st.columns([2, 2, 8])
+        with _hb1:
+            if st.button("🩺 Tiefer Selbsttest", use_container_width=True,
+                         help="Testet zusätzlich echte Mini-Scans (CSP + Strangle) "
+                              "und alle persistenten Dateien (~30–60s)"):
+                from data.health import run_deep_check
+                with st.spinner("Selbsttest läuft…"):
+                    for c in run_deep_check():
+                        icon = "✅" if c["ok"] else "❌"
+                        st.markdown(f"{icon} **{c['name']}** — {c['detail']}"
+                                    + (f" · 🔧 {c['repaired']}" if c.get("repaired") else ""))
+        with _hb2:
+            if st.button("🔧 Konsistenz-Reparatur", use_container_width=True,
+                         help="Prüft die persistenten Daten (Trades, Caches) und "
+                              "repariert sicher Behebbares (mit Backup)"):
+                from data.health import check_consistency
+                with st.spinner("Prüfe & repariere…"):
+                    for c in check_consistency(repair=True):
+                        icon = "✅" if c["ok"] else "❌"
+                        st.markdown(f"{icon} **{c['name']}** — {c['detail']}"
+                                    + (f" · 🔧 {c['repaired']}" if c.get("repaired") else ""))
+                _auto_health.clear()
+
         # ── Speicher-Diagnose: aktiver Cache-Pfad (zeigt ob Volume greift) ─────
         try:
             from data import _persistent_cache as _pc

@@ -110,8 +110,15 @@ def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
     bid, ask, lastPrice, mid_price, _has_market, _spread_pct, strike.
 
     strict=True (Handelszeiten):
-      • NUR echte zweiseitige Quotes (bid>0 UND ask>0) — kein lastPrice-Fallback
-      • Spread ≤ max_spread_pct ist PFLICHT (quote-lose können nicht durchrutschen)
+      • echtes zweiseitiges Bid/Ask (dann Spread-Limit Pflicht) ODER
+      • nachweislich HEUTIGER Handel: lastPrice > 0 UND Tagesvolumen > 0.
+        Hintergrund: Der Polygon-Options-STARTER-Plan liefert im Snapshot
+        KEINE NBBO-Quotes (last_quote leer — Quotes sind ein Entitlement
+        höherer Pläne), sondern 15-min-verzögerte Tagesdaten. Eine reine
+        Bid/Ask-Pflicht ergäbe mit diesem Plan IMMER 0 Treffer; ein
+        lastPrice OHNE heutiges Volumen wäre dagegen ein stale Vortags-
+        preis (die Quelle der 'falschen Ergebnisse'). 'Letzter Preis +
+        heutiges Volumen' ist der ehrliche Mittelweg.
     strict=False (Markt geschlossen):
       • lastPrice als Fallback erlaubt; wo Quotes existieren, gilt das Spread-Limit
     Immer:
@@ -126,9 +133,16 @@ def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
     else:
         intrinsic = (current_price - strike).clip(lower=0)
 
+    if "volume" in df.columns:
+        _vol = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+    else:
+        _vol = pd.Series(0, index=df.index)
+
     if strict:
-        market_ok = df["_has_market"]
-        spread_ok = df["_spread_pct"].notna() & (df["_spread_pct"] <= max_spread_pct)
+        traded_today = (df["lastPrice"] > 0) & (_vol > 0)
+        market_ok = df["_has_market"] | traded_today
+        # Spread-Limit nur prüfbar, wo Quotes existieren
+        spread_ok = (~df["_has_market"]) | (df["_spread_pct"] <= max_spread_pct)
     else:
         market_ok = df["_has_market"] | (df["lastPrice"] > 0)
         spread_ok = (~df["_has_market"]) | (df["_spread_pct"] <= max_spread_pct)
@@ -325,14 +339,19 @@ def scan_strangle(
             p_exp["_has_market"] = (p_exp["bid"] > 0) & (p_exp["ask"] > 0) & (p_exp["ask"] >= p_exp["bid"])
             c_exp["_has_market"] = (c_exp["bid"] > 0) & (c_exp["ask"] > 0) & (c_exp["ask"] >= c_exp["bid"])
 
-            # Preis: Handelszeiten STRIKT nur aus zweiseitigen Quotes; lastPrice-
-            # Fallback ausschließlich bei geschlossenem Markt (require_valid_
-            # market=False). Der frühere Sparse-Fallback während der Handels-
-            # zeiten brachte stale Prämien → falsche Ergebnisse.
-            _p_fallback = p_exp["lastPrice"] if not require_valid_market else 0.0
-            _c_fallback = c_exp["lastPrice"] if not require_valid_market else 0.0
-            p_exp["mid_price"] = np.where(p_exp["_has_market"], (p_exp["bid"] + p_exp["ask"]) / 2, _p_fallback)
-            c_exp["mid_price"] = np.where(c_exp["_has_market"], (c_exp["bid"] + c_exp["ask"]) / 2, _c_fallback)
+            # Preis: Quotes bevorzugt; Handelszeiten ohne Quotes (Polygon-Starter
+            # liefert keine NBBO) → lastPrice nur mit HEUTIGEM Volumen; Markt zu
+            # → lastPrice generell erlaubt.
+            def _side_mid(df_):
+                _v = (pd.to_numeric(df_["volume"], errors="coerce").fillna(0)
+                      if "volume" in df_.columns else pd.Series(0, index=df_.index))
+                if require_valid_market:
+                    fb = np.where(_v > 0, df_["lastPrice"], 0.0)
+                else:
+                    fb = df_["lastPrice"]
+                return np.where(df_["_has_market"], (df_["bid"] + df_["ask"]) / 2, fb)
+            p_exp["mid_price"] = _side_mid(p_exp)
+            c_exp["mid_price"] = _side_mid(c_exp)
 
             # Spread %
             p_exp["_spread_pct"] = np.where(
@@ -568,13 +587,15 @@ def scan_ticker(
             mask &= df["impliedVolatility"].fillna(0) >= iv_min
 
         # ── Plausibilisierung (Datenqualität) ─────────────────────────────────
-        # Handelszeiten (require_valid_market=True): STRIKT — nur zweiseitige
-        # Quotes, Spread-Limit Pflicht. Der frühere Sparse-Markt-Fallback auf
-        # lastPrice lieferte während der Handelszeiten stale Prämien → falsche
-        # Renditen; er gilt jetzt nur noch bei geschlossenem Markt.
+        # Handelszeiten: Quotes bevorzugt; ohne Quotes (Polygon-Starter liefert
+        # keine NBBO) gilt lastPrice NUR mit nachweislich heutigem Volumen —
+        # stale Vortagespreise (die Quelle falscher Renditen) fliegen raus.
+        _volq = (pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+                 if "volume" in df.columns else pd.Series(0, index=df.index))
         if require_valid_market:
-            df["mid_price"] = np.where(df["_has_market"],
-                                        (df["bid"] + df["ask"]) / 2, 0.0)
+            df["mid_price"] = np.where(
+                df["_has_market"], (df["bid"] + df["ask"]) / 2,
+                np.where(_volq > 0, df["lastPrice"], 0.0))
         else:
             df["mid_price"] = np.where(df["_has_market"],
                                         (df["bid"] + df["ask"]) / 2,
