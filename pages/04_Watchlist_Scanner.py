@@ -46,30 +46,35 @@ def _fetch_mini_hist(ticker: str):
 
 
 def _tradingview_html(ticker: str, dark: bool, height: int = 460) -> str:
-    """TradingView Advanced-Chart-Widget (interaktiv, schön) für einen Ticker."""
+    """TradingView Advanced-Chart (offizielles external-embedding-Widget).
+    Hinweis: Das alte tv.js-API wird von TradingView nicht mehr zuverlässig
+    ausgeliefert → leere graue Fläche. Dieses Embed ist der dokumentierte Weg."""
     theme = "dark" if dark else "light"
     bg    = "#0e0e0e" if dark else "#ffffff"
-    cid   = f"tv_{ticker}".replace(".", "_")
+    cfg = (
+        '{'
+        '"autosize": true,'
+        f'"symbol": "{ticker}",'
+        '"interval": "D",'
+        '"timezone": "Europe/Berlin",'
+        f'"theme": "{theme}",'
+        '"style": "1",'
+        '"locale": "de_DE",'
+        '"hide_side_toolbar": true,'
+        '"allow_symbol_change": true,'
+        '"studies": ["STD;EMA", "STD;MACD"],'
+        '"support_host": "https://www.tradingview.com"'
+        '}'
+    )
     return f"""
 <div class="tradingview-widget-container" style="height:{height}px;width:100%;background:{bg}">
-  <div id="{cid}" style="height:100%;width:100%"></div>
+  <div class="tradingview-widget-container__widget" style="height:100%;width:100%"></div>
+  <script type="text/javascript"
+          src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+          async>
+  {cfg}
+  </script>
 </div>
-<script src="https://s3.tradingview.com/tv.js"></script>
-<script>
-new TradingView.widget({{
-  "autosize": true,
-  "symbol": "{ticker}",
-  "interval": "D",
-  "timezone": "Europe/Berlin",
-  "theme": "{theme}",
-  "style": "1",
-  "locale": "de_DE",
-  "hide_side_toolbar": true,
-  "allow_symbol_change": true,
-  "studies": ["STD;EMA", "STD;MACD"],
-  "container_id": "{cid}"
-}});
-</script>
 """
 
 
@@ -1679,6 +1684,11 @@ else:
                     # Schöner interaktiver TradingView-Chart statt Plotly-Mini
                     _tv_dark = st.session_state.get("app_theme", "dark") != "green"
                     components.html(_tradingview_html(_tkr, _tv_dark), height=470)
+                    st.caption(
+                        f"Chart bleibt leer? Meist blockiert ein **Adblocker** das "
+                        f"TradingView-Embed → "
+                        f"[Auf TradingView öffnen ↗](https://www.tradingview.com/chart/?symbol={_tkr})"
+                    )
                 with _mc2:
                     # ── Ampel 4h / 1D ─────────────────────────────────────
                     _is_green = st.session_state.get("app_theme", "dark") == "green"
