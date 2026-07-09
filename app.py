@@ -348,7 +348,6 @@ with st.expander("⚙️ System", expanded=False):
                         icon = "✅" if c["ok"] else "❌"
                         st.markdown(f"{icon} **{c['name']}** — {c['detail']}"
                                     + (f" · 🔧 {c['repaired']}" if c.get("repaired") else ""))
-                _auto_health.clear()
 
         # ── Speicher-Diagnose: aktiver Cache-Pfad (zeigt ob Volume greift) ─────
         try:

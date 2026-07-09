@@ -138,13 +138,25 @@ def clicks() -> None:
             cb[0].click(); at.run()
             _check("Top9 Chart-Klick", at)
 
-    # 4) app.py: Tagesdaten-Button existiert und klickt ohne NameError
+    # 4) app.py: System-Buttons klicken (Tagesdaten, Konsistenz-Reparatur,
+    #    tiefer Selbsttest) — Klick-Handler-Pfade, die Lade-Tests nicht sehen!
     at = _mk("app.py", ADMIN, "dark", 120); at.run()
     if _check("app laden", at):
         tb = [x for x in at.button if "Tagesdaten" in (x.label or "")]
         if tb:
             tb[0].click(); at.run()
             _check("app Tagesdaten-Klick", at)
+    at = _mk("app.py", ADMIN, "dark", 180); at.run()
+    rb = [x for x in at.button if "Konsistenz" in (x.label or "")]
+    if rb:
+        rb[0].click(); at.run()
+        _check("app Konsistenz-Reparatur-Klick", at)
+    if os.environ.get("MASSIVE_API_KEY"):
+        at = _mk("app.py", ADMIN, "dark", 300); at.run()
+        hb = [x for x in at.button if "Selbsttest" in (x.label or "")]
+        if hb:
+            hb[0].click(); at.run()
+            _check("app Tiefer-Selbsttest-Klick", at)
 
     # 5) Scanner-Kurzscan (nur mit API-Key — Netzwerk!)
     if os.environ.get("MASSIVE_API_KEY"):
