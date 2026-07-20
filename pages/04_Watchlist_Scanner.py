@@ -81,13 +81,14 @@ def _tradingview_html(ticker: str, dark: bool, height: int = 460) -> str:
 @st.cache_data(ttl=900, show_spinner=False)
 def _scanner_tf_ampel(ticker: str) -> dict:
     """Ampel-Farben (🟢/🟡/🔴) je Indikator × Zeitebene (4h, 1d) via Multi-Timeframe."""
-    out = {"Trend":      {"4h": "⚪", "1d": "⚪"},
-           "MACD":       {"4h": "⚪", "1d": "⚪"},
-           "Stoch schnell": {"4h": "⚪", "1d": "⚪"},
-           "Stoch langsam": {"4h": "⚪", "1d": "⚪"}}
+    out = {"Trend":      {"4h": "⚪", "1d": "⚪", "1w": "⚪"},
+           "MACD":       {"4h": "⚪", "1d": "⚪", "1w": "⚪"},
+           "Stoch schnell": {"4h": "⚪", "1d": "⚪", "1w": "⚪"},
+           "Stoch langsam": {"4h": "⚪", "1d": "⚪", "1w": "⚪"}}
     try:
         m = analyze_multi_timeframe(ticker)
-        for key, sig in (("4h", getattr(m, "tf_4h", None)), ("1d", getattr(m, "tf_1d", None))):
+        for key, sig in (("4h", getattr(m, "tf_4h", None)), ("1d", getattr(m, "tf_1d", None)),
+                         ("1w", getattr(m, "tf_1w", None))):
             if not sig:
                 continue
             out["Trend"][key] = "🟢" if getattr(sig, "ema_bullish", False) else "🔴"
@@ -438,7 +439,8 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
             ["🛡️ Stillhalter-Score", "CRV Score", "Best Convergence", "Rendite ann. %",
              "Rendite % Laufzeit", "Rendite %/Tag", "OTM %", "Prämie/Tag", "DTE", "|Delta|"],
             help="🛡️ Stillhalter-Score = 60% Richtung (Trend BT · MACD Pro · Dual "
-                 "Stochastik — strategieabhängig: Kurs soll sich vom Strike entfernen) "
+                 "Stochastik — strategieabhängig: Kurs soll sich vom Strike entfernen; "
+                 "Zeitebene passend zur Laufzeit: ≤14T→4h · 15–42T→1D · >6 Wochen→1W) "
                  "+ 40% Prämienqualität (CRV-Perzentil im Scan).",
         )
 
@@ -1311,9 +1313,27 @@ else:
 
         _scan_strat_name = meta.get("strategy", scan_strategy)
 
-        def _setup_for(ticker: str):
+        # Zeitebene passend zur Optionslaufzeit (kurz-/mittel-/langfristiger
+        # Trend): DTE 1–14 → 4h · 15–42 (bis 6 Wochen) → 1D · darüber → 1W.
+        def _tf_bucket(dte) -> str:
+            try:
+                d = int(dte)
+            except Exception:
+                d = 30
+            return "4h" if d <= 14 else ("1D" if d <= 42 else "1W")
+
+        _TF_ATTR = {"4h": "tf_4h", "1D": "tf_1d", "1W": "tf_1w"}
+
+        def _setup_for(ticker: str, bucket: str):
             m = _stf.get(ticker)
-            sig = getattr(m, "tf_1d", None) if m else None
+            sig = getattr(m, _TF_ATTR[bucket], None) if m else None
+            used = bucket
+            if not sig and m is not None:             # Fallback: 1D, dann 4h
+                for fb in ("1D", "4h"):
+                    sig = getattr(m, _TF_ATTR[fb], None)
+                    if sig:
+                        used = fb + "*"
+                        break
             if not sig:
                 return (None, "–")
             trend_bull = bool(getattr(sig, "ema_bullish", False))
@@ -1336,11 +1356,19 @@ else:
             def _a(v):
                 return "🟢" if v >= 1.0 else ("🟡" if v >= 0.5 else "🔴")
             total = round(s_t + s_m + s_s, 1)
-            return (total, f"{_a(s_t)}{_a(s_m)}{_a(s_s)} {total:g}/3")
+            return (total, f"{_a(s_t)}{_a(s_m)}{_a(s_s)} {total:g}/3 · {used}")
 
-        _sm = {t: _setup_for(t) for t in results["Ticker"].unique()}
-        results["Setup-Score"] = results["Ticker"].map(lambda t: _sm.get(t, (None, "–"))[0])
-        results["🎯 Setup"]    = results["Ticker"].map(lambda t: _sm.get(t, (None, "–"))[1])
+        # Pro (Ticker, Zeitebene) berechnen und ZEILENWEISE zuordnen —
+        # die Zeitebene hängt an der Laufzeit der jeweiligen Option.
+        _sm: dict = {}
+        def _row_setup(row):
+            key = (row.get("Ticker", ""), _tf_bucket(row.get("DTE", 30)))
+            if key not in _sm:
+                _sm[key] = _setup_for(*key)
+            return _sm[key]
+        _applied = results.apply(_row_setup, axis=1)
+        results["Setup-Score"] = [x[0] for x in _applied]
+        results["🎯 Setup"]    = [x[1] for x in _applied]
         st.session_state.scan_results = results
 
     # ── 🛡️ Stillhalter-Score (0–100): DIE Kombination der 3 Indikatoren + CRV ──
@@ -1568,7 +1596,8 @@ else:
             "🛡️ **Score** = 60 % Richtung (Trend BT · MACD Pro · Dual Stochastik — "
             "hoch, wenn sich der Kurs wahrscheinlich **vom Strike entfernt**) "
             "+ 40 % Prämienqualität (CRV-Perzentil). "
-            "🎯 Ampeln: Trend · MACD · Stochastik."
+            "🎯 Ampeln: Trend · MACD · Stochastik — auf der zur Laufzeit passenden "
+            "Zeitebene: **≤14 T → 4h · 15–42 T → 1D · >6 Wochen → 1W** (steht hinter den Ampeln)."
         )
     else:
         show_cols = [c for c in (["🛡️ Score"] + base_cols + tech_cols
@@ -1579,7 +1608,8 @@ else:
         "🛡️ Score":     st.column_config.ProgressColumn(
             "🛡️ Score", min_value=0, max_value=100, format="%.0f",
             help="60% Richtung (Trend BT · MACD Pro · Dual Stochastik, strategie-"
-                 "abhängig: Kurs soll sich vom Strike entfernen) + 40% CRV-Perzentil"),
+                 "abhängig: Kurs soll sich vom Strike entfernen; Zeitebene je Laufzeit: "
+                 "≤14T→4h · 15–42T→1D · >6W→1W) + 40% CRV-Perzentil"),
         "Top":           st.column_config.TextColumn("Top", width="small",
                                                       help="Rang nach gewählter Sortierung"),
         "Liq.":          st.column_config.TextColumn("Liq.", width="small",
@@ -1750,7 +1780,8 @@ else:
                     _amp_rows = "".join(
                         f"<tr><td style='padding:4px 10px 4px 0;font-size:0.84rem;color:{_lbl}'>{k}</td>"
                         f"<td style='text-align:center;font-size:1.05rem'>{v['4h']}</td>"
-                        f"<td style='text-align:center;font-size:1.05rem'>{v['1d']}</td></tr>"
+                        f"<td style='text-align:center;font-size:1.05rem'>{v['1d']}</td>"
+                        f"<td style='text-align:center;font-size:1.05rem'>{v['1w']}</td></tr>"
                         for k, v in _amp.items()
                     )
                     st.html(
@@ -1759,7 +1790,8 @@ else:
                         f"<table style='width:100%;border-collapse:collapse'>"
                         f"<tr><td></td>"
                         f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>4h</td>"
-                        f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>1D</td></tr>"
+                        f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>1D</td>"
+                        f"<td style='text-align:center;font-size:0.72rem;color:{_sub}'>1W</td></tr>"
                         f"{_amp_rows}</table>"
                         f"<div style='font-size:0.68rem;color:{_sub};margin-top:4px'>"
                         f"🟢 bullisch/überverkauft · 🔴 bärisch/überkauft · 🟡 neutral</div>"
