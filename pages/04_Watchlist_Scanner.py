@@ -435,8 +435,11 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
         st.markdown("<br>", unsafe_allow_html=True)
         sort_by = st.selectbox(
             "Sortierung",
-            ["CRV Score", "Best Convergence", "Rendite ann. %", "Rendite % Laufzeit",
-             "Rendite %/Tag", "OTM %", "Prämie/Tag", "DTE", "|Delta|"],
+            ["🛡️ Stillhalter-Score", "CRV Score", "Best Convergence", "Rendite ann. %",
+             "Rendite % Laufzeit", "Rendite %/Tag", "OTM %", "Prämie/Tag", "DTE", "|Delta|"],
+            help="🛡️ Stillhalter-Score = 60% Richtung (Trend BT · MACD Pro · Dual "
+                 "Stochastik — strategieabhängig: Kurs soll sich vom Strike entfernen) "
+                 "+ 40% Prämienqualität (CRV-Perzentil im Scan).",
         )
 
     # ── Earnings-Filter ───────────────────────────────────────────────────────
@@ -1340,6 +1343,21 @@ else:
         results["🎯 Setup"]    = results["Ticker"].map(lambda t: _sm.get(t, (None, "–"))[1])
         st.session_state.scan_results = results
 
+    # ── 🛡️ Stillhalter-Score (0–100): DIE Kombination der 3 Indikatoren + CRV ──
+    # 60% Richtung: Trend BT · MACD Pro · Dual Stochastik, strategieabhängig so
+    # gedreht, dass hohe Werte = 'Kurs entfernt sich wahrscheinlich vom Strike'
+    # (Short Put → bullisch/überverkauft · Covered Call → bärisch/überkauft ·
+    # Strangle → neutral). 40% Prämienqualität: CRV als Perzentil im Scan.
+    if "🛡️ Score" not in results.columns and "Setup-Score" in results.columns:
+        _dirscore = (pd.to_numeric(results["Setup-Score"], errors="coerce")
+                     .fillna(0) / 3.0).clip(0, 1)
+        if "CRV Score" in results.columns:
+            _crv_pct = results["CRV Score"].rank(pct=True).fillna(0)
+        else:
+            _crv_pct = 0.0
+        results["🛡️ Score"] = ((0.6 * _dirscore + 0.4 * _crv_pct) * 100).round(0)
+        st.session_state.scan_results = results
+
     # ── Kennzahlen ─────────────────────────────────────────────────────────
     n_tickers_found = results["Ticker"].nunique() if "Ticker" in results.columns else 0
     avg_crv  = results["CRV Score"].mean() if "CRV Score" in results.columns else 0
@@ -1463,7 +1481,10 @@ else:
         elif sort_by == "Best Convergence" and "Konvergenz" in results.columns:
             display_df = results.sort_values("Konvergenz", ascending=False).head(int(top_n)).reset_index(drop=True)
         else:
-            sort_col = sort_by if sort_by in results.columns else "CRV Score"
+            if sort_by.startswith("🛡️") and "🛡️ Score" in results.columns:
+                sort_col = "🛡️ Score"
+            else:
+                sort_col = sort_by if sort_by in results.columns else "CRV Score"
             display_df = results.sort_values(
                 sort_col, ascending=(sort_by == "DTE")
             ).head(int(top_n)).reset_index(drop=True)
@@ -1525,9 +1546,40 @@ else:
     conv_cols_show = [c for c in [
         "Konvergenz", "Konv.", "Konv. TF", "Konv. Ampeln", "Konv. Hinweis", "S/R Schutz",
     ] if c in display_df.columns]
-    show_cols = [c for c in base_cols + tech_cols + conv_cols_show + ["⭐ CRV"] if c in display_df.columns]
+    # ── Ansicht: Kompakt (Stillhalter-Fokus) vs. Alle Spalten ────────────────
+    view_mode = st.radio(
+        "Ansicht", ["🛡️ Kompakt (Stillhalter-Fokus)", "Alle Spalten"],
+        horizontal=True, key="scan_view_mode",
+        help="Kompakt: Score + Setup-Ampeln + Kernzahlen. Alle Spalten: "
+             "komplette Detail-Tabelle wie bisher.",
+    )
+    if view_mode.startswith("🛡️"):
+        if is_strangle and "Strike PUT" in display_df.columns:
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "Ticker",
+                        "Kurs", "Strike PUT", "Strike CALL", "Range %", "Verfall",
+                        "DTE", "Prämie gesamt", "Rendite % Laufzeit",
+                        "Rendite ann. %", "IV %"]
+        else:
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "Ticker",
+                        "Kurs", "Strike", "OTM %", "Verfall", "DTE", "Prämie",
+                        "Rendite % Laufzeit", "Rendite ann. %", "Delta", "IV %"]
+        show_cols = [c for c in _compact if c in display_df.columns]
+        st.caption(
+            "🛡️ **Score** = 60 % Richtung (Trend BT · MACD Pro · Dual Stochastik — "
+            "hoch, wenn sich der Kurs wahrscheinlich **vom Strike entfernt**) "
+            "+ 40 % Prämienqualität (CRV-Perzentil). "
+            "🎯 Ampeln: Trend · MACD · Stochastik."
+        )
+    else:
+        show_cols = [c for c in (["🛡️ Score"] + base_cols + tech_cols
+                                 + conv_cols_show + ["⭐ CRV"])
+                     if c in display_df.columns]
 
     col_config = {
+        "🛡️ Score":     st.column_config.ProgressColumn(
+            "🛡️ Score", min_value=0, max_value=100, format="%.0f",
+            help="60% Richtung (Trend BT · MACD Pro · Dual Stochastik, strategie-"
+                 "abhängig: Kurs soll sich vom Strike entfernen) + 40% CRV-Perzentil"),
         "Top":           st.column_config.TextColumn("Top", width="small",
                                                       help="Rang nach gewählter Sortierung"),
         "Liq.":          st.column_config.TextColumn("Liq.", width="small",
