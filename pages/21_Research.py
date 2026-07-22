@@ -62,7 +62,7 @@ with tab_grid:
         "welche Kombination historisch die beste Verfallsquote und Rendite hatte."
     )
     st.info(
-        "ℹ️ **Methodik (ehrlich):** Kursdaten kommen von Yahoo Finance (bis zu ~26 Jahre, "
+        "ℹ️ **Methodik (ehrlich):** Kursdaten aus der Markt-Historie (bis zu ~26 Jahre, "
         "je nach Aktie). Da echte historische Optionspreise so weit zurück nicht frei "
         "verfügbar sind, werden die **Prämien per Black-Scholes simuliert** (historische "
         "Volatilität, Delta-Targeting). Verfallsquote und Strike-Treffer sind exakt — "

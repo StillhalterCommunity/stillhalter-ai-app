@@ -765,7 +765,7 @@ with tab_bt:
                 line-height:1.7;margin-bottom:16px'>
         Simuliert historische Trades basierend auf dem <b style='color:#d4a843'>SC Trend Signal</b>.
         Prämien werden über <b style='color:#888'>Black-Scholes + historische Volatilität</b> berechnet,
-        da Yahoo Finance keine historischen Optionspreise liefert.
+        da für die Vergangenheit keine echten Optionspreise vorliegen.
         Ergebnisse sind <i>theoretisch</i> — reale Bid/Ask-Spreads & Slippage nicht enthalten.
     </div>
     """, unsafe_allow_html=True)

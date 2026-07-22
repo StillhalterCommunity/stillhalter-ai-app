@@ -57,7 +57,7 @@ Die Stillhalter AI App erhebt und verarbeitet folgende Daten:
 
 - **Zugangsdaten:** Bei der Anmeldung wird das verwendete Passwort (enthält den Nutzernamen) sowie Datum und Uhrzeit des Zugriffs protokolliert.
 - **Nutzungsdaten:** Seitenaufrufe und Verweildauer werden intern für Betriebszwecke erfasst.
-- **Börsendaten:** Alle Kursdaten werden in Echtzeit von Yahoo Finance abgerufen. Es werden keine persönlichen Finanzdaten des Nutzers gespeichert.
+- **Börsendaten:** Alle Kursdaten werden von externen, professionellen Marktdaten-Anbietern abgerufen. Es werden keine persönlichen Finanzdaten des Nutzers gespeichert.
 
 ### 2. Zweck der Datenverarbeitung
 
@@ -67,7 +67,7 @@ Die Protokollierung des Logins dient ausschließlich:
 
 ### 3. Datenweitergabe
 
-Erhobene Daten werden **nicht** an Dritte weitergegeben. Yahoo Finance verarbeitet Datenanfragen gemäß eigener Datenschutzrichtlinie (yahoo.com/privacy).
+Erhobene Daten werden **nicht** an Dritte weitergegeben. Die angebundenen Marktdaten-Anbieter verarbeiten reine Kursdaten-Anfragen gemäß ihrer eigenen Datenschutzrichtlinien; personenbezogene Daten werden dabei nicht übermittelt.
 
 ### 4. Speicherdauer
 
@@ -88,7 +88,7 @@ Die App verwendet ausschließlich technisch notwendige Sitzungsdaten (Session St
 
 ### 7. Externe Dienste
 
-- **Yahoo Finance API:** Kursdaten werden von Yahoo Finance abgerufen. Keine personenbezogenen Daten werden übermittelt.
+- **Marktdaten-APIs:** Kursdaten werden von externen Marktdaten-Anbietern abgerufen. Keine personenbezogenen Daten werden übermittelt.
 - **Streamlit / Railway:** Hosting-Dienst. Serverprotokolle können IP-Adressen temporär speichern.
 
 ---
@@ -138,13 +138,13 @@ Der Handel mit Optionen und anderen Derivaten ist mit **erheblichen Risiken** ve
 
 Die Stillhalter Community und der Betreiber dieser Plattform übernehmen **keinerlei Haftung** für:
 - Verluste, die durch die Nutzung der bereitgestellten Informationen entstehen
-- Fehlerhafte, unvollständige oder veraltete Daten (Datenquelle: Yahoo Finance)
+- Fehlerhafte, unvollständige oder veraltete Daten der externen Datenanbieter
 - Technische Ausfälle, Datenverluste oder Unterbrechungen des Dienstes
 - Entscheidungen, die auf Basis der Plattform getroffen wurden
 
 ### 4. Datenqualität
 
-Alle Kursdaten, Optionsketten, IV-Werte und Fundamentaldaten stammen von Yahoo Finance und können:
+Alle Kursdaten, Optionsketten, IV-Werte und Fundamentaldaten stammen von externen Anbietern und können:
 - Verzögerungen von bis zu 15–20 Minuten aufweisen
 - Unvollständig oder fehlerhaft sein
 - Außerhalb der Marktzeiten auf historischen Werten basieren
@@ -206,7 +206,7 @@ der Grenzen des Urheberrechts bedürfen der schriftlichen Zustimmung des Betreib
 
 ### Haftung für Links
 
-Diese Seite enthält Links zu externen Webseiten (z. B. Yahoo Finance). Für die Inhalte
+Diese Seite enthält Links zu externen Webseiten. Für die Inhalte
 externer Links wird keine Haftung übernommen. Die verlinkten Seiten wurden zum Zeitpunkt
 der Verlinkung auf mögliche Rechtsverstöße überprüft.
 

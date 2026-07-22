@@ -617,7 +617,7 @@ with c14:
 c15, c16 = st.columns(2, gap="large")
 with c15:
     _card("15", "DATENQUELLEN",
-          "Yahoo Finance vs. Massive.com · API-Konfiguration · Verbindungstest",
+          "Daten-Status · API-Konfiguration · Verbindungstest",
           "#3b82f6", "pages/15_Datenquellen.py", "📡", "Datenquellen")
 with c16:
     _card("16", "SENTIMENT ANALYSE",
@@ -651,7 +651,7 @@ st.markdown("---")
 st.html("""
 <div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.78rem;color:#333;
             letter-spacing:0.08em'>
-    STILLHALTER AI APP · Daten: Yahoo Finance ·
+    STILLHALTER AI APP ·
     Stillhalter MACD Pro · Stillhalter Dual Stochastik · Stillhalter Trend Model®
     &nbsp;·&nbsp;
     <a href='pages/13_Rechtliches.py' style='color:#444;text-decoration:none'>

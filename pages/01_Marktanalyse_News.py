@@ -1202,7 +1202,7 @@ st.html("""
 <div style='margin-top:12px;padding:8px 14px;background:#080808;border-radius:6px;
      display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px'>
   <span style='font-size:0.6rem;color:#333;font-family:sans-serif'>
-    Quellen: BBC News · Yahoo Finance · Google News RSS · nitter.net/X · yfinance
+    Quellen: BBC News · Google News RSS · nitter.net/X · diverse Finanz-Feeds
     · ⏱ Aktualisierung: News 30min · Stocks 15min · Earnings 1h
   </span>
   <span style='font-size:0.6rem;color:#222;font-family:sans-serif'>

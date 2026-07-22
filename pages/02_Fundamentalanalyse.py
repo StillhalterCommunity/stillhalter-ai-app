@@ -173,7 +173,7 @@ st.markdown("""
             line-height:1.7;margin:10px 0 16px'>
     Bewertet alle Aktien deiner Watchlist nach ihrer Qualität als <b style='color:#d4a843'>Value-Aktie</b> für
     Stillhalter-Strategien. Ziel: <b>hohes Gewinnwachstum bei fairer Bewertung</b> (niedriges PEG Ratio).
-    Daten via Yahoo Finance.
+    
 </div>
 """, unsafe_allow_html=True)
 
@@ -360,7 +360,7 @@ if start_scan:
         st.session_state.vs_results = df
         st.session_state["_vs_scan_msg"] = f"✅ **Value-Scan abgeschlossen** — **{len(df)} Aktien** analysiert"
     else:
-        st.session_state["_vs_scan_msg"] = "❌ Keine Daten empfangen — Yahoo Finance Verbindung prüfen."
+        st.session_state["_vs_scan_msg"] = "❌ Keine Daten empfangen — Datenverbindung prüfen und erneut versuchen."
     st.rerun()
 
 # ── Ergebnisse anzeigen ────────────────────────────────────────────────────────

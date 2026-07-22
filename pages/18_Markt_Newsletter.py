@@ -1000,7 +1000,7 @@ with st.expander("⚙️ Einstellungen", expanded=False):
     with cfg3:
         n_stocks_deep = st.slider("Aktien im Deep Dive", 1, 3, 2)
     st.info(
-        f"📌 **Quellen:** Yahoo Finance RSS · MarketWatch · yfinance News  \n"
+        f"📌 **Quellen:** diverse Finanznachrichten-Feeds  \n"
         f"📌 **X/Twitter (manuell):** {TWITTER_ACCOUNTS}",
         icon="ℹ️",
     )
@@ -1112,7 +1112,7 @@ st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("### 📰 Top-News")
 st.caption(
-    "Quellen: Yahoo Finance · MarketWatch · automatisch aktualisiert alle 10 Min. · "
+    "Diverse Finanznachrichten-Feeds · automatisch aktualisiert alle 10 Min. · "
     "Übersetzung: Google Translate · Top 10 Meldungen"
 )
 

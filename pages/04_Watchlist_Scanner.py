@@ -78,6 +78,15 @@ def _tradingview_html(ticker: str, dark: bool, height: int = 460) -> str:
 """
 
 
+def _dte_tf_bucket(dte) -> str:
+    """Zeitebene je Optionslaufzeit: ≤14 T → 4h · 15–42 T → 1D · >6 Wochen → 1W."""
+    try:
+        d = int(dte)
+    except Exception:
+        d = 30
+    return "4h" if d <= 14 else ("1D" if d <= 42 else "1W")
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _scanner_tf_ampel(ticker: str) -> dict:
     """Ampel-Farben (🟢/🟡/🔴) je Indikator × Zeitebene (4h, 1d) via Multi-Timeframe."""
@@ -142,7 +151,7 @@ with st.expander("⚙️ Keine Daten? Cache komplett zurücksetzen", expanded=Fa
     with _rc2:
         st.caption(
             "Danach einen neuen Scan starten oder die Seite neu laden. "
-            "Alle Daten werden frisch von Yahoo Finance abgerufen."
+            "Alle Daten werden frisch aus den Markt-Feeds abgerufen."
         )
 
 # ── Off-Hours Hinweis ─────────────────────────────────────────────────────────
@@ -1315,12 +1324,7 @@ else:
 
         # Zeitebene passend zur Optionslaufzeit (kurz-/mittel-/langfristiger
         # Trend): DTE 1–14 → 4h · 15–42 (bis 6 Wochen) → 1D · darüber → 1W.
-        def _tf_bucket(dte) -> str:
-            try:
-                d = int(dte)
-            except Exception:
-                d = 30
-            return "4h" if d <= 14 else ("1D" if d <= 42 else "1W")
+        _tf_bucket = _dte_tf_bucket
 
         _TF_ATTR = {"4h": "tf_4h", "1D": "tf_1d", "1W": "tf_1w"}
 
@@ -1445,7 +1449,7 @@ else:
             |-----------|----------------|-----------------|
             | **Stoch. Dual** | %K kreuzt 20 ↑ | %K kreuzt 80 ↓ |
             | **RSI** | kreuzt 30 ↑ | kreuzt 70 ↓ |
-            | **Stillhalter Trendmodel** | EMA2 kreuzt EMA9 ↑ | EMA2 kreuzt EMA9 ↓ |
+            | **Stillhalter Trendmodel** | dreht bullisch ↑ | dreht bärisch ↓ |
             | **MACD Pro** | Hist. neg → pos | Hist. pos → neg |
 
             Score = gewichteter Durchschnitt (1D 60% · 4H 40%)
@@ -1495,11 +1499,20 @@ else:
         setup_f = st.selectbox(
             "🎯 Stillhalter-Setup",
             ["Aus", "≥ 2 von 3", "≥ 2.5 von 3", "3 von 3"],
+            index=1,
             key="setup_filter",
             help="Filtert nach den 3 Stillhalter-Indikatoren (Trend BT · MACD Pro · "
                  "Dual Stochastik), strategieabhängig auf hohe Verfallswahrscheinlichkeit: "
                  "Short Put → bullisch/überverkauft · Covered Call → bärisch/überkauft · "
                  "Strangle → neutral.",
+        )
+        best_tf = st.checkbox(
+            "🧠 Beste Zeitebene je Aktie", value=True, key="best_tf_mode",
+            help="Zeigt je Aktie nur Optionen aus dem Laufzeitband, dessen "
+                 "Zeitebene (4h ≤14T · 1D 15–42T · 1W >6 Wochen) das STÄRKSTE "
+                 "Stillhalter-Setup hat — statt vieler Optionen auf schwachen "
+                 "Ebenen. Tipp: DTE-Fenster weit fassen (z. B. 7–120), damit "
+                 "alle Ebenen Kandidaten haben.",
         )
     with fc2:
         if sort_by == "|Delta|" and "Delta" in results.columns:
@@ -1531,6 +1544,36 @@ else:
         if display_df.empty and _n_before > 0:
             st.warning(f"🎯 Kein Treffer erfüllt das Stillhalter-Setup ({setup_f}). "
                        f"Filter lockern oder 'Aus' wählen — {_n_before} Treffer ohne Setup-Filter.")
+
+    # 🧠 Beste Zeitebene je Aktie: nur Optionen aus dem Laufzeitband behalten,
+    # dessen Zeitebene das stärkste Setup hat — sonst dominieren viele
+    # Optionen einer schwachen Ebene (z. B. rotes 1D) die Liste.
+    if best_tf and "Setup-Score" in display_df.columns and "DTE" in display_df.columns \
+            and not display_df.empty and "Setup-Score" in results.columns:
+        _bt = results[["Ticker", "DTE", "Setup-Score"]].dropna(subset=["Setup-Score"]).copy()
+        if not _bt.empty:
+            _bt["_bkt"] = _bt["DTE"].map(_dte_tf_bucket)
+            _best = (_bt.groupby(["Ticker", "_bkt"])["Setup-Score"].max()
+                        .reset_index()
+                        .sort_values("Setup-Score", ascending=False)
+                        .drop_duplicates("Ticker"))
+            _bestmap = dict(zip(_best["Ticker"], _best["_bkt"]))
+            _n0 = len(display_df)
+            display_df = display_df[[
+                _dte_tf_bucket(d) == _bestmap.get(t, _dte_tf_bucket(d))
+                for t, d in zip(display_df["Ticker"], display_df["DTE"])
+            ]]
+            _hidden = _n0 - len(display_df)
+            if _hidden > 0:
+                _hints = " · ".join(f"{t} → {b}" for t, b in list(_bestmap.items())[:6])
+                st.caption(
+                    f"🧠 Beste Zeitebene aktiv — **{_hidden} Optionen schwächerer "
+                    f"Zeitebenen ausgeblendet**. Stärkste Ebene je Aktie: {_hints}"
+                    f"{' …' if len(_bestmap) > 6 else ''}"
+                )
+            if display_df.empty and _n0 > 0:
+                st.warning("🧠 Beste-Zeitebene-Modus hat alle Treffer ausgeblendet — "
+                           "DTE-Fenster erweitern (z. B. 7–120) oder Modus abschalten.")
 
     display_df["Rang"] = range(1, len(display_df) + 1)
 
@@ -1583,13 +1626,14 @@ else:
     )
     if view_mode.startswith("🛡️"):
         if is_strangle and "Strike PUT" in display_df.columns:
-            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "Ticker",
-                        "Kurs", "Strike PUT", "Strike CALL", "Range %", "Verfall",
-                        "DTE", "Prämie gesamt", "Rendite % Laufzeit",
-                        "Rendite ann. %", "IV %"]
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "⭐ CRV",
+                        "Ticker", "Kurs", "Strike PUT", "Strike CALL", "Range %",
+                        "S/R Schutz", "Verfall", "DTE", "Prämie gesamt",
+                        "Rendite % Laufzeit", "Rendite ann. %", "IV %"]
         else:
-            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "Ticker",
-                        "Kurs", "Strike", "OTM %", "Verfall", "DTE", "Prämie",
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "⭐ CRV",
+                        "Ticker", "Kurs", "Strike", "OTM %", "S/R Schutz",
+                        "Verfall", "DTE", "Prämie",
                         "Rendite % Laufzeit", "Rendite ann. %", "Delta", "IV %"]
         show_cols = [c for c in _compact if c in display_df.columns]
         st.caption(
@@ -1761,18 +1805,17 @@ else:
 
             if _tkr and _strike > 0 and _premium > 0:
                 st.markdown("---")
-                _mc1, _mc2 = st.columns([3, 2])
+                # ── TradingView-Chart in VOLLER Breite (groß & lesbar) ────────
+                _tv_dark = st.session_state.get("app_theme", "dark") != "green"
+                components.html(_tradingview_html(_tkr, _tv_dark, height=600), height=620)
+                st.caption(
+                    f"Chart bleibt leer? Meist blockiert ein **Adblocker** das "
+                    f"TradingView-Embed → "
+                    f"[Auf TradingView öffnen ↗](https://www.tradingview.com/chart/?symbol={_tkr})"
+                )
+                _mc1, _mc2 = st.columns([2, 3])
                 with _mc1:
-                    # Schöner interaktiver TradingView-Chart statt Plotly-Mini
-                    _tv_dark = st.session_state.get("app_theme", "dark") != "green"
-                    components.html(_tradingview_html(_tkr, _tv_dark), height=470)
-                    st.caption(
-                        f"Chart bleibt leer? Meist blockiert ein **Adblocker** das "
-                        f"TradingView-Embed → "
-                        f"[Auf TradingView öffnen ↗](https://www.tradingview.com/chart/?symbol={_tkr})"
-                    )
-                with _mc2:
-                    # ── Ampel 4h / 1D ─────────────────────────────────────
+                    # ── Ampel 4h / 1D / 1W ────────────────────────────────
                     _is_green = st.session_state.get("app_theme", "dark") == "green"
                     _lbl = "#0a1628" if _is_green else "#f0f0f0"
                     _sub = "#475569" if _is_green else "#888"
@@ -1797,6 +1840,7 @@ else:
                         f"🟢 bullisch/überverkauft · 🔴 bärisch/überkauft · 🟡 neutral</div>"
                     )
 
+                with _mc2:
                     # ── OptionStrat-Button ────────────────────────────────
                     _os_url = str(_r.get("OptionStrat", ""))
                     if not _os_url and _tkr and _strike > 0 and _expiry:

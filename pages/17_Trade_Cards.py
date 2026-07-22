@@ -1472,7 +1472,7 @@ with tab1:
             st.button(
                 "🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
                 use_container_width=True,
-                help="Holt Prämie, Delta & IV automatisch von Massive/Polygon",
+                help="Holt Prämie, Delta & IV automatisch aus dem Live-Optionsdaten-Feed",
                 on_click=_autofill_cb,
                 args=(cls, ticker_v, strike_v, strat_v, call_strike_v, call_expiry_v, expiry_v),
             )

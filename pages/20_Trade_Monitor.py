@@ -642,6 +642,6 @@ with st.spinner("⏳ Live-Daten…"):
 st.markdown("---")
 st.markdown("""
 <div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.76rem;color:#cfcfcf;letter-spacing:0.08em'>
-    STILLHALTER COMMUNITY · Live-Preise: Yahoo Finance · Nicht als Finanzberatung zu verstehen
+    STILLHALTER COMMUNITY · Live-Marktdaten · Nicht als Finanzberatung zu verstehen
 </div>
 """, unsafe_allow_html=True)

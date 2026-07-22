@@ -1,5 +1,33 @@
 [
   {
+    "ts": "2026-07-22T13:10:43.848565",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-07-20T22:00:28.546115",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-07-20T21:55:11.367728",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 30
+  },
+  {
+    "ts": "2026-07-08T10:02:37.455088",
+    "strategy": "Cash Covered Put",
+    "sector": "7. IMMOBILIEN (REITS)",
+    "n_tickers": 10,
+    "n_results": 29
+  },
+  {
     "ts": "2026-07-03T18:19:03.253204",
     "strategy": "Cash Covered Put",
     "sector": "7. IMMOBILIEN (REITS)",

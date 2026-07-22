@@ -20,6 +20,13 @@ from ui.sidebar import render_sidebar
 st.markdown(f"<style>{get_css()}</style>", unsafe_allow_html=True)
 render_sidebar()
 
+# ── Nur Admin: Anbieter-/API-Details sind nicht für Mitglieder bestimmt ───────
+from data.maintenance import is_admin as _da_admin
+if not _da_admin(st.session_state.get("auth_user", "")):
+    st.info("🔒 **Systembereich** — die Daten- & API-Konfiguration ist dem "
+            "Administrator vorbehalten.")
+    st.stop()
+
 # ══════════════════════════════════════════════════════════════════════════════
 # HEADER
 # ══════════════════════════════════════════════════════════════════════════════

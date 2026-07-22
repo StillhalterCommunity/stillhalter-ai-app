@@ -969,6 +969,6 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align:center;font-family:RedRose,sans-serif;font-size:0.76rem;color:#333;letter-spacing:0.08em'>
-    STILLHALTER COMMUNITY · Daten: Yahoo Finance · Nicht als Finanzberatung zu verstehen
+    STILLHALTER COMMUNITY · Nicht als Finanzberatung zu verstehen
 </div>
 """, unsafe_allow_html=True)

@@ -1460,7 +1460,7 @@ with tab_auto:
                             f'target="_blank" style="display:block;text-align:center;'
                             f'background:#1a1a1a;border:1px solid #333;border-radius:8px;'
                             f'padding:5px;color:#d4a843;font-size:0.8rem;text-decoration:none">'
-                            f'→ Yahoo Finance</a>' if ticker else "",
+                            f'→ Chart &amp; News</a>' if ticker else "",
                             unsafe_allow_html=True,
                         )
 
@@ -1737,7 +1737,7 @@ st.markdown("---")
 st.markdown(
     '<div style="font-size:0.72rem;color:#333;text-align:center">'
     'Quellen: Reddit JSON-API · Google Trends (pytrends) · StockTwits API · '
-    'Product Hunt RSS · Hacker News Firebase API · Kursdaten: Yahoo Finance'
+    'Product Hunt RSS · Hacker News Firebase API · Live-Kursdaten'
     '</div>',
     unsafe_allow_html=True,
 )
