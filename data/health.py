@@ -212,7 +212,11 @@ def run_light_check() -> List[dict]:
             lp = pd.to_numeric(puts.get("lastPrice"), errors="coerce").fillna(0)
             v = pd.to_numeric(puts.get("volume"), errors="coerce").fillna(0)
             quoted = ((b > 0) & (a > 0))
-            traded = ((lp > 0) & (v > 0))
+            if "traded_today" in puts.columns:
+                _fresh = puts["traded_today"].fillna(False).astype(bool)
+            else:
+                _fresh = v > 0
+            traded = ((lp > 0) & (v > 0) & _fresh)
             usable = float((quoted | traded).mean()) * 100
             if is_market_open():
                 # Polygon-Starter liefert keine NBBO-Quotes — Kriterium ist

@@ -205,6 +205,19 @@ def get_options_chain(
         mid_price = (bid + ask) / 2 if bid > 0 and ask > 0 else 0.0
         last      = float(day.get("close", 0) or item.get("last_trade", {}).get("price", 0) or 0)
 
+        # WICHTIG: 'day' ist im Snapshot der LETZTE Tag MIT Handel — bei
+        # illiquiden Kontrakten also u. U. Wochen alt (close/volume stale!).
+        # day.last_updated (ns) verrät das echte Datum → traded_today-Flag.
+        _lu = day.get("last_updated") or 0
+        try:
+            import pytz as _tz
+            _et = _tz.timezone("America/New_York")
+            _lu_date = datetime.fromtimestamp(_lu / 1e9, _et).date() if _lu else None
+            _today_et = datetime.now(_et).date()
+            traded_today = bool(_lu_date == _today_et)
+        except Exception:
+            traded_today = False
+
         rows.append({
             "contractSymbol":    details.get("ticker", ""),
             "strike":            float(details.get("strike_price", 0)),
@@ -221,6 +234,7 @@ def get_options_chain(
             "vega":              float(greeks.get("vega", 0) or 0),
             "openInterest":      int(item.get("open_interest", 0) or 0),
             "volume":            int(day.get("volume", 0) or 0),
+            "traded_today":      traded_today,
         })
 
     if not rows:

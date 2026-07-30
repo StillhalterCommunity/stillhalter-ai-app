@@ -3,6 +3,8 @@ Batch-Screener: Scannt mehrere Ticker gleichzeitig und berechnet
 den Chance-Risiko-Verhältnis (CRV) Score für alle Optionen.
 """
 
+from __future__ import annotations
+
 import pandas as pd
 import numpy as np
 import time
@@ -83,7 +85,40 @@ def _optionstrat_url_strangle(
 
 _PLAUS_LOCK  = threading.Lock()
 _PLAUS_STATS = {"no_quote": 0, "wide_spread": 0, "below_intrinsic": 0,
-                "bad_iv": 0, "kept": 0}
+                "bad_iv": 0, "unreal_price": 0, "kept": 0}
+
+
+def _bs_price_cap(S: float, strikes: pd.Series, dte: pd.Series | int,
+                  opt_type: str, iv: pd.Series | None = None) -> pd.Series:
+    """Theoretische PREIS-OBERGRENZE je Option: das DOPPELTE des Black-
+    Scholes-Werts mit der kontrakt-eigenen IV (+0.10 $ Sockel). Kein echter
+    Marktpreis liegt so weit über seinem eigenen Modellwert — stale Prints
+    von Alt-Tagen (weit-OTM mit Wochen alten 'Tages'-Daten) dagegen schon,
+    weil Kurs und Restlaufzeit inzwischen weitergelaufen sind.
+    Fehlt eine brauchbare IV, gilt der Extremfall σ=300 %."""
+    from math import erf, sqrt
+    K = strikes.astype(float)
+    if isinstance(dte, pd.Series):
+        T = (pd.to_numeric(dte, errors="coerce").fillna(30).clip(lower=1) / 365.0)
+    else:
+        T = pd.Series(max(1, int(dte)) / 365.0, index=strikes.index)
+    if iv is not None:
+        sigma = pd.to_numeric(iv, errors="coerce")
+        sigma = sigma.where((sigma > 0.05) & (sigma < 4.0), 3.0).astype(float)
+    else:
+        sigma = pd.Series(3.0, index=strikes.index)
+    r = 0.05
+    _N = lambda x: 0.5 * (1.0 + np.vectorize(erf)(x / sqrt(2.0)))
+    with np.errstate(all="ignore"):
+        vsqrt = sigma * np.sqrt(T)
+        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / vsqrt
+        d2 = d1 - vsqrt
+        if opt_type == "put":
+            px = K * np.exp(-r * T) * _N(-d2) - S * _N(-d1)
+        else:
+            px = S * _N(d1) - K * np.exp(-r * T) * _N(d2)
+    fair = pd.Series(np.nan_to_num(px, nan=np.inf), index=strikes.index)
+    return fair * 2.0 + 0.10
 
 
 def reset_plaus_stats() -> None:
@@ -104,7 +139,8 @@ def _plaus_count(**kw) -> None:
 
 
 def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
-                      max_spread_pct: float, strict: bool) -> pd.Series:
+                      max_spread_pct: float, strict: bool,
+                      dte=None) -> pd.Series:
     """
     Plausibilitäts-Maske für eine Optionsseite. Erwartet Spalten:
     bid, ask, lastPrice, mid_price, _has_market, _spread_pct, strike.
@@ -138,8 +174,17 @@ def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
     else:
         _vol = pd.Series(0, index=df.index)
 
+    # 'Heute gehandelt': Polygons day-Block ist der LETZTE Tag mit Handel —
+    # ohne Zeitstempel-Prüfung zählen Wochen alte close/volume als 'heute'
+    # (Quelle der falschen hohen Prämien weit OTM). traded_today kommt aus
+    # day.last_updated; fehlt die Spalte (alte Caches), Volumen-Heuristik.
+    if "traded_today" in df.columns:
+        _fresh = df["traded_today"].fillna(False).astype(bool)
+    else:
+        _fresh = _vol > 0
+
     if strict:
-        traded_today = (df["lastPrice"] > 0) & (_vol > 0)
+        traded_today = (df["lastPrice"] > 0) & (_vol > 0) & _fresh
         market_ok = df["_has_market"] | traded_today
         # Spread-Limit nur prüfbar, wo Quotes existieren
         spread_ok = (~df["_has_market"]) | (df["_spread_pct"] <= max_spread_pct)
@@ -149,18 +194,29 @@ def plausibility_mask(df: pd.DataFrame, current_price: float, opt_type: str,
 
     intr_ok = df["mid_price"] >= (intrinsic * 0.98 - 0.02)
 
+    # Preis-REALITÄTSGRENZE: kein echter Optionspreis liegt über dem
+    # Black-Scholes-Wert bei 300 % Vol (+10 % Puffer). Stale Prints von
+    # Alt-Tagen (weit-OTM mit absurden Prämien) fliegen hier sicher raus.
+    if dte is not None and current_price > 0:
+        _cap = _bs_price_cap(float(current_price), df["strike"], dte, opt_type,
+                             iv=df.get("impliedVolatility"))
+        real_ok = df["mid_price"] <= _cap
+    else:
+        real_ok = pd.Series(True, index=df.index)
+
     if "impliedVolatility" in df.columns:
         _iv = pd.to_numeric(df["impliedVolatility"], errors="coerce")
         iv_ok = _iv.isna() | ((_iv > 0.005) & (_iv < 4.0))
     else:
         iv_ok = pd.Series(True, index=df.index)
 
-    mask = market_ok & spread_ok & intr_ok & iv_ok
+    mask = market_ok & spread_ok & intr_ok & real_ok & iv_ok
     _plaus_count(
         no_quote=int((~market_ok).sum()),
         wide_spread=int((market_ok & ~spread_ok).sum()),
         below_intrinsic=int((market_ok & spread_ok & ~intr_ok).sum()),
-        bad_iv=int((market_ok & spread_ok & intr_ok & ~iv_ok).sum()),
+        unreal_price=int((market_ok & spread_ok & intr_ok & ~real_ok).sum()),
+        bad_iv=int((market_ok & spread_ok & intr_ok & real_ok & ~iv_ok).sum()),
         kept=int(mask.sum()),
     )
     return mask
@@ -345,8 +401,10 @@ def scan_strangle(
             def _side_mid(df_):
                 _v = (pd.to_numeric(df_["volume"], errors="coerce").fillna(0)
                       if "volume" in df_.columns else pd.Series(0, index=df_.index))
+                _f = (df_["traded_today"].fillna(False).astype(bool)
+                      if "traded_today" in df_.columns else (_v > 0))
                 if require_valid_market:
-                    fb = np.where(_v > 0, df_["lastPrice"], 0.0)
+                    fb = np.where((_v > 0) & _f, df_["lastPrice"], 0.0)
                 else:
                     fb = df_["lastPrice"]
                 return np.where(df_["_has_market"], (df_["bid"] + df_["ask"]) / 2, fb)
@@ -373,6 +431,7 @@ def scan_strangle(
                 plaus = plausibility_mask(
                     df_, current_price, side,
                     max_spread_pct=max_spread_pct, strict=require_valid_market,
+                    dte=dte_val,
                 )
                 mask = (
                     plaus &
@@ -592,10 +651,12 @@ def scan_ticker(
         # stale Vortagespreise (die Quelle falscher Renditen) fliegen raus.
         _volq = (pd.to_numeric(df["volume"], errors="coerce").fillna(0)
                  if "volume" in df.columns else pd.Series(0, index=df.index))
+        _freshq = (df["traded_today"].fillna(False).astype(bool)
+                   if "traded_today" in df.columns else (_volq > 0))
         if require_valid_market:
             df["mid_price"] = np.where(
                 df["_has_market"], (df["bid"] + df["ask"]) / 2,
-                np.where(_volq > 0, df["lastPrice"], 0.0))
+                np.where((_volq > 0) & _freshq, df["lastPrice"], 0.0))
         else:
             df["mid_price"] = np.where(df["_has_market"],
                                         (df["bid"] + df["ask"]) / 2,
@@ -603,6 +664,7 @@ def scan_ticker(
         mask &= plausibility_mask(
             df, current_price, opt_type,
             max_spread_pct=max_spread_pct, strict=require_valid_market,
+            dte=df["dte"],
         )
 
         df = df[mask].copy()

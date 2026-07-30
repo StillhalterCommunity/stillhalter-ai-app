@@ -1411,22 +1411,28 @@ else:
         from analysis.batch_screener import get_plaus_stats
         _pst = get_plaus_stats()
         _dropped = _pst.get("no_quote", 0) + _pst.get("wide_spread", 0) \
-                   + _pst.get("below_intrinsic", 0) + _pst.get("bad_iv", 0)
+                   + _pst.get("below_intrinsic", 0) + _pst.get("bad_iv", 0) \
+                   + _pst.get("unreal_price", 0)
         if _dropped > 0 or _pst.get("kept", 0) > 0:
             with st.expander(
                 f"🔎 Datenqualität — {_dropped} Optionen verworfen · "
                 f"{_pst.get('kept', 0)} plausibel", expanded=False,
             ):
-                _q1, _q2, _q3, _q4 = st.columns(4)
-                _q1.metric("Ohne Bid/Ask", _pst.get("no_quote", 0),
-                           help="Kein zweiseitiger Markt — während der Handelszeiten "
-                                "werden diese strikt verworfen (kein Last-Price-Ersatz).")
+                _q1, _q2, _q3, _q4, _q5 = st.columns(5)
+                _q1.metric("Ohne heutigen Markt", _pst.get("no_quote", 0),
+                           help="Weder zweiseitiges Bid/Ask noch nachweislich HEUTE "
+                                "gehandelt (Zeitstempel-Prüfung) — stale Alt-Preise "
+                                "werden strikt verworfen.")
                 _q2.metric("Spread zu groß", _pst.get("wide_spread", 0),
                            help="Bid/Ask-Spread über dem Max.-Spread-Filter.")
                 _q3.metric("Unter innerem Wert", _pst.get("below_intrinsic", 0),
                            help="Mid-Preis unter dem inneren Wert = unmöglicher Preis "
                                 "→ stale oder gekreuzte Quote.")
-                _q4.metric("IV unplausibel", _pst.get("bad_iv", 0),
+                _q4.metric("Preis unrealistisch", _pst.get("unreal_price", 0),
+                           help="Preis über der theoretischen Obergrenze (Modellwert "
+                                "bei 300% Vol) — typisch: Wochen alte Prints auf "
+                                "weit-OTM-Strikes, die real fast wertlos sind.")
+                _q5.metric("IV unplausibel", _pst.get("bad_iv", 0),
                            help="Implizite Volatilität ≤0.5% oder >400%.")
                 st.caption(
                     "Während der Handelszeiten gilt: nur Optionen mit echtem "
