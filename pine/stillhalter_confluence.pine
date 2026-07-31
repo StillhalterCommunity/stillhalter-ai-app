@@ -2,33 +2,28 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.0
+//  Stillhalter Community® – CONFLUENCE v0.9
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  SIGNAL-LOGIK (Kurzfassung):
-//   BUY  (Aktie kaufen / Put verkaufen)  — Dreieck UNTER der Kerze:
-//     • Trend:  EMA-Band dreht von gelb auf grün (Fast-EMA kreuzt über Slow-EMA)
-//     • MACD:   Histogramm kreuzt von negativ (rot) auf positiv (grün)
+//  SIGNAL-LOGIK:
+//   UP  (Kurs wahrscheinlich hoch → Aktie kaufen / Short Put) — Dreieck UNTER der Kerze
+//     • Trend:  EMA-Band dreht von gelb auf grün
+//     • MACD:   Histogramm kreuzt von negativ auf positiv
 //     • Stoch:  schnelle Stochastik bricht von unten durch 20,
-//               während die langsame Stochastik überverkauft ist
-//   SELL (Aktie verkaufen / Call verkaufen) — Dreieck ÜBER der Kerze: spiegelbildlich
-//     (Trend grün→gelb · Histogramm +→− · schnelle Stoch bricht durch 80 runter,
-//      langsame überkauft)
+//               während die langsame überverkauft ist
+//   DOWN (Kurs wahrscheinlich runter → Aktie verkaufen / Short Call) — Dreieck ÜBER der Kerze
+//     • spiegelbildlich (Trend grün→gelb · Hist +→− · Stoch 80 runter, langsam überkauft)
 //
-//   Da die Komponenten selten auf DERSELBEN Kerze feuern, gilt ein
-//   KONFLUENZ-FENSTER (Standard 5 Kerzen): ein Ereignis zählt, solange es
-//   frisch ist UND sein Zustand noch gilt (Trend noch grün, Hist noch >0 …).
-//   Das Dreieck erscheint an der Kerze, an der ein NEUES Kern-Ereignis feuert.
-//
-//   FARBE = Güte der Konfluenz (Anzahl erfüllter Komponenten):
-//     alle aktiven Komponenten  → DUNKEL   (extrem gute Konfluenz)
-//     alle bis auf eine         → MITTEL
-//     weniger                   → HELL     (leichte Konfluenz)
-//   Bei den 3 Kernkomponenten also: 3/3 dunkel · 2/3 mittel · 1/3 hell.
+//   KONFLUENZ-FENSTER (Standard 3): Ereignis zählt, solange frisch UND Zustand gilt.
+//   FARBE: alle Komponenten → DUNKEL · alle−1 → MITTEL · weniger → HELL.
+//   OPTIONS-HINWEIS: am UP-Dreieck Short-Put-Level unter der nächsten Unterstützung,
+//   am DOWN-Dreieck Short-Call-Level über dem nächsten Widerstand (Pivot-Level).
+//   BACKTEST: UP-Dreieck = Long-Einstieg, DOWN-Dreieck = Ausstieg (Ausführung am
+//   Open der Folgekerze, wie beim Stillhalter Trend BT).
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.0", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500)
 
 // ══════════════════════════ INPUTS ══════════════════════════
@@ -37,27 +32,39 @@ trendMode = input.string("Very Tight", "Trend Mode",
      options = ["Very Tight", "Tight", "Loose", "Very Loose"], group = grpT)
 
 grpC = "Confluence"
-confWin  = input.int(5, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
+confWin  = input.int(3, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
      tooltip = "Wie lange ein Komponenten-Signal als 'frisch' zählt.")
-minScore = input.int(1, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5, group = grpC,
-     tooltip = "1 = auch leichte Konfluenz anzeigen (hell). Höher = weniger Signale.")
+minScore = input.int(2, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5, group = grpC,
+     tooltip = "2 = erst ab mittlerer Konfluenz anzeigen. 1 = auch leichte (hell).")
 osLevel  = input.int(20, "Stochastik überverkauft", minval = 5,  maxval = 40, group = grpC)
 obLevel  = input.int(80, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC)
 
 grpX = "Zusatz-Komponenten (optional)"
-useRSI    = input.bool(false, "RSI (14) einbeziehen — Buy: kreuzt 30 hoch · Sell: kreuzt 70 runter", group = grpX)
-useMR     = input.bool(false, "Mean Reversion einbeziehen — Buy: Z-Score < −1σ · Sell: > +1σ", group = grpX)
+useRSI    = input.bool(false, "RSI (14) einbeziehen — UP: kreuzt 30 hoch · DOWN: kreuzt 70 runter", group = grpX)
+useMR     = input.bool(false, "Mean Reversion einbeziehen — UP: Z-Score < −1σ · DOWN: > +1σ", group = grpX)
 mrLen     = input.int(30, "Mean-Reversion Länge (SMA/SD)", minval = 5, maxval = 100, group = grpX)
 adxFilter = input.bool(false, "ADX-Filter: Signale nur bei ADX(14) > 20", group = grpX)
 
 grpS = "Anzeige"
+labelTxt  = input.string("UP/DOWN", "Dreieck-Beschriftung",
+     options = ["UP/DOWN", "BULL/BEAR", "PUT/CALL", "BUY/SELL"], group = grpS)
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS)
-colBuy3  = input.color(color.new(#1B5E20, 0), "Buy dunkel (volle Konfluenz)",  group = grpS)
-colBuy2  = input.color(color.new(#4CAF50, 0), "Buy mittel",                     group = grpS)
-colBuy1  = input.color(color.new(#A5D6A7, 0), "Buy hell",                       group = grpS)
-colSell3 = input.color(color.new(#B71C1C, 0), "Sell dunkel (volle Konfluenz)", group = grpS)
-colSell2 = input.color(color.new(#EF5350, 0), "Sell mittel",                    group = grpS)
-colSell1 = input.color(color.new(#FFCDD2, 0), "Sell hell",                      group = grpS)
+showHints = input.bool(true, "Options-Hinweis (Short Put / Short Call Level)", group = grpS)
+hintMin   = input.int(2, "Options-Hinweis ab Konfluenz-Stufe", minval = 1, maxval = 5, group = grpS)
+pivLb     = input.int(10, "Pivot-Länge für Unterstützung/Widerstand", minval = 3, maxval = 30, group = grpS)
+colBuy3  = input.color(color.new(#1B5E20, 0), "UP dunkel (volle Konfluenz)",   group = grpS)
+colBuy2  = input.color(color.new(#4CAF50, 0), "UP mittel",                      group = grpS)
+colBuy1  = input.color(color.new(#A5D6A7, 0), "UP hell",                        group = grpS)
+colSell3 = input.color(color.new(#B71C1C, 0), "DOWN dunkel (volle Konfluenz)", group = grpS)
+colSell2 = input.color(color.new(#EF5350, 0), "DOWN mittel",                    group = grpS)
+colSell1 = input.color(color.new(#FFCDD2, 0), "DOWN hell",                      group = grpS)
+
+grpB = "Backtest"
+enableBT   = input.bool(true, "Backtest aktivieren", group = grpB)
+btOnlyFull = input.bool(false, "Nur VOLLE Konfluenz handeln", group = grpB)
+btFrom     = input.time(timestamp("2020-01-01T00:00:00"), "Backtest Start", group = grpB)
+btTo       = input.time(timestamp("2099-01-01T00:00:00"), "Backtest Ende",  group = grpB)
+initialCapital = input.float(10000, "Startkapital", minval = 1, group = grpB)
 
 // ══════════════════════════ 1) TREND MODEL ══════════════════════════
 fastLen = trendMode == "Very Tight" ? 2 : trendMode == "Tight" ? 4 : trendMode == "Loose" ? 6 : 13
@@ -68,23 +75,23 @@ trendSlow = ta.ema(close, slowLen)
 bullTrend = trendFast > trendSlow
 bearTrend = trendFast < trendSlow
 
-trendBuyEvt  = bullTrend and not bullTrend[1]     // gelb → grün
-trendSellEvt = bearTrend and not bearTrend[1]     // grün → gelb
+trendBuyEvt  = bullTrend and not bullTrend[1]
+trendSellEvt = bearTrend and not bearTrend[1]
 
 // ══════════════════════════ 2) MACD PRO (10/35/5) ══════════════════════════
 macdLine = ta.ema(close, 10) - ta.ema(close, 35)
 sigLine  = ta.ema(macdLine, 5)
 hist     = macdLine - sigLine
 
-macdBuyEvt  = ta.crossover(hist, 0)               // rot → grün
-macdSellEvt = ta.crossunder(hist, 0)              // grün → rot
+macdBuyEvt  = ta.crossover(hist, 0)
+macdSellEvt = ta.crossunder(hist, 0)
 
 // ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
-k1 = ta.sma(ta.stoch(close, high, low, 14), 3)    // schnell: 14,3,3 (%K)
-k2 = ta.sma(ta.stoch(close, high, low, 35), 10)   // langsam: 35,10,5 (%K)
+k1 = ta.sma(ta.stoch(close, high, low, 14), 3)
+k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
 
-stochBuyEvt  = ta.crossover(k1, osLevel)  and k2 < osLevel   // schnell bricht 20 hoch, langsam überverkauft
-stochSellEvt = ta.crossunder(k1, obLevel) and k2 > obLevel   // schnell bricht 80 runter, langsam überkauft
+stochBuyEvt  = ta.crossover(k1, osLevel)  and k2 < osLevel
+stochSellEvt = ta.crossunder(k1, obLevel) and k2 > obLevel
 
 // ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
 rsi = ta.rsi(close, 14)
@@ -109,9 +116,6 @@ adx     = ta.rma(dx, 14)
 adxOK   = not adxFilter or adx > 20
 
 // ══════════════════════════ KONFLUENZ-BEWERTUNG ══════════════════════════
-// Komponente = erfüllt, wenn ihr Ereignis frisch ist (≤ Fenster) UND der
-// Zustand noch gilt. So dürfen die drei Signale bis zu 'confWin' Kerzen
-// auseinander liegen — echte Konfluenz statt unrealistischer Gleichzeitigkeit.
 sinceTrendBuy  = nz(ta.barssince(trendBuyEvt),  99999)
 sinceMacdBuy   = nz(ta.barssince(macdBuyEvt),   99999)
 sinceStochBuy  = nz(ta.barssince(stochBuyEvt),  99999)
@@ -140,28 +144,119 @@ buyScore  = (trendBuyOK ? 1 : 0) + (macdBuyOK ? 1 : 0) + (stochBuyOK ? 1 : 0)
 sellScore = (trendSellOK ? 1 : 0) + (macdSellOK ? 1 : 0) + (stochSellOK ? 1 : 0)
           + (rsiSellOK ? 1 : 0)  + (mrSellOK ? 1 : 0)
 
-// Dreieck an der Kerze, an der ein NEUES Kern-Ereignis feuert (kein Dauer-Spam)
 buyEvtNow  = trendBuyEvt  or macdBuyEvt  or stochBuyEvt  or (useRSI and rsiBuyEvt)
 sellEvtNow = trendSellEvt or macdSellEvt or stochSellEvt or (useRSI and rsiSellEvt)
 
 buyTrigger  = buyEvtNow  and buyScore  >= minScore and adxOK
 sellTrigger = sellEvtNow and sellScore >= minScore and adxOK
 
-// Farbstufe: volle Konfluenz = dunkel · n−1 = mittel · sonst hell
 buyCol  = buyScore  >= nComp ? colBuy3  : buyScore  >= nComp - 1 ? colBuy2  : colBuy1
 sellCol = sellScore >= nComp ? colSell3 : sellScore >= nComp - 1 ? colSell2 : colSell1
 
-// ══════════════════════════ PLOTS ══════════════════════════
-plotshape(buyTrigger,  title = "Confluence BUY",  style = shape.triangleup,
-     location = location.belowbar, color = buyCol,  size = size.tiny)
-plotshape(sellTrigger, title = "Confluence SELL", style = shape.triangledown,
-     location = location.abovebar, color = sellCol, size = size.tiny)
+// ══════════════════════════ DREIECKE (größer, mit Beschriftung) ══════════════════════════
+upTxtSel   = labelTxt == "UP/DOWN" ? "UP" : labelTxt == "BULL/BEAR" ? "BULL" : labelTxt == "PUT/CALL" ? "PUT" : "BUY"
+downTxtSel = labelTxt == "UP/DOWN" ? "DOWN" : labelTxt == "BULL/BEAR" ? "BEAR" : labelTxt == "PUT/CALL" ? "CALL" : "SELL"
 
-// dezentes Trend-Band als Orientierung (wie Trend Model, transparenter)
+// plotshape braucht konstante Texte → je Variante ein Plot (Bedingung schaltet um)
+plotshape(buyTrigger and labelTxt == "UP/DOWN",   "UP",   shape.triangleup,   location.belowbar, buyCol,  text = "UP",   textcolor = buyCol,  size = size.small)
+plotshape(buyTrigger and labelTxt == "BULL/BEAR", "BULL", shape.triangleup,   location.belowbar, buyCol,  text = "BULL", textcolor = buyCol,  size = size.small)
+plotshape(buyTrigger and labelTxt == "PUT/CALL",  "PUT",  shape.triangleup,   location.belowbar, buyCol,  text = "PUT",  textcolor = buyCol,  size = size.small)
+plotshape(buyTrigger and labelTxt == "BUY/SELL",  "BUY",  shape.triangleup,   location.belowbar, buyCol,  text = "BUY",  textcolor = buyCol,  size = size.small)
+plotshape(sellTrigger and labelTxt == "UP/DOWN",   "DOWN", shape.triangledown, location.abovebar, sellCol, text = "DOWN", textcolor = sellCol, size = size.small)
+plotshape(sellTrigger and labelTxt == "BULL/BEAR", "BEAR", shape.triangledown, location.abovebar, sellCol, text = "BEAR", textcolor = sellCol, size = size.small)
+plotshape(sellTrigger and labelTxt == "PUT/CALL",  "CALL", shape.triangledown, location.abovebar, sellCol, text = "CALL", textcolor = sellCol, size = size.small)
+plotshape(sellTrigger and labelTxt == "BUY/SELL",  "SELL", shape.triangledown, location.abovebar, sellCol, text = "SELL", textcolor = sellCol, size = size.small)
+
+// dezentes Trend-Band als Orientierung
 pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100))
 pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100))
 fill(pF, pS, color = bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85),
      title = "Trend Band")
+
+// ══════════════════════ OPTIONS-HINWEIS (Short Put / Short Call Level) ══════════════════════
+// Nächste Unterstützung = jüngstes bestätigtes Pivot-Tief UNTER dem Kurs,
+// nächster Widerstand = jüngstes bestätigtes Pivot-Hoch ÜBER dem Kurs.
+pl_ = ta.pivotlow(low,  pivLb, pivLb)
+ph_ = ta.pivothigh(high, pivLb, pivLb)
+var float sup1 = na
+var float sup2 = na
+var float res1 = na
+var float res2 = na
+if not na(pl_)
+    sup2 := sup1
+    sup1 := pl_
+if not na(ph_)
+    res2 := res1
+    res1 := ph_
+
+support    = not na(sup1) and sup1 < close ? sup1 : not na(sup2) and sup2 < close ? sup2 : na
+resistance = not na(res1) and res1 > close ? res1 : not na(res2) and res2 > close ? res2 : na
+
+if showHints and buyTrigger and buyScore >= hintMin and not na(support)
+    label.new(bar_index, low, "SP < " + str.tostring(support, format.mintick),
+         style = label.style_label_up, color = color.new(#1B5E20, 55),
+         textcolor = color.white, size = size.small, yloc = yloc.belowbar,
+         tooltip = "Short-Put-Idee: Strike unterhalb der nächsten Unterstützung ("
+              + str.tostring(support, format.mintick) + ")")
+
+if showHints and sellTrigger and sellScore >= hintMin and not na(resistance)
+    label.new(bar_index, high, "SC > " + str.tostring(resistance, format.mintick),
+         style = label.style_label_down, color = color.new(#B71C1C, 55),
+         textcolor = color.white, size = size.small, yloc = yloc.abovebar,
+         tooltip = "Short-Call-Idee: Strike oberhalb des nächsten Widerstands ("
+              + str.tostring(resistance, format.mintick) + ")")
+
+// ══════════════════════════ BACKTEST (wie Stillhalter Trend BT) ══════════════════════════
+// UP-Dreieck = Long-Einstieg · DOWN-Dreieck = Ausstieg · Ausführung am
+// Open der FOLGE-Kerze (kein Look-Ahead).
+inWindow = time >= btFrom and time <= btTo
+
+btBuySig  = enableBT and inWindow and buyTrigger  and (not btOnlyFull or buyScore  >= nComp)
+btSellSig = enableBT and inWindow and sellTrigger and (not btOnlyFull or sellScore >= nComp)
+
+var float equity     = na
+var float entryPrice = na
+var bool  inPos      = false
+var int   trades     = 0
+var int   wins       = 0
+var bool  pendingBuy  = false
+var bool  pendingSell = false
+
+if enableBT
+    if na(equity)
+        equity := initialCapital
+    // 1) Signal auf Close vormerken
+    if btBuySig and not inPos and not pendingBuy
+        pendingBuy := true
+    if btSellSig and inPos and not pendingSell
+        pendingSell := true
+    // 2) Ausführung am Open dieser Kerze (Signal war auf der vorherigen)
+    if pendingBuy[1] and not inPos
+        inPos      := true
+        entryPrice := open
+        pendingBuy := false
+    if pendingSell[1] and inPos
+        pnlPct  = (open - entryPrice) / entryPrice
+        equity  := equity * (1 + pnlPct)
+        trades  += 1
+        if pnlPct > 0
+            wins += 1
+        inPos       := false
+        pendingSell := false
+
+winrate = trades > 0 ? wins * 100.0 / trades : 0.0
+roiPct  = enableBT and not na(equity) ? (equity / initialCapital - 1) * 100 : 0.0
+
+var table bt = table.new(position.top_right, 2, 4, border_width = 1)
+if barstate.islast and enableBT
+    table.cell(bt, 0, 0, "Trades",    text_color = color.white)
+    table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
+    table.cell(bt, 0, 1, "Winrate",   text_color = color.white)
+    table.cell(bt, 1, 1, str.tostring(winrate, "#.#") + " %", text_color = color.white)
+    table.cell(bt, 0, 2, "ROI",       text_color = color.white)
+    table.cell(bt, 1, 2, str.tostring(roiPct, "#.#") + " %", text_color = color.white)
+    table.cell(bt, 0, 3, "Equity",    text_color = color.white)
+    table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
 
 // ══════════════════════════ STATUS-TABELLE ══════════════════════════
 var table t = table.new(position.bottom_right, 2, 7, border_width = 1)
@@ -194,9 +289,9 @@ if barstate.islast and showTable
         table.cell(t, 1, 6, adx > 20 ? "✓" : "·", text_color = color.white)
 
 // ══════════════════════════ ALERTS ══════════════════════════
-alertcondition(buyTrigger,  "Confluence BUY (alle Stufen)",  "Stillhalter Confluence: BUY-Signal")
-alertcondition(sellTrigger, "Confluence SELL (alle Stufen)", "Stillhalter Confluence: SELL-Signal")
-alertcondition(buyTrigger  and buyScore  >= nComp, "Confluence BUY — VOLLE Konfluenz",
-     "Stillhalter Confluence: BUY mit VOLLER Konfluenz!")
-alertcondition(sellTrigger and sellScore >= nComp, "Confluence SELL — VOLLE Konfluenz",
-     "Stillhalter Confluence: SELL mit VOLLER Konfluenz!")
+alertcondition(buyTrigger,  "Confluence UP (alle Stufen)",   "Stillhalter Confluence: UP-Signal")
+alertcondition(sellTrigger, "Confluence DOWN (alle Stufen)", "Stillhalter Confluence: DOWN-Signal")
+alertcondition(buyTrigger  and buyScore  >= nComp, "Confluence UP — VOLLE Konfluenz",
+     "Stillhalter Confluence: UP mit VOLLER Konfluenz!")
+alertcondition(sellTrigger and sellScore >= nComp, "Confluence DOWN — VOLLE Konfluenz",
+     "Stillhalter Confluence: DOWN mit VOLLER Konfluenz!")
