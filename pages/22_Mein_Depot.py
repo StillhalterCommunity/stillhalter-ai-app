@@ -60,23 +60,36 @@ with st.expander("🔐 IBKR Flex Query — Zugangsdaten",
                  expanded=not (_cred.get("token") and _cred.get("query_id"))):
     st.caption(
         "Einmal eintragen — wird **nur für dein Konto** gespeichert (persistent, "
-        "kein erneutes Anmelden nötig). Anleitung zum Erstellen der Flex Query: "
-        "Seite 12 · IBKR Integration. Empfohlene Sektionen der Query: "
-        "**Open Positions**, **Net Asset Value (NAV) in Base**, **Cash Report**, **Trades**."
+        "kein erneutes Anmelden nötig). Anleitung zum Erstellen der Flex Queries: "
+        "Seite 12 · IBKR Integration. Empfohlene Sektionen der Haupt-Query: "
+        "**Open Positions**, **Net Asset Value (NAV) in Base**, **Cash Report**, **Trades**. "
+        "Die Query-IDs 2 und 3 sind optional — beim Abruf werden alle eingetragenen "
+        "Queries geholt und zusammengeführt."
     )
-    fc1, fc2, fc3 = st.columns([3, 2, 2])
-    with fc1:
-        _tok_in = st.text_input("Flex Web Service Token", value=_cred.get("token", ""),
-                                type="password", key="md_tok")
-    with fc2:
-        _qid_in = st.text_input("Query-ID", value=_cred.get("query_id", ""), key="md_qid")
-    with fc3:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("💾 Speichern", use_container_width=True, key="md_save"):
-            _us.set_value(_user, "flex_credentials",
-                          {"token": _tok_in.strip(), "query_id": _qid_in.strip()})
-            st.success("Gespeichert — gilt nur für dein Konto.")
-            st.rerun()
+    _tok_in = st.text_input("Flex Web Service Token (Aktiver Prüfcode)",
+                            value=_cred.get("token", ""), type="password", key="md_tok")
+    fq1, fq2, fq3 = st.columns(3)
+    with fq1:
+        _qid_in = st.text_input("Query-ID 1 · Positionen & NAV *",
+                                value=_cred.get("query_id", ""), key="md_qid",
+                                help="Haupt-Query (Pflicht): Open Positions, NAV in Base, "
+                                     "Cash Report — Grundlage für Kennzahlen und Charts.")
+    with fq2:
+        _qid2_in = st.text_input("Query-ID 2 · Kontoumsätze / Trades",
+                                 value=_cred.get("query_id2", ""), key="md_qid2",
+                                 help="Optional: Query mit der Sektion 'Trades' — "
+                                      "liefert den Options-Cashflow.")
+    with fq3:
+        _qid3_in = st.text_input("Query-ID 3 · Handelsbestätigungen",
+                                 value=_cred.get("query_id3", ""), key="md_qid3",
+                                 help="Optional: Query mit 'Trade Confirmations' — "
+                                      "ergänzt tagesaktuelle Ausführungen.")
+    if st.button("💾 Speichern", key="md_save"):
+        _us.set_value(_user, "flex_credentials",
+                      {"token": _tok_in.strip(), "query_id": _qid_in.strip(),
+                       "query_id2": _qid2_in.strip(), "query_id3": _qid3_in.strip()})
+        st.success("Gespeichert — gilt nur für dein Konto.")
+        st.rerun()
 
 _cred = _us.get_value(_user, "flex_credentials", {}) or {}
 _ready = bool(_cred.get("token") and _cred.get("query_id"))
@@ -97,34 +110,60 @@ with lc2:
     st.caption(f"Letzter Abruf: {_last or '—'} · Abrufe sind bei IBKR "
                f"limitiert — Dashboard nutzt zwischendurch den letzten Stand.")
 
+def _parse_bundle(xmls: list) -> tuple:
+    """Mehrere Flex-Reports zusammenführen: NAV/Cash und Positionen aus dem
+    ersten Report, der sie liefert — Options-Trades aus allen kombiniert."""
+    summ, allpos, _tr_parts = {}, pd.DataFrame(), []
+    for _x in xmls:
+        _s = _flex.parse_account_summary(_x)
+        if _s and (_s.get("nlv") or not summ):
+            if _s.get("nlv") or not summ.get("nlv"):
+                summ = _s
+        _p = _flex.parse_all_positions(_x)
+        if allpos.empty and not _p.empty:
+            allpos = _p
+        _t = _flex.parse_option_trades(_x)
+        if not _t.empty:
+            _tr_parts.append(_t)
+    opttr = (pd.concat(_tr_parts, ignore_index=True).drop_duplicates()
+             if _tr_parts else pd.DataFrame())
+    return summ, allpos, opttr
+
 if _do_fetch:
-    with st.spinner("Hole Depot von IBKR… (bis zu 45 Sek.)"):
-        xml, err, dbg = _flex.fetch_flex(_cred["token"], _cred["query_id"])
-    if xml:
-        st.session_state[_ck] = xml
+    _qids = [q for q in [_cred.get("query_id"), _cred.get("query_id2"),
+                         _cred.get("query_id3")] if q]
+    xmls, _fails = [], []
+    with st.spinner(f"Hole Depot von IBKR… ({len(_qids)} "
+                    f"Quer{'ies' if len(_qids) > 1 else 'y'}, je bis zu 45 Sek.)"):
+        for _qid in _qids:
+            _x, _err, _dbg = _flex.fetch_flex(_cred["token"], _qid)
+            if _x:
+                xmls.append(_x)
+            else:
+                _fails.append((_qid, _err, _dbg))
+    for _qid, _err, _dbg in _fails:
+        st.error(f"Query {_qid}: {_err or 'Unbekannter Fehler'}")
+        with st.expander(f"🔍 Diagnose Query {_qid}"):
+            st.code(_dbg or "", language="text")
+    if xmls:
+        st.session_state[_ck] = xmls
         _ts = datetime.now().strftime("%d.%m.%Y %H:%M")
         _us.set_value(_user, "last_fetch_ts", _ts)
-        _us.set_value(_user, "last_flex_xml_len", len(xml))
+        _us.set_value(_user, "last_flex_xml_len", sum(len(_x) for _x in xmls))
         # Persistente Kurzfassung für Anzeige ohne Neuabruf
-        summ = _flex.parse_account_summary(xml)
-        allpos = _flex.parse_all_positions(xml)
+        summ, allpos, _ = _parse_bundle(xmls)
         _us.set_value(_user, "last_positions", allpos.to_dict("records") if not allpos.empty else [])
         _us.set_value(_user, "last_summary", summ)
         if summ.get("nlv"):
             _us.append_snapshot(_user, "nlv_history",
                                 {"ts": _ts, "nlv": summ.get("nlv"), "cash": summ.get("cash")})
-        st.success("Depot aktualisiert.")
-    else:
-        st.error(err or "Unbekannter Fehler")
-        with st.expander("🔍 Diagnose"):
-            st.code(dbg or "", language="text")
+        st.success(f"Depot aktualisiert ({len(xmls)} von {len(_qids)} Queries).")
 
 # Datenbasis: frischer Abruf ODER letzter gespeicherter Stand
 _xml = st.session_state.get(_ck)
 if _xml:
-    summ   = _flex.parse_account_summary(_xml)
-    allpos = _flex.parse_all_positions(_xml)
-    opttr  = _flex.parse_option_trades(_xml)
+    # Abwärtskompatibel: ältere Sessions haben einen einzelnen XML-String
+    summ, allpos, opttr = _parse_bundle([_xml] if isinstance(_xml, str) else _xml)
 else:
     summ   = _us.get_value(_user, "last_summary", {}) or {}
     _rec   = _us.get_value(_user, "last_positions", []) or []
