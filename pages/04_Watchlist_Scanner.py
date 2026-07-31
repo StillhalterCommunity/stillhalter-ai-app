@@ -241,93 +241,68 @@ with st.expander("💾 **KONFIGURATION SPEICHERN** — Filter-Presets für Kunde
     </div>
     """, unsafe_allow_html=True)
 
-# ── Preset-Defaults ───────────────────────────────────────────────────────────
+# ── Preset-Defaults (kombiniert: Risikoprofil = IV-Kategorie) ─────────────────
 PRESETS = {
-    # ── Klassische Presets ────────────────────────────────────────────────────
-    "Konservativ 🟢": dict(dte_min=21, dte_max=45, d_min=-0.20, d_max=-0.05,
-                           iv_min=0, iv_max=200, otm_min=5, otm_max=20,
-                           prem_min=0.10, oi_min=50, max_spread=40.0,
-                           prem_pct_min=0.0),
-    "Ausgewogen 🟡":  dict(dte_min=14, dte_max=60, d_min=-0.30, d_max=-0.05,
-                           iv_min=0, iv_max=200, otm_min=3, otm_max=25,
-                           prem_min=0.05, oi_min=10, max_spread=60.0,
-                           prem_pct_min=0.0),
-    "Aggressiv 🔴":   dict(dte_min=7, dte_max=45, d_min=-0.40, d_max=-0.05,
-                           iv_min=0, iv_max=300, otm_min=0, otm_max=30,
-                           prem_min=0.01, oi_min=0, max_spread=80.0,
-                           prem_pct_min=0.0),
-    # ── IV-basierte Presets ───────────────────────────────────────────────────
-    "Low IV 📘":  dict(dte_min=1, dte_max=42, d_min=-0.25, d_max=-0.05,
-                       iv_min=0,  iv_max=30,  otm_min=3,  otm_max=15,
-                       prem_min=0.05, oi_min=10, max_spread=50.0,
-                       prem_pct_min=0.4),
-    "Mid IV 📙":  dict(dte_min=1, dte_max=42, d_min=-0.35, d_max=-0.05,
-                       iv_min=30, iv_max=60,  otm_min=5,  otm_max=20,
-                       prem_min=0.05, oi_min=10, max_spread=60.0,
-                       prem_pct_min=0.7),
-    "High IV 📕": dict(dte_min=1, dte_max=42, d_min=-0.45, d_max=-0.05,
-                       iv_min=60, iv_max=999, otm_min=7,  otm_max=30,
-                       prem_min=0.05, oi_min=5,  max_spread=80.0,
-                       prem_pct_min=1.0),
+    "Konservativ 🟢 · Low IV":  dict(dte_min=21, dte_max=45, d_min=-0.20, d_max=-0.05,
+                                     iv_min=0,  iv_max=30,  otm_min=5, otm_max=20,
+                                     prem_min=0.05, oi_min=50, max_spread=40.0,
+                                     prem_pct_min=0.4),
+    "Ausgewogen 🟡 · Mid IV":   dict(dte_min=14, dte_max=60, d_min=-0.30, d_max=-0.05,
+                                     iv_min=30, iv_max=60,  otm_min=3, otm_max=25,
+                                     prem_min=0.05, oi_min=10, max_spread=60.0,
+                                     prem_pct_min=0.7),
+    "Aggressiv 🔴 · High IV":   dict(dte_min=7,  dte_max=45, d_min=-0.40, d_max=-0.05,
+                                     iv_min=60, iv_max=999, otm_min=0, otm_max=30,
+                                     prem_min=0.05, oi_min=5,  max_spread=80.0,
+                                     prem_pct_min=1.0),
 }
 
-# Preset-Auswahl via Session-State
+# Preset-Auswahl via Session-State (alte/entfernte Preset-Namen verwerfen)
 if "preset" not in st.session_state:
     st.session_state.preset = None
+if st.session_state.preset and st.session_state.preset not in PRESETS:
+    st.session_state.preset = None
 
-# ── Zeile 1: Klassische Presets ───────────────────────────────────────────────
-st.markdown("<div style='font-size:0.72rem;color:#555;margin-bottom:4px'>Klassisch</div>",
-            unsafe_allow_html=True)
-pc1, pc2, pc3, pc_gap = st.columns([2, 2, 2, 6])
-with pc1:
-    if st.button("Konservativ 🟢", use_container_width=True,
-                 help="DTE 21–45 · Delta ≤ 0.20 · OTM 5–20% · OI ≥ 50"):
-        st.session_state.preset = "Konservativ 🟢"; st.rerun()
-with pc2:
-    if st.button("Ausgewogen 🟡", use_container_width=True,
-                 help="DTE 14–60 · Delta ≤ 0.30 · OTM 3–25% · OI ≥ 10"):
-        st.session_state.preset = "Ausgewogen 🟡"; st.rerun()
-with pc3:
-    if st.button("Aggressiv 🔴", use_container_width=True,
-                 help="DTE 7–45 · Delta ≤ 0.40 · OTM 0–30% · OI ≥ 0"):
-        st.session_state.preset = "Aggressiv 🔴"; st.rerun()
+# ── Presets: EINE Reihe, nur im Professional-Modus ────────────────────────────
+if IS_PRO:
+    st.markdown("<div style='font-size:0.72rem;color:#555;margin-bottom:4px'>Presets</div>",
+                unsafe_allow_html=True)
+    pc1, pc2, pc3, pc_gap = st.columns([2, 2, 2, 6])
+    with pc1:
+        if st.button("Konservativ 🟢 · Low IV", use_container_width=True,
+                     help="IV 0–30% · DTE 21–45 · Delta ≤ 0.20 · OTM 5–20% · OI ≥ 50 "
+                          "· Min. 0,4% Rendite/LZ"):
+            st.session_state.preset = "Konservativ 🟢 · Low IV"; st.rerun()
+    with pc2:
+        if st.button("Ausgewogen 🟡 · Mid IV", use_container_width=True,
+                     help="IV 30–60% · DTE 14–60 · Delta ≤ 0.30 · OTM 3–25% · OI ≥ 10 "
+                          "· Min. 0,7% Rendite/LZ"):
+            st.session_state.preset = "Ausgewogen 🟡 · Mid IV"; st.rerun()
+    with pc3:
+        if st.button("Aggressiv 🔴 · High IV", use_container_width=True,
+                     help="IV >60% · DTE 7–45 · Delta ≤ 0.40 · OTM 0–30% · OI ≥ 5 "
+                          "· Min. 1,0% Rendite/LZ"):
+            st.session_state.preset = "Aggressiv 🔴 · High IV"; st.rerun()
 
-# ── Zeile 2: IV-Presets ────────────────────────────────────────────────────────
-st.markdown("<div style='font-size:0.72rem;color:#555;margin:6px 0 4px'>IV-Kategorie</div>",
-            unsafe_allow_html=True)
-iv1, iv2, iv3, iv_gap = st.columns([2, 2, 2, 6])
-with iv1:
-    if st.button("Low IV 📘", use_container_width=True,
-                 help="IV 0–30% · DTE 1–42 · OTM 3–15% · Min. 0,4% Rendite/LZ · Delta ≤ 0.25"):
-        st.session_state.preset = "Low IV 📘"; st.rerun()
-with iv2:
-    if st.button("Mid IV 📙", use_container_width=True,
-                 help="IV 30–60% · DTE 1–42 · OTM 5–20% · Min. 0,7% Rendite/LZ · Delta ≤ 0.35"):
-        st.session_state.preset = "Mid IV 📙"; st.rerun()
-with iv3:
-    if st.button("High IV 📕", use_container_width=True,
-                 help="IV >60% · DTE 1–42 · OTM 7–30% · Min. 1,0% Rendite/LZ · Delta ≤ 0.45"):
-        st.session_state.preset = "High IV 📕"; st.rerun()
+    # ── Preset-Status ─────────────────────────────────────────────────────────
+    if st.session_state.preset:
+        _pname = st.session_state.preset
+        _pdata = PRESETS[_pname]
+        _iv_label = (f"IV {_pdata['iv_min']}–{_pdata['iv_max']}% · "
+                     if _pdata.get("iv_max", 999) < 999 else f"IV >{_pdata['iv_min']}% · ")
+        _pct_label = (f" · Min. {_pdata['prem_pct_min']}% Rendite/LZ"
+                      if _pdata.get("prem_pct_min", 0) > 0 else "")
+        st.info(
+            f"✅ **{_pname}** aktiv — "
+            f"{_iv_label}DTE {_pdata['dte_min']}–{_pdata['dte_max']} · "
+            f"OTM {_pdata['otm_min']}–{_pdata['otm_max']}% · "
+            f"Delta ≤ {abs(_pdata['d_min'])}{_pct_label}"
+        )
+        if st.button("✖ Preset zurücksetzen", key="reset_preset"):
+            st.session_state.preset = None; st.rerun()
 
-# ── Preset-Status ─────────────────────────────────────────────────────────────
-if st.session_state.preset:
-    _pname = st.session_state.preset
-    _pdata = PRESETS[_pname]
-    _iv_label = (f"IV {_pdata['iv_min']}–{_pdata['iv_max']}% · "
-                 if _pdata.get("iv_max", 999) < 999 else f"IV >{_pdata['iv_min']}% · ")
-    _pct_label = (f" · Min. {_pdata['prem_pct_min']}% Rendite/LZ"
-                  if _pdata.get("prem_pct_min", 0) > 0 else "")
-    st.info(
-        f"✅ **{_pname}** aktiv — "
-        f"{_iv_label}DTE {_pdata['dte_min']}–{_pdata['dte_max']} · "
-        f"OTM {_pdata['otm_min']}–{_pdata['otm_max']}% · "
-        f"Delta ≤ {abs(_pdata['d_min'])}{_pct_label}"
-    )
-    if st.button("✖ Preset zurücksetzen", key="reset_preset"):
-        st.session_state.preset = None; st.rerun()
-
-# Preset-Werte laden
-_p = PRESETS.get(st.session_state.preset, {})
+# Preset-Werte laden (nur Professional — Quick & Easy setzt eigene Vorgaben)
+_p = PRESETS.get(st.session_state.preset, {}) if IS_PRO else {}
 
 # ── Haupt-Einstellungen ───────────────────────────────────────────────────────
 with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=IS_PRO):
@@ -386,7 +361,9 @@ with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ *
             icon="⚡",
         )
     with row1[2]:
-        max_per_ticker = st.number_input("Max. Optionen/Aktie", 1, 10, 3)
+        max_per_ticker = st.number_input("Max. Optionen/Aktie", 1, 10, 1,
+                                         help="Standard: die beste Option je Aktie. "
+                                              "Erhöhen, um Alternativen je Aktie zu sehen.")
     with row1[3]:
         top_n = st.number_input("Top N Ergebnisse", 5, 500, 40, step=5)
     with row1[4]:
@@ -682,7 +659,8 @@ if not IS_PRO:
     st.caption(
         f"Vorgaben: Laufzeit **{dte_min}–{dte_max} Tage** · Abstand ≥ **{otm_min:g} %** · "
         f"Earnings ausgeschlossen · Ranking: **🛡️ Stillhalter-Score** · "
-        f"Anzeige nur bei **🚦 Confluence ≥ 2 von 3** auf der zur Laufzeit passenden Zeitebene."
+        f"Setup-Filter: **🚦 Stillhalter Confluence** (Standard ≥ 2 von 3, unter den "
+        f"Ergebnissen einstellbar) auf der zur Laufzeit passenden Zeitebene."
     )
 
 try:
@@ -1596,16 +1574,29 @@ else:
     with fc1:
         trend_f = st.radio("Trend-Filter (1D)", ["Alle", "↑ Aufwärts", "→ Seitwärts", "↓ Abwärts"], horizontal=True)
     with fc4:
-        setup_f = st.selectbox(
-            "🎯 Stillhalter-Setup",
-            ["Aus", "≥ 2 von 3", "≥ 2.5 von 3", "3 von 3"],
-            index=1,
-            key="setup_filter",
-            help="Filtert nach den 3 Stillhalter-Indikatoren (Trend BT · MACD Pro · "
-                 "Dual Stochastik), strategieabhängig auf hohe Verfallswahrscheinlichkeit: "
-                 "Short Put → bullisch/überverkauft · Covered Call → bärisch/überkauft · "
-                 "Strangle → neutral.",
-        )
+        if IS_PRO:
+            setup_f = st.selectbox(
+                "🎯 Stillhalter-Setup",
+                ["Aus", "≥ 2 von 3", "≥ 2.5 von 3", "3 von 3"],
+                index=1,
+                key="setup_filter",
+                help="Filtert nach den 3 Stillhalter-Indikatoren (Trend BT · MACD Pro · "
+                     "Dual Stochastik), strategieabhängig auf hohe Verfallswahrscheinlichkeit: "
+                     "Short Put → bullisch/überverkauft · Covered Call → bärisch/überkauft · "
+                     "Strangle → neutral.",
+            )
+        else:
+            # Quick & Easy: Setup-Filter basiert VOLLSTÄNDIG auf dem
+            # Stillhalter Confluence Model (🚦), nicht auf dem alten Setup-Score.
+            setup_f = st.selectbox(
+                "🎯 Stillhalter-Setup (Confluence)",
+                ["Aus", "≥ 2 von 3", "3 von 3"],
+                index=1,
+                key="setup_filter_qe",
+                help="Basiert auf dem Stillhalter Confluence Model — gleiche Logik "
+                     "wie der TradingView-Indikator, bewertet auf der zur Laufzeit "
+                     "passenden Zeitebene in Trade-Richtung.",
+            )
         best_tf = st.checkbox(
             "🧠 Beste Zeitebene je Aktie", value=True, key="best_tf_mode",
             help="Zeigt je Aktie nur Optionen aus dem Laufzeitband, dessen "
@@ -1637,24 +1628,25 @@ else:
         display_df = display_df[display_df["Trend"].str.contains(t_map.get(trend_f, ""), na=False)]
     if sector_f and "Sektor" in display_df.columns:
         display_df = display_df[display_df["Sektor"].isin(sector_f)]
-    if setup_f != "Aus" and "Setup-Score" in display_df.columns:
+    if IS_PRO and setup_f != "Aus" and "Setup-Score" in display_df.columns:
         _setup_min = {"≥ 2 von 3": 2.0, "≥ 2.5 von 3": 2.5, "3 von 3": 3.0}[setup_f]
         _n_before = len(display_df)
         display_df = display_df[display_df["Setup-Score"].fillna(-1) >= _setup_min]
         if display_df.empty and _n_before > 0:
             st.warning(f"🎯 Kein Treffer erfüllt das Stillhalter-Setup ({setup_f}). "
                        f"Filter lockern oder 'Aus' wählen — {_n_before} Treffer ohne Setup-Filter.")
-    if not IS_PRO and "_conf_score" in display_df.columns:
+    if not IS_PRO and setup_f != "Aus" and "_conf_score" in display_df.columns:
+        _cf_min = {"≥ 2 von 3": 2, "3 von 3": 3}[setup_f]
         _cf_before = len(display_df)
-        display_df = display_df[display_df["_conf_score"].fillna(-1) >= 2]
+        display_df = display_df[display_df["_conf_score"].fillna(-1) >= _cf_min]
         if _cf_before and display_df.empty:
-            st.warning("🚦 **Kein Treffer mit Confluence ≥ 2 von 3** auf der passenden "
+            st.warning(f"🚦 **Kein Treffer mit Confluence {setup_f}** auf der passenden "
                        "Zeitebene — heute bietet sich nach der Stillhalter-Logik kein "
-                       "Einstieg an. Andere Laufzeit probieren oder im Professional-Modus "
-                       "ohne Confluence-Pflicht suchen.")
+                       "Einstieg an. Filter auf 'Aus' stellen, andere Laufzeit probieren "
+                       "oder im Professional-Modus suchen.")
         elif _cf_before > len(display_df):
             st.caption(f"🚦 Confluence-Filter aktiv: {len(display_df)} von {_cf_before} "
-                       f"Treffern haben ≥ 2 von 3 auf der laufzeitgerechten Zeitebene.")
+                       f"Treffern haben {setup_f} auf der laufzeitgerechten Zeitebene.")
 
     # 🧠 Beste Zeitebene je Aktie: nur Optionen aus dem Laufzeitband behalten,
     # dessen Zeitebene das stärkste Setup hat — sonst dominieren viele
