@@ -61,7 +61,7 @@ showVP = input.bool(true, "Volumenprofil anzeigen", group = grpVP)
 vpLen  = input.int(120, "Anker-Suchfenster (Kerzen) — lokales Tief → heute",
      minval = 20, maxval = 400, group = grpVP,
      tooltip = "Das Profil beginnt am tiefsten Punkt der letzten N Kerzen und läuft bis heute.")
-vpRows = input.int(24, "Preis-Zeilen", minval = 10, maxval = 50, group = grpVP)
+vpRows = input.int(40, "Preis-Zeilen", minval = 10, maxval = 100, group = grpVP)
 vaPct  = input.float(70, "Value Area (%)", minval = 50, maxval = 90, group = grpVP)
 
 grpB = "Backtest"
@@ -284,15 +284,29 @@ if barstate.islast and showVP and lowestOff > 5
         float accV = array.get(rowsV, pocR)
         int loR = pocR
         int hiR = pocR
+        // Value-Area-Expansion PAARWEISE (wie TradingViews Volume Profile):
+        // es werden jeweils die nächsten ZWEI Zeilen oben vs. unten verglichen.
         while accV < vaPct / 100 * totV and (loR > 0 or hiR < vpRows - 1)
-            upV = hiR + 1 <= vpRows - 1 ? array.get(rowsV, hiR + 1) : -1.0
-            dnV = loR - 1 >= 0          ? array.get(rowsV, loR - 1) : -1.0
-            if upV >= dnV
-                hiR += 1
-                accV += upV
+            upV = 0.0
+            if hiR + 1 <= vpRows - 1
+                upV += array.get(rowsV, hiR + 1)
+            if hiR + 2 <= vpRows - 1
+                upV += array.get(rowsV, hiR + 2)
+            dnV = 0.0
+            if loR - 1 >= 0
+                dnV += array.get(rowsV, loR - 1)
+            if loR - 2 >= 0
+                dnV += array.get(rowsV, loR - 2)
+            if (upV >= dnV and hiR < vpRows - 1) or loR <= 0
+                steps = math.min(2, vpRows - 1 - hiR)
+                for s_ = 1 to steps
+                    accV += array.get(rowsV, hiR + s_)
+                hiR += steps
             else
-                loR -= 1
-                accV += dnV
+                steps = math.min(2, loR)
+                for s_ = 1 to steps
+                    accV += array.get(rowsV, loR - s_)
+                loR -= steps
         pocPx = rLo + (pocR + 0.5) * step_
         vahPx = rLo + (hiR + 1) * step_
         valPx = rLo + loR * step_

@@ -190,6 +190,20 @@ if _user_presets:
 
 st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
 
+# ══════════════════ MODUS: Quick & Easy vs. Professional ══════════════════
+scan_mode = st.radio(
+    "Modus",
+    ["🚀 Quick & Easy", "🛠️ Professional"],
+    horizontal=True, key="scan_mode",
+    help="Quick & Easy: 3 einfache Regler, Suche basiert auf dem Stillhalter "
+         "Confluence. Professional: alle Filter + Technische Analyse im Detail.",
+)
+IS_PRO = scan_mode.startswith("🛠")
+if not IS_PRO:
+    st.caption("🛠️ Alle Profi-Filter findest du unten zugeklappt unter "
+               "**Professional** — Quick & Easy setzt bewährte Standardwerte.")
+
+
 # ── Neue Konfiguration speichern ──────────────────────────────────────────────
 with st.expander("💾 **KONFIGURATION SPEICHERN** — Filter-Presets für Kunden/Strategien", expanded=False):
     sp1, sp2 = st.columns([3, 1])
@@ -316,7 +330,7 @@ if st.session_state.preset:
 _p = PRESETS.get(st.session_state.preset, {})
 
 # ── Haupt-Einstellungen ───────────────────────────────────────────────────────
-with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True):
+with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=IS_PRO):
     # ── Universe & Sektor Zeile ────────────────────────────────────────────────
     urow = st.columns([3, 3, 2, 2, 2])
     with urow[0]:
@@ -474,159 +488,203 @@ with st.expander("⚙️ **SCAN-EINSTELLUNGEN & OPTIONS-FILTER**", expanded=True
             )
 
 # ── Technische Filter ─────────────────────────────────────────────────────────
-with st.expander("📊 **TECHNISCHE FILTER** — RSI · Dual Stochastik · MACD Pro · Trend Model · Score-basiert", expanded=False):
+if IS_PRO:
+    with st.expander("📊 **TECHNISCHE FILTER** — RSI · Dual Stochastik · MACD Pro · Trend Model · Score-basiert", expanded=False):
 
-    TF_OPTIONS = ["4H", "1D", "1W", "Alle TFs"]
+        TF_OPTIONS = ["4H", "1D", "1W", "Alle TFs"]
 
-    # ── Filter-Modus ──────────────────────────────────────────────────────────
-    fm1, fm2, fm3 = st.columns([3, 3, 6])
-    with fm1:
-        filter_mode = st.selectbox(
-            "🎛️ Filter-Modus",
-            ["AND — alle müssen passen", "OR — mindestens einer", "SCORE — Score-basiert ★"],
-            index=2,
-            key="filter_mode",
-            help=(
-                "AND: Alle aktivierten Filter müssen gleichzeitig erfüllt sein (streng, oft 0 Ergebnisse)\n"
-                "OR: Mindestens einer der aktivierten Filter muss passen (flexibler)\n"
-                "SCORE ★: Nutzt den Konvergenz-Score (0-100) — berücksichtigt zeitliche Nähe zum Signal automatisch"
-            ),
-        )
-    _fmode = "AND" if filter_mode.startswith("AND") else ("OR" if filter_mode.startswith("OR") else "SCORE")
-
-    with fm2:
-        if _fmode == "SCORE":
-            min_conv_score = st.slider(
-                "Min. Konvergenz-Score",
-                0, 100, 0, 5,
-                key="min_conv_score",
+        # ── Filter-Modus ──────────────────────────────────────────────────────────
+        fm1, fm2, fm3 = st.columns([3, 3, 6])
+        with fm1:
+            filter_mode = st.selectbox(
+                "🎛️ Filter-Modus",
+                ["AND — alle müssen passen", "OR — mindestens einer", "SCORE — Score-basiert ★"],
+                index=2,
+                key="filter_mode",
                 help=(
-                    "0 = kein Mindest-Score (alle Ticker)\n"
-                    "40+ = Indikatoren nähern sich dem Signal an\n"
-                    "60+ = Sehr nah am idealen Einstieg\n"
-                    "78+ = Perfekte Konvergenz (selten)"
+                    "AND: Alle aktivierten Filter müssen gleichzeitig erfüllt sein (streng, oft 0 Ergebnisse)\n"
+                    "OR: Mindestens einer der aktivierten Filter muss passen (flexibler)\n"
+                    "SCORE ★: Nutzt den Konvergenz-Score (0-100) — berücksichtigt zeitliche Nähe zum Signal automatisch"
                 ),
             )
+        _fmode = "AND" if filter_mode.startswith("AND") else ("OR" if filter_mode.startswith("OR") else "SCORE")
+
+        with fm2:
+            if _fmode == "SCORE":
+                min_conv_score = st.slider(
+                    "Min. Konvergenz-Score",
+                    0, 100, 0, 5,
+                    key="min_conv_score",
+                    help=(
+                        "0 = kein Mindest-Score (alle Ticker)\n"
+                        "40+ = Indikatoren nähern sich dem Signal an\n"
+                        "60+ = Sehr nah am idealen Einstieg\n"
+                        "78+ = Perfekte Konvergenz (selten)"
+                    ),
+                )
+            else:
+                min_conv_score = 0.0
+
+        if _fmode == "SCORE":
+            st.markdown("""
+            <div style='color:#888;font-size:0.82rem;margin-bottom:12px;background:rgba(212,168,67,0.06);
+                        padding:8px 12px;border-radius:6px;border-left:3px solid rgba(212,168,67,0.4)'>
+            ★ <b>Score-Modus aktiv</b> — MACD-Kreuzung von vor 2–3 Tagen, RSI nah an 30, Stochastik nah an 20
+            werden alle berücksichtigt und in einen Gesamt-Score (0–100) umgerechnet.<br>
+            Einzelne Filter unten sind im Score-Modus <b>optional</b> (fungieren als OR-Zusatzbedingung, nicht als harter Filter).
+            </div>
+            """, unsafe_allow_html=True)
+        elif _fmode == "AND":
+            st.markdown("""
+            <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
+            AND-Modus: Alle aktivierten Filter müssen gleichzeitig erfüllt sein. Bei vielen kombinierten Signalen
+            können Ergebnisse auf 0 sinken — dann Score-Modus empfohlen.
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            min_conv_score = 0.0
+            st.markdown("""
+            <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
+            OR-Modus: Mindestens einer der aktivierten Filter muss erfüllt sein. Flexibler als AND.
+            </div>
+            """, unsafe_allow_html=True)
 
-    if _fmode == "SCORE":
-        st.markdown("""
-        <div style='color:#888;font-size:0.82rem;margin-bottom:12px;background:rgba(212,168,67,0.06);
-                    padding:8px 12px;border-radius:6px;border-left:3px solid rgba(212,168,67,0.4)'>
-        ★ <b>Score-Modus aktiv</b> — MACD-Kreuzung von vor 2–3 Tagen, RSI nah an 30, Stochastik nah an 20
-        werden alle berücksichtigt und in einen Gesamt-Score (0–100) umgerechnet.<br>
-        Einzelne Filter unten sind im Score-Modus <b>optional</b> (fungieren als OR-Zusatzbedingung, nicht als harter Filter).
-        </div>
-        """, unsafe_allow_html=True)
-    elif _fmode == "AND":
-        st.markdown("""
-        <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
-        AND-Modus: Alle aktivierten Filter müssen gleichzeitig erfüllt sein. Bei vielen kombinierten Signalen
-        können Ergebnisse auf 0 sinken — dann Score-Modus empfohlen.
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style='color:#888;font-size:0.82rem;margin-bottom:12px'>
-        OR-Modus: Mindestens einer der aktivierten Filter muss erfüllt sein. Flexibler als AND.
-        </div>
-        """, unsafe_allow_html=True)
+        tc1, tc2, tc3, tc4 = st.columns(4)
 
-    tc1, tc2, tc3, tc4 = st.columns(4)
+        with tc1:
+            st.markdown("**📈 Stillhalter Trend Model®**")
+            ema_filter = st.selectbox("SC Trend Signal", [
+                "Alle",
+                "SC Trend bullish ↑",
+                "SC Trend bearish ↓",
+                "Kaufsignal (Cross ↑)",
+                "Verkaufssignal (Cross ↓)",
+            ], key="ema_f")
+            ema_tf = st.selectbox("SC Trend Timeframe", TF_OPTIONS, index=1, key="ema_tf")
+            st.caption("Cross ↑ = Kaufsignal | Cross ↓ = Verkaufssignal")
+            trend_mode_scan = st.selectbox("Trend Mode",
+                ["Very Tight", "Tight", "Loose", "Very Loose"],
+                index=0,
+                key="trend_mode_scan",
+                help="Very Tight = kurzfristig sensitiv · Very Loose = langfristig stabil")
 
-    with tc1:
-        st.markdown("**📈 Stillhalter Trend Model®**")
-        ema_filter = st.selectbox("SC Trend Signal", [
-            "Alle",
-            "SC Trend bullish ↑",
-            "SC Trend bearish ↓",
-            "Kaufsignal (Cross ↑)",
-            "Verkaufssignal (Cross ↓)",
-        ], key="ema_f")
-        ema_tf = st.selectbox("SC Trend Timeframe", TF_OPTIONS, index=1, key="ema_tf")
-        st.caption("Cross ↑ = Kaufsignal | Cross ↓ = Verkaufssignal")
-        trend_mode_scan = st.selectbox("Trend Mode",
-            ["Very Tight", "Tight", "Loose", "Very Loose"],
-            index=0,
-            key="trend_mode_scan",
-            help="Very Tight = kurzfristig sensitiv · Very Loose = langfristig stabil")
+        with tc2:
+            st.markdown("**〰️ RSI (Momentum)**")
+            rsi_filter = st.selectbox("RSI Signal", [
+                "Alle",
+                "Kreuzt 30 aufwärts ↑",
+                "Kreuzt 70 abwärts ↓",
+                "< 30 (überverkauft)",
+                "> 70 (überkauft)",
+                "Bullish (RSI > 50)",
+                "Bearish (RSI < 50)",
+            ], key="rsi_f")
+            rsi_tf = st.selectbox("RSI Timeframe", TF_OPTIONS, index=1, key="rsi_tf")
+            st.caption("Crossover-Signale = Trendumkehr-Hinweise")
 
-    with tc2:
-        st.markdown("**〰️ RSI (Momentum)**")
-        rsi_filter = st.selectbox("RSI Signal", [
-            "Alle",
-            "Kreuzt 30 aufwärts ↑",
-            "Kreuzt 70 abwärts ↓",
-            "< 30 (überverkauft)",
-            "> 70 (überkauft)",
-            "Bullish (RSI > 50)",
-            "Bearish (RSI < 50)",
-        ], key="rsi_f")
-        rsi_tf = st.selectbox("RSI Timeframe", TF_OPTIONS, index=1, key="rsi_tf")
-        st.caption("Crossover-Signale = Trendumkehr-Hinweise")
+        with tc3:
+            st.markdown("**〽️ Stillhalter Dual Stochastik**")
+            stoch_filter = st.selectbox("Stochastik Signal", [
+                "Alle",
+                "Kreuzt 20 aufwärts ↑",
+                "Kreuzt 80 abwärts ↓",
+                "< 20 (überverkauft)",
+                "> 80 (überkauft)",
+                "%K > %D (bullish)",
+                "%K < %D (bearish)",
+            ], key="stoch_f")
+            stoch_tf = st.selectbox("Stoch. Timeframe", TF_OPTIONS, index=1, key="stoch_tf")
+            st.caption("%K kreuzt 20 aufwärts = klassisches Kaufsignal")
 
-    with tc3:
-        st.markdown("**〽️ Stillhalter Dual Stochastik**")
-        stoch_filter = st.selectbox("Stochastik Signal", [
-            "Alle",
-            "Kreuzt 20 aufwärts ↑",
-            "Kreuzt 80 abwärts ↓",
-            "< 20 (überverkauft)",
-            "> 80 (überkauft)",
-            "%K > %D (bullish)",
-            "%K < %D (bearish)",
-        ], key="stoch_f")
-        stoch_tf = st.selectbox("Stoch. Timeframe", TF_OPTIONS, index=1, key="stoch_tf")
-        st.caption("%K kreuzt 20 aufwärts = klassisches Kaufsignal")
+        with tc4:
+            st.markdown("**🌊 Stillhalter MACD Pro**")
+            macd_filter = st.selectbox("MACD Signal", [
+                "Alle",
+                "Bullish Cross (neg → pos)",
+                "Bearish Cross (pos → neg)",
+                "MACD > Signal (bullish)",
+                "MACD < Signal (bearish)",
+                "MACD Linie > 0",
+            ], key="macd_f")
+            macd_tf = st.selectbox("MACD Timeframe", TF_OPTIONS, index=1, key="macd_tf")
+            st.caption("Cross neg→pos = starkes Bullish-Signal")
 
-    with tc4:
-        st.markdown("**🌊 Stillhalter MACD Pro**")
-        macd_filter = st.selectbox("MACD Signal", [
-            "Alle",
-            "Bullish Cross (neg → pos)",
-            "Bearish Cross (pos → neg)",
-            "MACD > Signal (bullish)",
-            "MACD < Signal (bearish)",
-            "MACD Linie > 0",
-        ], key="macd_f")
-        macd_tf = st.selectbox("MACD Timeframe", TF_OPTIONS, index=1, key="macd_tf")
-        st.caption("Cross neg→pos = starkes Bullish-Signal")
+        st.markdown("---")
+        al1, al2, al3 = st.columns([1, 2, 5])
+        with al1:
+            require_align = st.checkbox("Multi-TF Alignment", value=False,
+                                         help="Alle/mind. 2 Timeframes müssen dieselbe Richtung zeigen")
+        with al2:
+            align_dir = st.selectbox("Alignment Richtung",
+                                      ["bullish", "bearish"], disabled=not require_align)
+        with al3:
+            if require_align:
+                st.info(
+                    f"✅ Nur Aktien anzeigen, bei denen mind. **2 von 3 Timeframes (4H · 1D · 1W)** "
+                    f"**{align_dir}** sind (RSI + Stoch + MACD + EMA alle berücksichtigt)"
+                )
 
-    st.markdown("---")
-    al1, al2, al3 = st.columns([1, 2, 5])
-    with al1:
-        require_align = st.checkbox("Multi-TF Alignment", value=False,
-                                     help="Alle/mind. 2 Timeframes müssen dieselbe Richtung zeigen")
-    with al2:
-        align_dir = st.selectbox("Alignment Richtung",
-                                  ["bullish", "bearish"], disabled=not require_align)
-    with al3:
-        if require_align:
-            st.info(
-                f"✅ Nur Aktien anzeigen, bei denen mind. **2 von 3 Timeframes (4H · 1D · 1W)** "
-                f"**{align_dir}** sind (RSI + Stoch + MACD + EMA alle berücksichtigt)"
-            )
+        tech_params = TechFilterParams(
+            ema_filter=ema_filter, ema_timeframe=ema_tf,
+            rsi_filter=rsi_filter, rsi_timeframe=rsi_tf,
+            stoch_filter=stoch_filter, stoch_timeframe=stoch_tf,
+            macd_filter=macd_filter, macd_timeframe=macd_tf,
+            require_alignment=require_align,
+            alignment_direction=align_dir,
+            filter_mode=_fmode,
+            min_convergence_score=float(min_conv_score),
+        )
 
-    tech_params = TechFilterParams(
-        ema_filter=ema_filter, ema_timeframe=ema_tf,
-        rsi_filter=rsi_filter, rsi_timeframe=rsi_tf,
-        stoch_filter=stoch_filter, stoch_timeframe=stoch_tf,
-        macd_filter=macd_filter, macd_timeframe=macd_tf,
-        require_alignment=require_align,
-        alignment_direction=align_dir,
-        filter_mode=_fmode,
-        min_convergence_score=float(min_conv_score),
+        use_tech_filter = any([
+            ema_filter != "Alle", rsi_filter != "Alle",
+            stoch_filter != "Alle", macd_filter != "Alle",
+            require_align, min_conv_score > 0,
+        ])
+
+    # ── Ticker Liste ──────────────────────────────────────────────────────────────
+else:
+    # Quick & Easy: keine technische Vorab-Filterung — die Richtung
+    # kommt aus dem Stillhalter Confluence (nach dem Scan).
+    use_tech_filter = False
+    tech_params = {}
+
+scan_tickers = scan_tickers_universe   # aus Universe-Selector oben
+
+# ══════════════════ 🚀 QUICK & EASY — einfache Regler ══════════════════
+# Überschreibt die Professional-Werte mit anfängertauglichen Vorgaben.
+# Die Suche basiert hier auf dem Stillhalter Confluence (Filter nach dem Scan).
+if not IS_PRO:
+    st.markdown("### 🚀 Quick & Easy")
+    _q1, _q2, _q3 = st.columns([2, 3, 3])
+    with _q1:
+        scan_strategy = st.selectbox(
+            "Strategie", ["Cash Covered Put", "Covered Call", "Short Strangle"],
+            key="qe_strategy")
+    with _q2:
+        _qe_lauf = st.radio("Laufzeit", ["⚡ Kurz (7–21 T)", "📅 Mittel (21–45 T)",
+                                          "📆 Lang (45–90 T)"],
+                            index=1, horizontal=True, key="qe_laufzeit")
+    with _q3:
+        _qe_sich = st.radio("Sicherheitsabstand",
+                            ["🟢 Konservativ", "🟡 Ausgewogen", "🔴 Mutig"],
+                            index=0, horizontal=True, key="qe_sicherheit",
+                            help="Konservativ = weiter vom Kurs entfernte Strikes "
+                                 "(kleinere Prämie, höhere Verfallswahrscheinlichkeit).")
+    dte_min, dte_max = {"⚡": (7, 21), "📅": (21, 45), "📆": (45, 90)}[_qe_lauf[0]]
+    d_min, d_max, otm_min = {
+        "🟢": (-0.20, -0.05, 8.0),
+        "🟡": (-0.30, -0.05, 5.0),
+        "🔴": (-0.35, -0.15, 3.0),
+    }[_qe_sich[0]]
+    otm_max = 40.0
+    exclude_earnings = True
+    sort_by = "🛡️ Stillhalter-Score"
+    use_last_price = use_last_price if market_open else True
+    st.caption(
+        f"Vorgaben: Laufzeit **{dte_min}–{dte_max} Tage** · Abstand ≥ **{otm_min:g} %** · "
+        f"Earnings ausgeschlossen · Ranking: **🛡️ Stillhalter-Score** · "
+        f"Anzeige nur bei **🚦 Confluence ≥ 2 von 3** auf der zur Laufzeit passenden Zeitebene."
     )
 
-    use_tech_filter = any([
-        ema_filter != "Alle", rsi_filter != "Alle",
-        stoch_filter != "Alle", macd_filter != "Alle",
-        require_align, min_conv_score > 0,
-    ])
-
-# ── Ticker Liste ──────────────────────────────────────────────────────────────
-scan_tickers = scan_tickers_universe   # aus Universe-Selector oben
 try:
     from data.fetcher import USE_MASSIVE as _USE_MASSIVE
 except Exception:
@@ -1375,6 +1433,42 @@ else:
         results["🎯 Setup"]    = [x[1] for x in _applied]
         st.session_state.scan_results = results
 
+    # ── 🚦 Stillhalter Confluence je (Ticker, Zeitebene) ──────────────────────
+    # Suchbasis beider Modi: identische Logik wie der TradingView-Indikator
+    # (Trend Model + MACD Pro + Dual Stochastik, Konfluenz-Fenster 3).
+    if "🚦 Confluence" not in results.columns and "Ticker" in results.columns:
+        from analysis.confluence import confluence_for as _conf_for
+
+        def _tf_bucket_cf(dte) -> str:
+            try:
+                d = int(dte)
+            except Exception:
+                d = 30
+            return "4h" if d <= 14 else ("1D" if d <= 42 else "1W")
+
+        _cf_cache: dict = {}
+        _cf_call = "Call" in meta.get("strategy", scan_strategy)
+        _cph = st.empty()
+        _cph.caption("🚦 Berechne Stillhalter Confluence…")
+
+        def _row_conf(row):
+            key = (row.get("Ticker", ""), _tf_bucket_cf(row.get("DTE", 30)))
+            if key not in _cf_cache:
+                _cf_cache[key] = _conf_for(key[0], key[1])
+            c = _cf_cache[key]
+            if not c:
+                return (None, "–")
+            sc = c["sell_score"] if _cf_call else c["buy_score"]
+            _arrow = "▼" if _cf_call else "▲"
+            disp = f"{_arrow * min(sc, 3)}{'⚪' * (3 - min(sc, 3))} {sc}/3 · {key[1]}"
+            return (sc, disp)
+
+        _cfa = results.apply(_row_conf, axis=1)
+        results["_conf_score"] = [x[0] for x in _cfa]
+        results["🚦 Confluence"] = [x[1] for x in _cfa]
+        _cph.empty()
+        st.session_state.scan_results = results
+
     # ── 🛡️ Stillhalter-Score (0–100): DIE Kombination der 3 Indikatoren + CRV ──
     # 60% Richtung: Trend BT · MACD Pro · Dual Stochastik, strategieabhängig so
     # gedreht, dass hohe Werte = 'Kurs entfernt sich wahrscheinlich vom Strike'
@@ -1550,6 +1644,17 @@ else:
         if display_df.empty and _n_before > 0:
             st.warning(f"🎯 Kein Treffer erfüllt das Stillhalter-Setup ({setup_f}). "
                        f"Filter lockern oder 'Aus' wählen — {_n_before} Treffer ohne Setup-Filter.")
+    if not IS_PRO and "_conf_score" in display_df.columns:
+        _cf_before = len(display_df)
+        display_df = display_df[display_df["_conf_score"].fillna(-1) >= 2]
+        if _cf_before and display_df.empty:
+            st.warning("🚦 **Kein Treffer mit Confluence ≥ 2 von 3** auf der passenden "
+                       "Zeitebene — heute bietet sich nach der Stillhalter-Logik kein "
+                       "Einstieg an. Andere Laufzeit probieren oder im Professional-Modus "
+                       "ohne Confluence-Pflicht suchen.")
+        elif _cf_before > len(display_df):
+            st.caption(f"🚦 Confluence-Filter aktiv: {len(display_df)} von {_cf_before} "
+                       f"Treffern haben ≥ 2 von 3 auf der laufzeitgerechten Zeitebene.")
 
     # 🧠 Beste Zeitebene je Aktie: nur Optionen aus dem Laufzeitband behalten,
     # dessen Zeitebene das stärkste Setup hat — sonst dominieren viele
@@ -1632,12 +1737,12 @@ else:
     )
     if view_mode.startswith("🛡️"):
         if is_strangle and "Strike PUT" in display_df.columns:
-            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "⭐ CRV",
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "🚦 Confluence", "⭐ CRV",
                         "Ticker", "Kurs", "Strike PUT", "Strike CALL", "Range %",
                         "S/R Schutz", "Verfall", "DTE", "Prämie gesamt",
                         "Rendite % Laufzeit", "Rendite ann. %", "IV %"]
         else:
-            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "⭐ CRV",
+            _compact = ["OptionStrat", "Top", "🛡️ Score", "🎯 Setup", "🚦 Confluence", "⭐ CRV",
                         "Ticker", "Kurs", "Strike", "OTM %", "S/R Schutz",
                         "Verfall", "DTE", "Prämie",
                         "Rendite % Laufzeit", "Rendite ann. %", "Delta", "IV %"]
@@ -1683,6 +1788,10 @@ else:
         "IV %":          st.column_config.NumberColumn("IV %", format="%.1f%%"),
         "TF-Align":      st.column_config.ProgressColumn("TF Score", min_value=0, max_value=100, format="%.0f"),
         "⭐ CRV":        st.column_config.TextColumn("⭐ CRV", width="medium"),
+        "🚦 Confluence": st.column_config.TextColumn("🚦 Confluence", width="small",
+            help="Stillhalter Confluence (wie der TradingView-Indikator): Trend Model + "
+                 "MACD Pro + Dual Stochastik auf der zur Laufzeit passenden Zeitebene. "
+                 "▲/▼ = erfüllte Komponenten in Trade-Richtung."),
         "🎯 Setup":      st.column_config.TextColumn("🎯 Setup", width="small",
             help="Stillhalter-Setup: Trend BT · MACD Pro · Dual Stochastik (strategieabhängig)"),
         "Kursquelle":   st.column_config.TextColumn("Kurs", width="small",
