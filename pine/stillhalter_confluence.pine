@@ -1,0 +1,202 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © Stillhalter Community
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stillhalter Community® – CONFLUENCE v1.0
+//  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
+//              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
+//  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
+//
+//  SIGNAL-LOGIK (Kurzfassung):
+//   BUY  (Aktie kaufen / Put verkaufen)  — Dreieck UNTER der Kerze:
+//     • Trend:  EMA-Band dreht von gelb auf grün (Fast-EMA kreuzt über Slow-EMA)
+//     • MACD:   Histogramm kreuzt von negativ (rot) auf positiv (grün)
+//     • Stoch:  schnelle Stochastik bricht von unten durch 20,
+//               während die langsame Stochastik überverkauft ist
+//   SELL (Aktie verkaufen / Call verkaufen) — Dreieck ÜBER der Kerze: spiegelbildlich
+//     (Trend grün→gelb · Histogramm +→− · schnelle Stoch bricht durch 80 runter,
+//      langsame überkauft)
+//
+//   Da die Komponenten selten auf DERSELBEN Kerze feuern, gilt ein
+//   KONFLUENZ-FENSTER (Standard 5 Kerzen): ein Ereignis zählt, solange es
+//   frisch ist UND sein Zustand noch gilt (Trend noch grün, Hist noch >0 …).
+//   Das Dreieck erscheint an der Kerze, an der ein NEUES Kern-Ereignis feuert.
+//
+//   FARBE = Güte der Konfluenz (Anzahl erfüllter Komponenten):
+//     alle aktiven Komponenten  → DUNKEL   (extrem gute Konfluenz)
+//     alle bis auf eine         → MITTEL
+//     weniger                   → HELL     (leichte Konfluenz)
+//   Bei den 3 Kernkomponenten also: 3/3 dunkel · 2/3 mittel · 1/3 hell.
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("Stillhalter Confluence v1.0", shorttitle = "Stillhalter Confluence",
+     overlay = true, max_labels_count = 500)
+
+// ══════════════════════════ INPUTS ══════════════════════════
+grpT = "Trend Model"
+trendMode = input.string("Very Tight", "Trend Mode",
+     options = ["Very Tight", "Tight", "Loose", "Very Loose"], group = grpT)
+
+grpC = "Confluence"
+confWin  = input.int(5, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
+     tooltip = "Wie lange ein Komponenten-Signal als 'frisch' zählt.")
+minScore = input.int(1, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5, group = grpC,
+     tooltip = "1 = auch leichte Konfluenz anzeigen (hell). Höher = weniger Signale.")
+osLevel  = input.int(20, "Stochastik überverkauft", minval = 5,  maxval = 40, group = grpC)
+obLevel  = input.int(80, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC)
+
+grpX = "Zusatz-Komponenten (optional)"
+useRSI    = input.bool(false, "RSI (14) einbeziehen — Buy: kreuzt 30 hoch · Sell: kreuzt 70 runter", group = grpX)
+useMR     = input.bool(false, "Mean Reversion einbeziehen — Buy: Z-Score < −1σ · Sell: > +1σ", group = grpX)
+mrLen     = input.int(30, "Mean-Reversion Länge (SMA/SD)", minval = 5, maxval = 100, group = grpX)
+adxFilter = input.bool(false, "ADX-Filter: Signale nur bei ADX(14) > 20", group = grpX)
+
+grpS = "Anzeige"
+showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS)
+colBuy3  = input.color(color.new(#1B5E20, 0), "Buy dunkel (volle Konfluenz)",  group = grpS)
+colBuy2  = input.color(color.new(#4CAF50, 0), "Buy mittel",                     group = grpS)
+colBuy1  = input.color(color.new(#A5D6A7, 0), "Buy hell",                       group = grpS)
+colSell3 = input.color(color.new(#B71C1C, 0), "Sell dunkel (volle Konfluenz)", group = grpS)
+colSell2 = input.color(color.new(#EF5350, 0), "Sell mittel",                    group = grpS)
+colSell1 = input.color(color.new(#FFCDD2, 0), "Sell hell",                      group = grpS)
+
+// ══════════════════════════ 1) TREND MODEL ══════════════════════════
+fastLen = trendMode == "Very Tight" ? 2 : trendMode == "Tight" ? 4 : trendMode == "Loose" ? 6 : 13
+slowLen = trendMode == "Very Tight" ? 9 : trendMode == "Tight" ? 16 : trendMode == "Loose" ? 28 : 35
+
+trendFast = ta.ema(close, fastLen)
+trendSlow = ta.ema(close, slowLen)
+bullTrend = trendFast > trendSlow
+bearTrend = trendFast < trendSlow
+
+trendBuyEvt  = bullTrend and not bullTrend[1]     // gelb → grün
+trendSellEvt = bearTrend and not bearTrend[1]     // grün → gelb
+
+// ══════════════════════════ 2) MACD PRO (10/35/5) ══════════════════════════
+macdLine = ta.ema(close, 10) - ta.ema(close, 35)
+sigLine  = ta.ema(macdLine, 5)
+hist     = macdLine - sigLine
+
+macdBuyEvt  = ta.crossover(hist, 0)               // rot → grün
+macdSellEvt = ta.crossunder(hist, 0)              // grün → rot
+
+// ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
+k1 = ta.sma(ta.stoch(close, high, low, 14), 3)    // schnell: 14,3,3 (%K)
+k2 = ta.sma(ta.stoch(close, high, low, 35), 10)   // langsam: 35,10,5 (%K)
+
+stochBuyEvt  = ta.crossover(k1, osLevel)  and k2 < osLevel   // schnell bricht 20 hoch, langsam überverkauft
+stochSellEvt = ta.crossunder(k1, obLevel) and k2 > obLevel   // schnell bricht 80 runter, langsam überkauft
+
+// ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
+rsi = ta.rsi(close, 14)
+rsiBuyEvt  = ta.crossover(rsi, 30)
+rsiSellEvt = ta.crossunder(rsi, 70)
+
+// ══════════════════════════ 5) OPTIONAL: MEAN REVERSION ══════════════════════════
+mrMa = ta.sma(close, mrLen)
+mrSd = ta.stdev(close, mrLen)
+zRaw = mrSd != 0 ? (close - mrMa) / mrSd : 0.0
+zS   = ta.ema(zRaw, 3)
+
+// ══════════════════════════ ADX (14) — optionaler Filter ══════════════════════════
+tr_     = math.max(math.max(high - low, math.abs(high - close[1])), math.abs(low - close[1]))
+plusDM  = high - high[1] > low[1] - low ? math.max(high - high[1], 0) : 0
+minusDM = low[1] - low  > high - high[1] ? math.max(low[1] - low, 0) : 0
+sTR     = ta.rma(tr_, 14)
+diPlus  = 100 * ta.rma(plusDM, 14)  / sTR
+diMinus = 100 * ta.rma(minusDM, 14) / sTR
+dx      = (diPlus + diMinus) != 0 ? 100 * math.abs(diPlus - diMinus) / (diPlus + diMinus) : 0
+adx     = ta.rma(dx, 14)
+adxOK   = not adxFilter or adx > 20
+
+// ══════════════════════════ KONFLUENZ-BEWERTUNG ══════════════════════════
+// Komponente = erfüllt, wenn ihr Ereignis frisch ist (≤ Fenster) UND der
+// Zustand noch gilt. So dürfen die drei Signale bis zu 'confWin' Kerzen
+// auseinander liegen — echte Konfluenz statt unrealistischer Gleichzeitigkeit.
+sinceTrendBuy  = nz(ta.barssince(trendBuyEvt),  99999)
+sinceMacdBuy   = nz(ta.barssince(macdBuyEvt),   99999)
+sinceStochBuy  = nz(ta.barssince(stochBuyEvt),  99999)
+sinceRsiBuy    = nz(ta.barssince(rsiBuyEvt),    99999)
+sinceTrendSell = nz(ta.barssince(trendSellEvt), 99999)
+sinceMacdSell  = nz(ta.barssince(macdSellEvt),  99999)
+sinceStochSell = nz(ta.barssince(stochSellEvt), 99999)
+sinceRsiSell   = nz(ta.barssince(rsiSellEvt),   99999)
+
+trendBuyOK = bullTrend and sinceTrendBuy < confWin
+macdBuyOK  = hist > 0  and sinceMacdBuy  < confWin
+stochBuyOK = sinceStochBuy < confWin
+rsiBuyOK   = useRSI and sinceRsiBuy < confWin
+mrBuyOK    = useMR and zS < -1.0
+
+trendSellOK = bearTrend and sinceTrendSell < confWin
+macdSellOK  = hist < 0  and sinceMacdSell  < confWin
+stochSellOK = sinceStochSell < confWin
+rsiSellOK   = useRSI and sinceRsiSell < confWin
+mrSellOK    = useMR and zS > 1.0
+
+nComp = 3 + (useRSI ? 1 : 0) + (useMR ? 1 : 0)
+
+buyScore  = (trendBuyOK ? 1 : 0) + (macdBuyOK ? 1 : 0) + (stochBuyOK ? 1 : 0)
+          + (rsiBuyOK ? 1 : 0)  + (mrBuyOK ? 1 : 0)
+sellScore = (trendSellOK ? 1 : 0) + (macdSellOK ? 1 : 0) + (stochSellOK ? 1 : 0)
+          + (rsiSellOK ? 1 : 0)  + (mrSellOK ? 1 : 0)
+
+// Dreieck an der Kerze, an der ein NEUES Kern-Ereignis feuert (kein Dauer-Spam)
+buyEvtNow  = trendBuyEvt  or macdBuyEvt  or stochBuyEvt  or (useRSI and rsiBuyEvt)
+sellEvtNow = trendSellEvt or macdSellEvt or stochSellEvt or (useRSI and rsiSellEvt)
+
+buyTrigger  = buyEvtNow  and buyScore  >= minScore and adxOK
+sellTrigger = sellEvtNow and sellScore >= minScore and adxOK
+
+// Farbstufe: volle Konfluenz = dunkel · n−1 = mittel · sonst hell
+buyCol  = buyScore  >= nComp ? colBuy3  : buyScore  >= nComp - 1 ? colBuy2  : colBuy1
+sellCol = sellScore >= nComp ? colSell3 : sellScore >= nComp - 1 ? colSell2 : colSell1
+
+// ══════════════════════════ PLOTS ══════════════════════════
+plotshape(buyTrigger,  title = "Confluence BUY",  style = shape.triangleup,
+     location = location.belowbar, color = buyCol,  size = size.tiny)
+plotshape(sellTrigger, title = "Confluence SELL", style = shape.triangledown,
+     location = location.abovebar, color = sellCol, size = size.tiny)
+
+// dezentes Trend-Band als Orientierung (wie Trend Model, transparenter)
+pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100))
+pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100))
+fill(pF, pS, color = bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85),
+     title = "Trend Band")
+
+// ══════════════════════════ STATUS-TABELLE ══════════════════════════
+var table t = table.new(position.bottom_right, 2, 7, border_width = 1)
+f_mark(bool ok) => ok ? "✓" : "·"
+f_col(bool ok, color c) => ok ? c : color.new(color.gray, 40)
+
+if barstate.islast and showTable
+    table.cell(t, 0, 0, "Confluence",  text_color = color.white, bgcolor = color.new(color.black, 20))
+    table.cell(t, 1, 0, str.tostring(buyScore) + "▲ / " + str.tostring(sellScore) + "▼ von " + str.tostring(nComp),
+         text_color = color.white, bgcolor = color.new(color.black, 20))
+    table.cell(t, 0, 1, "Trend",  text_color = color.white)
+    table.cell(t, 1, 1, f_mark(trendBuyOK) + " / " + f_mark(trendSellOK),
+         text_color = f_col(trendBuyOK or trendSellOK, trendBuyOK ? colBuy2 : colSell2))
+    table.cell(t, 0, 2, "MACD Pro", text_color = color.white)
+    table.cell(t, 1, 2, f_mark(macdBuyOK) + " / " + f_mark(macdSellOK),
+         text_color = f_col(macdBuyOK or macdSellOK, macdBuyOK ? colBuy2 : colSell2))
+    table.cell(t, 0, 3, "Dual Stoch", text_color = color.white)
+    table.cell(t, 1, 3, f_mark(stochBuyOK) + " / " + f_mark(stochSellOK),
+         text_color = f_col(stochBuyOK or stochSellOK, stochBuyOK ? colBuy2 : colSell2))
+    if useRSI
+        table.cell(t, 0, 4, "RSI", text_color = color.white)
+        table.cell(t, 1, 4, f_mark(rsiBuyOK) + " / " + f_mark(rsiSellOK),
+             text_color = f_col(rsiBuyOK or rsiSellOK, rsiBuyOK ? colBuy2 : colSell2))
+    if useMR
+        table.cell(t, 0, 5, "Mean Rev.", text_color = color.white)
+        table.cell(t, 1, 5, f_mark(mrBuyOK) + " / " + f_mark(mrSellOK),
+             text_color = f_col(mrBuyOK or mrSellOK, mrBuyOK ? colBuy2 : colSell2))
+    if adxFilter
+        table.cell(t, 0, 6, "ADX>20", text_color = color.white)
+        table.cell(t, 1, 6, adx > 20 ? "✓" : "·", text_color = color.white)
+
+// ══════════════════════════ ALERTS ══════════════════════════
+alertcondition(buyTrigger,  "Confluence BUY (alle Stufen)",  "Stillhalter Confluence: BUY-Signal")
+alertcondition(sellTrigger, "Confluence SELL (alle Stufen)", "Stillhalter Confluence: SELL-Signal")
+alertcondition(buyTrigger  and buyScore  >= nComp, "Confluence BUY — VOLLE Konfluenz",
+     "Stillhalter Confluence: BUY mit VOLLER Konfluenz!")
+alertcondition(sellTrigger and sellScore >= nComp, "Confluence SELL — VOLLE Konfluenz",
+     "Stillhalter Confluence: SELL mit VOLLER Konfluenz!")
