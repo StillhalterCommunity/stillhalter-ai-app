@@ -55,8 +55,9 @@ labelTxt  = input.string("UP/DOWN", "Dreieck-Beschriftung",
      options = ["UP/DOWN", "BULL/BEAR", "PUT/CALL", "BUY/SELL"], group = grpS)
 colUp     = input.color(#00C853, "UP-Farbe (knallgrün)",  group = grpS)
 colDown   = input.color(#FF1744, "DOWN-Farbe (knallrot)", group = grpS)
-weakTransp = input.int(60, "Transparenz schwächere Stufe (%)", minval = 20, maxval = 85, group = grpS,
-     tooltip = "Volle Konfluenz = kräftig · alles darunter = diese Transparenz.")
+weakTransp = input.int(40, "Transparenz schwächere Stufe (%)", minval = 10, maxval = 85, group = grpS,
+     tooltip = "VOLLE Konfluenz = großes, kräftiges Dreieck · schwächere (z. B. 2 von 3) "
+          + "= kleineres Dreieck mit dieser Transparenz.")
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS)
 
 grpSR = "S/R-Pivots (Basis der Options-Zonen)"
@@ -181,19 +182,33 @@ sellEvtNow = trendSellEvt or macdSellEvt or stochSellEvt or (useRSI and rsiSellE
 buyTrigger  = buyEvtNow  and buyScore  >= minScore and adxOK
 sellTrigger = sellEvtNow and sellScore >= minScore and adxOK
 
-// 2 Stufen: volle Konfluenz kräftig · sonst transparenter
-buyCol  = buyScore  >= nComp ? color.new(colUp,   0) : color.new(colUp,   weakTransp)
-sellCol = sellScore >= nComp ? color.new(colDown, 0) : color.new(colDown, weakTransp)
+// 2 sichtbar unterscheidbare Stufen:
+// VOLLE Konfluenz (z. B. 3/3) = GROSSES, kräftiges Dreieck
+// schwächere   (z. B. 2/3)   = kleines Dreieck, leicht transparent
+buyFull  = buyTrigger  and buyScore  >= nComp
+buyWeak  = buyTrigger  and buyScore  <  nComp
+sellFull = sellTrigger and sellScore >= nComp
+sellWeak = sellTrigger and sellScore <  nComp
+colUpW   = color.new(colUp,   weakTransp)
+colDownW = color.new(colDown, weakTransp)
 
 // ══════════════════════════ DREIECKE ══════════════════════════
-plotshape(buyTrigger and labelTxt == "UP/DOWN",   "UP",   shape.triangleup,   location.belowbar, buyCol,  text = "UP",   textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyTrigger and labelTxt == "BULL/BEAR", "BULL", shape.triangleup,   location.belowbar, buyCol,  text = "BULL", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyTrigger and labelTxt == "PUT/CALL",  "PUT",  shape.triangleup,   location.belowbar, buyCol,  text = "PUT",  textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyTrigger and labelTxt == "BUY/SELL",  "BUY",  shape.triangleup,   location.belowbar, buyCol,  text = "BUY",  textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellTrigger and labelTxt == "UP/DOWN",   "DOWN", shape.triangledown, location.abovebar, sellCol, text = "DOWN", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellTrigger and labelTxt == "BULL/BEAR", "BEAR", shape.triangledown, location.abovebar, sellCol, text = "BEAR", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellTrigger and labelTxt == "PUT/CALL",  "CALL", shape.triangledown, location.abovebar, sellCol, text = "CALL", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellTrigger and labelTxt == "BUY/SELL",  "SELL", shape.triangledown, location.abovebar, sellCol, text = "SELL", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(buyFull and labelTxt == "UP/DOWN",   "UP (voll)",   shape.triangleup, location.belowbar, colUp, text = "UP",   textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(buyWeak and labelTxt == "UP/DOWN",   "UP",          shape.triangleup, location.belowbar, colUpW, text = "UP",   textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(buyFull and labelTxt == "BULL/BEAR", "BULL (voll)", shape.triangleup, location.belowbar, colUp, text = "BULL", textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(buyWeak and labelTxt == "BULL/BEAR", "BULL",        shape.triangleup, location.belowbar, colUpW, text = "BULL", textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(buyFull and labelTxt == "PUT/CALL",  "PUT (voll)",  shape.triangleup, location.belowbar, colUp, text = "PUT",  textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(buyWeak and labelTxt == "PUT/CALL",  "PUT",         shape.triangleup, location.belowbar, colUpW, text = "PUT",  textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(buyFull and labelTxt == "BUY/SELL",  "BUY (voll)",  shape.triangleup, location.belowbar, colUp, text = "BUY",  textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(buyWeak and labelTxt == "BUY/SELL",  "BUY",         shape.triangleup, location.belowbar, colUpW, text = "BUY",  textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(sellFull and labelTxt == "UP/DOWN",   "DOWN (voll)", shape.triangledown, location.abovebar, colDown, text = "DOWN", textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(sellWeak and labelTxt == "UP/DOWN",   "DOWN",        shape.triangledown, location.abovebar, colDownW, text = "DOWN", textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(sellFull and labelTxt == "BULL/BEAR", "BEAR (voll)", shape.triangledown, location.abovebar, colDown, text = "BEAR", textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(sellWeak and labelTxt == "BULL/BEAR", "BEAR",        shape.triangledown, location.abovebar, colDownW, text = "BEAR", textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(sellFull and labelTxt == "PUT/CALL",  "CALL (voll)", shape.triangledown, location.abovebar, colDown, text = "CALL", textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(sellFull and labelTxt == "BUY/SELL",  "SELL (voll)", shape.triangledown, location.abovebar, colDown, text = "SELL", textcolor = color.white, size = size.normal, display = display.pane)
+plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.small,  display = display.pane)
 
 // dezentes Trend-Band (Statuszeile bleibt sauber: display.pane)
 pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100), display = display.pane, editable = false)

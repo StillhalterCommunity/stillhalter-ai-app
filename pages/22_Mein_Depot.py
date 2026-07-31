@@ -62,32 +62,28 @@ with st.expander("🔐 IBKR Flex Query — Zugangsdaten",
         "Einmal eintragen — wird **nur für dein Konto** gespeichert (persistent, "
         "kein erneutes Anmelden nötig). Anleitung zum Erstellen der Flex Queries: "
         "Seite 12 · IBKR Integration. Empfohlene Sektionen der Haupt-Query: "
-        "**Open Positions**, **Net Asset Value (NAV) in Base**, **Cash Report**, **Trades**. "
-        "Die Query-IDs 2 und 3 sind optional — beim Abruf werden alle eingetragenen "
-        "Queries geholt und zusammengeführt."
+        "**Open Positions**, **Net Asset Value (NAV) in Base**, **Cash Report**, "
+        "**Trades**. Beim Abruf werden beide Queries geholt und zusammengeführt."
     )
-    _tok_in = st.text_input("Flex Web Service Token (Aktiver Prüfcode)",
+    _tok_in = st.text_input("Aktiver Prüfcode (Flex-Query-Token)",
                             value=_cred.get("token", ""), type="password", key="md_tok")
-    fq1, fq2, fq3 = st.columns(3)
+    fq1, fq2 = st.columns(2)
     with fq1:
-        _qid_in = st.text_input("Query-ID 1 · Positionen & NAV *",
+        _qid_in = st.text_input("Flex-Query ID für Kontoumsätze / Trades *",
                                 value=_cred.get("query_id", ""), key="md_qid",
-                                help="Haupt-Query (Pflicht): Open Positions, NAV in Base, "
-                                     "Cash Report — Grundlage für Kennzahlen und Charts.")
+                                help="Pflicht — Haupt-Query mit Open Positions, NAV in "
+                                     "Base, Cash Report und Trades: Grundlage für alle "
+                                     "Kennzahlen, Charts und den Options-Cashflow.")
     with fq2:
-        _qid2_in = st.text_input("Query-ID 2 · Kontoumsätze / Trades",
-                                 value=_cred.get("query_id2", ""), key="md_qid2",
-                                 help="Optional: Query mit der Sektion 'Trades' — "
-                                      "liefert den Options-Cashflow.")
-    with fq3:
-        _qid3_in = st.text_input("Query-ID 3 · Handelsbestätigungen",
-                                 value=_cred.get("query_id3", ""), key="md_qid3",
+        _qid2_in = st.text_input("Flex-Query ID für Handelsbestätigungen",
+                                 value=_cred.get("query_id2", "") or _cred.get("query_id3", ""),
+                                 key="md_qid2",
                                  help="Optional: Query mit 'Trade Confirmations' — "
                                       "ergänzt tagesaktuelle Ausführungen.")
     if st.button("💾 Speichern", key="md_save"):
         _us.set_value(_user, "flex_credentials",
                       {"token": _tok_in.strip(), "query_id": _qid_in.strip(),
-                       "query_id2": _qid2_in.strip(), "query_id3": _qid3_in.strip()})
+                       "query_id2": _qid2_in.strip()})
         st.success("Gespeichert — gilt nur für dein Konto.")
         st.rerun()
 
@@ -130,8 +126,10 @@ def _parse_bundle(xmls: list) -> tuple:
     return summ, allpos, opttr
 
 if _do_fetch:
+    # query_id3 nur noch als Alt-Bestand (frühere 3-Feld-Version) berücksichtigt
     _qids = [q for q in [_cred.get("query_id"), _cred.get("query_id2"),
                          _cred.get("query_id3")] if q]
+    _qids = list(dict.fromkeys(_qids))
     xmls, _fails = [], []
     with st.spinner(f"Hole Depot von IBKR… ({len(_qids)} "
                     f"Quer{'ies' if len(_qids) > 1 else 'y'}, je bis zu 45 Sek.)"):
