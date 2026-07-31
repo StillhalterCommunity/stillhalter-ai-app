@@ -7,7 +7,15 @@
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.2 — 🟢🔴 OPTIONS-ZONEN (anfängertauglich):
+//  NEU in v0.9.3:
+//   • Options-Zonen erstrecken sich jetzt über die GANZE betrachtete Periode
+//     (von der ersten Berührung des Levels bis heute) — man sieht sofort,
+//     wie oft die Zone gehalten hat.
+//   • Label zeigt nur noch Richtung + Sterne + OTM % (Abstand zum Kurs).
+//     Alle Details (exakter Strike, Zonenband, Berührungen, Seitenwechsel,
+//     Volumen-Bestätigung) erscheinen beim Drüber-Hovern.
+//   • ★-Signal-Sterne entfernt — die immer sichtbaren Zonen ersetzen sie.
+//  v0.9.2 — 🟢🔴 OPTIONS-ZONEN (anfängertauglich):
 //   • Max. 2 grüne Boxen UNTER dem Kurs (Short-Put-Zonen) und 2 rote Boxen
 //     ÜBER dem Kurs (Short-Call-Zonen) — immer sichtbar, aus den lokalen
 //     Hochs/Tiefs der letzten 12 Monate geclustert (Doppel-/Tripel-Tiefs
@@ -17,10 +25,10 @@
 //     +★ Volumen-Bestätigung (Zone trifft VAL bzw. VAH des Volumenprofils).
 //   • Regel in einem Satz: Put-Strike UNTER die grüne Box,
 //     Call-Strike ÜBER die rote Box.
-//  v0.9.1: knallige 2-Stufen-Dreiecke, ★-Signal-Sterne, Volumenprofil
-//     (Fixed Range, lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
+//  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
+//     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.2", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.3", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 20, max_bars_back = 500)
 
@@ -51,15 +59,10 @@ weakTransp = input.int(60, "Transparenz schwächere Stufe (%)", minval = 20, max
      tooltip = "Volle Konfluenz = kräftig · alles darunter = diese Transparenz.")
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS)
 
-grpSR = "★ Options-Level (markante S/R)"
-showStars = input.bool(true, "★ Sterne auf Unterstützung/Widerstand", group = grpSR)
-starMin   = input.int(2, "★ ab Konfluenz-Stufe", minval = 1, maxval = 5, group = grpSR)
+grpSR = "S/R-Pivots (Basis der Options-Zonen)"
 pivLb     = input.int(10, "Pivot-Länge", minval = 3, maxval = 30, group = grpSR)
 minTouch  = input.int(2, "Mindest-Bestätigungen des Levels", minval = 2, maxval = 5, group = grpSR,
      tooltip = "Level gilt nur als markant, wenn es von mehreren Pivots bestätigt wurde.")
-atrMult   = input.float(1.0, "Mindestabstand vom Kurs (× ATR14)", minval = 0.2, maxval = 3.0,
-     step = 0.1, group = grpSR,
-     tooltip = "Je volatiler die Aktie, desto weiter liegt das Level automatisch weg.")
 
 grpZ = "🟢🔴 Options-Zonen (Put/Call-Platzierung)"
 showZones  = input.bool(true, "Options-Zonen anzeigen", group = grpZ,
@@ -197,10 +200,9 @@ pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100), display 
 pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100), display = display.pane, editable = false)
 fill(pF, pS, color = bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85), title = "Trend Band")
 
-// ══════════════ ★ MARKANTE S/R (mehrfach bestätigt, ATR-Abstand) ══════════════
-// Pivots sammeln; ein Level ist markant, wenn ≥ minTouch Pivots innerhalb
-// einer halben ATR davon liegen. Unterstützung = höchstes markantes Level
-// mindestens atrMult×ATR UNTER dem Kurs (Widerstand spiegelbildlich).
+// ══════════════ MARKANTE S/R-PIVOTS (Basis der Options-Zonen) ══════════════
+// Pivots (mit Zeitstempel) sammeln; ein Level ist markant, wenn ≥ minTouch
+// Pivots innerhalb der Cluster-Toleranz davon liegen.
 var array<float> pivLows  = array.new_float()
 var array<int>   pivLowT  = array.new_int()
 var array<float> pivHighs = array.new_float()
@@ -219,52 +221,6 @@ if not na(ph_)
     if array.size(pivHighs) > 100
         array.shift(pivHighs)
         array.shift(pivHighT)
-
-f_confirmed(array<float> arr, float lvl, float tol) =>
-    int cnt = 0
-    if array.size(arr) > 0
-        for i = 0 to array.size(arr) - 1
-            if math.abs(array.get(arr, i) - lvl) <= tol
-                cnt += 1
-    cnt
-
-f_bestSupport(float px) =>
-    float best = na
-    float tol = atr14 * 0.5
-    if array.size(pivLows) > 0
-        for i = 0 to array.size(pivLows) - 1
-            lvl = array.get(pivLows, i)
-            if lvl <= px - atrMult * atr14 and f_confirmed(pivLows, lvl, tol) >= minTouch
-                if na(best) or lvl > best
-                    best := lvl
-    best
-
-f_bestResistance(float px) =>
-    float best = na
-    float tol = atr14 * 0.5
-    if array.size(pivHighs) > 0
-        for i = 0 to array.size(pivHighs) - 1
-            lvl = array.get(pivHighs, i)
-            if lvl >= px + atrMult * atr14 and f_confirmed(pivHighs, lvl, tol) >= minTouch
-                if na(best) or lvl < best
-                    best := lvl
-    best
-
-if showStars and buyTrigger and buyScore >= starMin
-    supStar = f_bestSupport(close)
-    if not na(supStar)
-        label.new(bar_index, supStar, "★", style = label.style_none,
-             textcolor = color.white, size = size.small,
-             tooltip = "Short-Put-Zone: Strike unter dieser mehrfach bestätigten "
-                  + "Unterstützung (" + str.tostring(supStar, format.mintick) + ")")
-
-if showStars and sellTrigger and sellScore >= starMin
-    resStar = f_bestResistance(close)
-    if not na(resStar)
-        label.new(bar_index, resStar, "★", style = label.style_none,
-             textcolor = color.white, size = size.small,
-             tooltip = "Short-Call-Zone: Strike über diesem mehrfach bestätigten "
-                  + "Widerstand (" + str.tostring(resStar, format.mintick) + ")")
 
 // ══════════════ VOLUMENPROFIL (lokales Tief → heute) · POC/VAH/VAL ══════════════
 lowestOff = -ta.lowestbars(low, vpLen)   // Kerzen seit dem lokalen Tief
@@ -393,6 +349,14 @@ f_bandSince(array<float> arr, array<int> tArr, float lvl, float tol, int tMin, b
 f_starsTxt(int n) =>
     n >= 4 ? "★★★★" : n == 3 ? "★★★" : n == 2 ? "★★" : "★"
 
+f_firstTouch(array<float> arr, array<int> tArr, float lvl, float tol, int tMin) =>
+    int first = time
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            if math.abs(array.get(arr, i) - lvl) <= tol and array.get(tArr, i) >= tMin
+                first := math.min(first, array.get(tArr, i))
+    first
+
 var array<box>   zBoxes  = array.new<box>()
 var array<label> zLabels = array.new<label>()
 
@@ -460,19 +424,30 @@ if barstate.islast and showZones
                 if vaHit
                     stars += 1
                 color zCol = isSup ? colUp : colDown
-                array.push(zBoxes, box.new(bar_index - 20, bHi, bar_index + 3, bLo,
+                // Zone über die GANZE betrachtete Periode: von der ersten
+                // Berührung des Levels bis heute (xloc.bar_time)
+                int firstT = math.min(f_firstTouch(pivLows, pivLowT, best, tolZ, tMinZ),
+                     f_firstTouch(pivHighs, pivHighT, best, tolZ, tMinZ))
+                array.push(zBoxes, box.new(firstT, bHi, time, bLo,
+                     xloc = xloc.bar_time,
                      border_color = color.new(zCol, 35), border_width = 1,
-                     bgcolor = color.new(zCol, z == 1 ? 78 : 88)))
+                     bgcolor = color.new(zCol, z == 1 ? 82 : 90)))
                 float strike = isSup ? bLo : bHi
+                float otmPct = isSup ? (close - strike) / close * 100 : (strike - close) / close * 100
+                // Label bewusst schlank: Richtung + Sterne + OTM % —
+                // exakte Preise & Begründung nur im Hover-Tooltip
                 string txt = isSup ? "🟢 PUT-Zone " : "🔴 CALL-Zone "
                 txt += f_starsTxt(stars)
-                txt += isSup ? " · Strike unter " : " · Strike über "
-                txt += str.tostring(strike, format.mintick)
-                string tip = str.tostring(touches) + "× berührt in " + str.tostring(zoneMonths) + " Monaten"
+                txt += " · " + str.tostring(otmPct, "#.#") + "% OTM"
+                string tip = isSup ? "Put-Strike unter " : "Call-Strike über "
+                tip += str.tostring(strike, format.mintick)
+                tip += " (" + str.tostring(otmPct, "#.#") + "% vom Kurs entfernt)"
+                tip += "\nZone " + str.tostring(bLo, format.mintick) + " – " + str.tostring(bHi, format.mintick)
+                tip += "\n" + str.tostring(touches) + "× berührt in " + str.tostring(zoneMonths) + " Monaten"
                 if roleRev
-                    tip += isSup ? " · Seitenwechsel: alter Widerstand = neue Unterstützung" : " · Seitenwechsel: alte Unterstützung = neuer Widerstand"
+                    tip += isSup ? "\nSeitenwechsel: alter Widerstand = neue Unterstützung" : "\nSeitenwechsel: alte Unterstützung = neuer Widerstand"
                 if vaHit
-                    tip += isSup ? " · Volumen-Bestätigung (VAL)" : " · Volumen-Bestätigung (VAH)"
+                    tip += isSup ? "\nVolumen-Bestätigung (VAL)" : "\nVolumen-Bestätigung (VAH)"
                 tip += "\n★ = 2 Berührungen · ★★ = 3+ Berührungen · +★ Seitenwechsel · +★ Volumen-Bestätigung"
                 array.push(zLabels, label.new(bar_index + 3, (bLo + bHi) / 2, txt,
                      style = label.style_label_left, color = color.new(zCol, 55),
