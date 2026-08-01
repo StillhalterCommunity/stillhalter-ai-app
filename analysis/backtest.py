@@ -214,6 +214,29 @@ def run_backtest(
     # Historische Volatilität
     hvol = _hist_vol(close, 20).bfill().clip(lower=min_iv, upper=2.0)
 
+    # ── Stillhalter Confluence (identische Logik wie der TV-Indikator) ────
+    # MACD Pro 10/35/5 Histogramm-Nulldurchgang
+    _macd_line = close.ewm(span=10, adjust=False).mean() - close.ewm(span=35, adjust=False).mean()
+    _macd_hist = _macd_line - _macd_line.ewm(span=5, adjust=False).mean()
+    _macd_cross_up = (_macd_hist > 0) & (_macd_hist.shift(1) <= 0)
+    # Dual Stochastik: schnelle (14,3) bricht 20 hoch, während langsame (35,10) < 20
+    _ll35 = low.rolling(35).min()
+    _hh35 = high.rolling(35).max()
+    _stoch_k2 = (100 * (close - _ll35) / (_hh35 - _ll35 + 1e-10)).rolling(10).mean()
+    _stoch_evt = stoch_cross_20_up & (_stoch_k2 < 20)
+
+    def _bars_since(evt: pd.Series) -> pd.Series:
+        _idx = np.arange(len(evt))
+        _last = pd.Series(np.where(evt.values, _idx, np.nan), index=evt.index).ffill()
+        return pd.Series(_idx, index=evt.index) - _last
+
+    _cw = 3   # Konfluenz-Fenster (Kerzen) — wie Indikator-Standard
+    _t_ok = sc_bullish & (_bars_since(sc_cross_up) < _cw)
+    _m_ok = (_macd_hist > 0) & (_bars_since(_macd_cross_up) < _cw)
+    _s_ok = _bars_since(_stoch_evt) < _cw
+    conf_score = _t_ok.astype(int) + _m_ok.astype(int) + _s_ok.astype(int)
+    conf_evt   = sc_cross_up | _macd_cross_up | _stoch_evt
+
     # ── Einstiegs-Signale bestimmen ────────────────────────────────────────
     if signal_type == "SC Trend Cross ↑":
         signal = sc_cross_up
@@ -224,6 +247,10 @@ def run_backtest(
         signal = (rsi < 30) & sc_bullish
     elif signal_type == "Stoch Cross 20 ↑":
         signal = stoch_cross_20_up & sc_bullish
+    elif signal_type == "Stillhalter Confluence (≥2 von 3)":
+        signal = conf_evt & (conf_score >= 2)
+    elif signal_type == "Stillhalter Confluence (3 von 3)":
+        signal = conf_evt & (conf_score >= 3)
     else:
         signal = sc_cross_up
 

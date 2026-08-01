@@ -85,10 +85,15 @@ with tab_grid:
                                      "(bei alten Aktien bis ~2000 und früher)")
     with gc4:
         g_signal = st.selectbox("Einstiegssignal",
-                                ["SC Trend bullish", "SC Trend Cross ↑",
+                                ["Stillhalter Confluence (≥2 von 3)",
+                                 "Stillhalter Confluence (3 von 3)",
+                                 "SC Trend bullish", "SC Trend Cross ↑",
                                  "RSI < 30 + SC Trend", "Stoch Cross 20 ↑"],
                                 key="rs_signal",
-                                help="'SC Trend bullish' = regelmäßig verkaufen, solange "
+                                help="Stillhalter Confluence = identische Logik wie der "
+                                     "TradingView-Indikator (Trend Model + MACD Pro + "
+                                     "Dual Stochastik, Konfluenz-Fenster 3). "
+                                     "'SC Trend bullish' = regelmäßig verkaufen, solange "
                                      "der Trend passt (max. 1 Trade/Monat)")
 
     gd1, gd2, gd3 = st.columns([3, 3, 2])
@@ -96,7 +101,7 @@ with tab_grid:
         g_deltas = st.multiselect("Delta-Raster", [0.10, 0.15, 0.20, 0.25, 0.30, 0.35],
                                   default=[0.15, 0.25, 0.35], key="rs_deltas")
     with gd2:
-        g_dtes = st.multiselect("DTE-Raster (Laufzeit)", [21, 30, 45, 60],
+        g_dtes = st.multiselect("DTE-Raster (Laufzeit)", [7, 14, 21, 30, 45, 60],
                                 default=[30, 45], key="rs_dtes")
     with gd3:
         g_exit = st.selectbox("Take Profit", ["Kein (bis Verfall)", "50%", "70%"],
@@ -129,7 +134,12 @@ with tab_grid:
                                      "Max DD %": None, "Profit-Faktor": None,
                                      "_res": None})
                     else:
+                        _otms = [(tr.stock_price_entry - tr.strike) / tr.stock_price_entry * 100
+                                 if g_strategy == "Cash Covered Put"
+                                 else (tr.strike - tr.stock_price_entry) / tr.stock_price_entry * 100
+                                 for tr in res.trades if tr.stock_price_entry]
                         rows.append({"Delta": d, "DTE": t, "Trades": res.n_trades,
+                                     "Ø OTM %": round(sum(_otms) / len(_otms), 1) if _otms else None,
                                      "Winrate %": round(res.win_rate, 1),
                                      "Ø p.a. %": round(res.avg_annualized_pct, 1),
                                      "Max DD %": round(res.max_drawdown_pct, 1),
@@ -170,6 +180,22 @@ with tab_grid:
                 f"Winrate **{best['Winrate %']:.1f}%**, Ø Rendite **{best['Ø p.a. %']:.1f}% p.a.**, "
                 f"Profit-Faktor {best['Profit-Faktor']:.2f} ({int(best['Trades'])} Trades)"
             )
+            # Getesteter Zeitraum sichtbar machen (Trades/PF beziehen sich darauf)
+            _pres = next((r["_res"] for r in _rows if r.get("_res") is not None), None)
+            if _pres is not None and _pres.trades:
+                try:
+                    _d0 = _pres.trades[0].entry_date
+                    _d1 = _pres.trades[-1].expiry_date
+                    _yrs = (pd.to_datetime(_d1) - pd.to_datetime(_d0)).days / 365.25
+                    st.caption(
+                        f"🗓️ Getesteter Zeitraum: **{_d0} bis {_d1}** (~{_yrs:.0f} Jahre "
+                        f"Kurshistorie) — Trades, Winrate und Profit-Faktor beziehen sich "
+                        f"auf diesen gesamten Zeitraum. Ø OTM % = durchschnittlicher "
+                        f"Abstand des verkauften Strikes vom Kurs (aus dem Delta-Ziel "
+                        f"abgeleitet, variiert mit der Volatilität)."
+                    )
+                except Exception:
+                    pass
             show = mdf.copy()
             show["Score"] = (show["Winrate %"] * show["Profit-Faktor"].clip(upper=5)).round(1)
             st.dataframe(
@@ -178,6 +204,11 @@ with tab_grid:
                 column_config={
                     "Delta":        st.column_config.NumberColumn("Δ Ziel", format="%.2f"),
                     "DTE":          st.column_config.NumberColumn("DTE", format="%d T"),
+                    "Ø OTM %":      st.column_config.NumberColumn(
+                        "Ø OTM", format="%.1f%%",
+                        help="Durchschnittlicher Abstand des verkauften Strikes vom "
+                             "Kurs bei Einstieg — je kleiner das Delta-Ziel, desto "
+                             "weiter OTM."),
                     "Winrate %":    st.column_config.NumberColumn("Winrate", format="%.1f%%"),
                     "Ø p.a. %":     st.column_config.NumberColumn("Ø Rendite p.a.", format="%.1f%%"),
                     "Max DD %":     st.column_config.NumberColumn("Max Drawdown", format="%.1f%%"),
@@ -193,7 +224,10 @@ with tab_grid:
                              if r["Delta"] == best["Delta"] and r["DTE"] == best["DTE"]
                              and r.get("_res") is not None), None)
             if best_res is not None and len(best_res.equity_curve) > 0:
-                st.markdown(f"#### 📈 Equity-Kurve — Δ{best['Delta']:.2f} · {int(best['DTE'])} DTE")
+                st.markdown(f"#### 📈 Gewinnentwicklung (Equity-Kurve) — "
+                            f"Δ{best['Delta']:.2f} · {int(best['DTE'])} DTE")
+                st.caption("Entwicklung des eingesetzten Kapitals mit dieser Strategie, "
+                           "Start = 100 — jeder Punkt ein abgeschlossener Trade.")
                 st.line_chart(best_res.equity_curve, height=260)
             if best_res is not None and not best_res.trade_df.empty:
                 with st.expander(f"📋 Alle {len(best_res.trade_df)} Trades der besten Kombination"):
