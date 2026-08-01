@@ -131,14 +131,26 @@ if _do_fetch:
                          _cred.get("query_id3")] if q]
     _qids = list(dict.fromkeys(_qids))
     xmls, _fails = [], []
+    import time as _time
     with st.spinner(f"Hole Depot von IBKR… ({len(_qids)} "
                     f"Quer{'ies' if len(_qids) > 1 else 'y'}, je bis zu 45 Sek.)"):
-        for _qid in _qids:
+        for _qi, _qid in enumerate(_qids):
+            if _qi > 0:
+                _time.sleep(4)   # IBKR-Rate-Limit schonen (gleiches Token)
             _x, _err, _dbg = _flex.fetch_flex(_cred["token"], _qid)
             if _x:
                 xmls.append(_x)
             else:
                 _fails.append((_qid, _err, _dbg))
+                # Bei Rate-Limit / transientem IBKR-Fehler: restliche Queries
+                # NICHT mehr feuern — jeder weitere Versuch verbrennt das Limit.
+                if _err and ("Rate Limit" in _err or "nicht erzeugen" in _err):
+                    if _qi + 1 < len(_qids):
+                        _fails.append(("Weitere Queries",
+                                       "Übersprungen, um das IBKR-Rate-Limit zu schonen "
+                                       "— bitte in 1–2 Minuten einfach erneut auf "
+                                       "'🔄 Depot jetzt aktualisieren' klicken.", ""))
+                    break
     for _qid, _err, _dbg in _fails:
         st.error(f"Query {_qid}: {_err or 'Unbekannter Fehler'}")
         with st.expander(f"🔍 Diagnose Query {_qid}"):

@@ -45,32 +45,58 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
         debug.append(f"\n── Versuche {host} ──")
         try:
             url1 = f"{send_url}?t={token}&q={query_id}&v=3"
-            r1 = requests.get(url1, headers=IBKR_HEADERS, timeout=timeout)
-            debug.append(f"Step1: HTTP {r1.status_code}, {len(r1.content)} bytes")
+            ref = ""
+            stat1 = ""
+            err1 = ""
+            err_code = ""
+            url2 = IBKR_GET_URLS.get(host, IBKR_GET_URLS["www.interactivebrokers.com"])
+            parse_fail = False
 
-            try:
-                root1 = ET.fromstring(r1.content)
-            except ET.ParseError as e:
-                debug.append(f"XML-Fehler: {e} | Rohdaten: {r1.text[:200]}")
-                continue
-
-            stat1    = root1.findtext("Status") or ""
-            ref      = root1.findtext("ReferenceCode") or ""
-            url2     = root1.findtext("Url") or IBKR_GET_URLS.get(host, IBKR_GET_URLS["www.interactivebrokers.com"])
-            err1     = root1.findtext("ErrorMessage") or root1.findtext("Message") or ""
-            err_code = root1.findtext("ErrorCode") or ""
-            debug.append(f"Status={stat1!r}  ref={ref!r}  err={err1!r}")
-
-            if not ref:
-                debug.append("Kein ReferenceCode → nächsten Endpoint versuchen")
-                conn_errors.append(f"{host}: Status='{stat1}', Fehler='{err1}'")
+            # 'Statement could not be generated at this time' ist ein
+            # VORÜBERGEHENDER Fehler auf Statement-Ebene: Endpoint-Wechsel
+            # hilft nicht und verbrennt nur das Token-Rate-Limit (Code 1018).
+            # → gleichen Endpoint mit Wartezeit bis zu 3× wiederholen.
+            for s1_try in range(3):
+                if s1_try > 0:
+                    debug.append("…Statement wird IBKR-seitig noch erzeugt → 12 s warten, GLEICHER Endpoint")
+                    time.sleep(12)
+                r1 = requests.get(url1, headers=IBKR_HEADERS, timeout=timeout)
+                debug.append(f"Step1 (Versuch {s1_try+1}): HTTP {r1.status_code}, {len(r1.content)} bytes")
+                try:
+                    root1 = ET.fromstring(r1.content)
+                except ET.ParseError as e:
+                    debug.append(f"XML-Fehler: {e} | Rohdaten: {r1.text[:200]}")
+                    parse_fail = True
+                    break
+                stat1    = root1.findtext("Status") or ""
+                ref      = root1.findtext("ReferenceCode") or ""
+                url2     = root1.findtext("Url") or url2
+                err1     = root1.findtext("ErrorMessage") or root1.findtext("Message") or ""
+                err_code = root1.findtext("ErrorCode") or ""
+                debug.append(f"Status={stat1!r}  ref={ref!r}  err={err1!r}")
+                if ref:
+                    break
                 if err_code in _RATE_LIMIT_CODES:
                     return None, (
                         f"⏱️ IBKR Rate Limit (Code {err_code}): Zu viele Anfragen mit diesem Token.\n"
                         "Bitte **5–10 Minuten warten** und dann erneut versuchen."
                     ), "\n".join(debug)
-                if err_code in _TRANSIENT_CODES:
-                    time.sleep(10)
+                if not (err_code in _TRANSIENT_CODES
+                        or "could not be generated" in err1.lower()):
+                    break   # dauerhafter Fehler → Endpoint-Wechsel versuchen
+
+            if parse_fail:
+                continue
+            if not ref:
+                conn_errors.append(f"{host}: Status='{stat1}', Fehler='{err1}'")
+                if err_code in _TRANSIENT_CODES or "could not be generated" in err1.lower():
+                    return None, (
+                        "⏳ IBKR kann das Statement **gerade** nicht erzeugen "
+                        "('Statement could not be generated at this time') — das ist "
+                        "ein vorübergehender IBKR-Serverzustand, kein Fehler deiner "
+                        "Zugangsdaten. Bitte in **1–2 Minuten** erneut versuchen."
+                    ), "\n".join(debug)
+                debug.append("Kein ReferenceCode → nächsten Endpoint versuchen")
                 continue
 
             for old_h in ["gdcdyn.interactivebrokers.com", "www.interactivebrokers.com",
