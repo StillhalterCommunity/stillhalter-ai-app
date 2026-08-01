@@ -160,6 +160,7 @@ def run_backtest(
     min_iv: float = 0.10,
     early_exit_pct: float = 0.0,        # 0 = kein Early Exit | 50 = schließen bei 50% Gewinn
     commission_per_contract: float = 0.0,  # $/Kontrakt (z.B. 1.30 = $0.65 Open + $0.65 Close)
+    signal_tf: str = "1D",              # Zeitebene des Einstiegssignals: "4h" | "1D" | "1W"
 ) -> BacktestResult:
     """
     Backtestet eine Stillhalter-Strategie auf historischen Daten.
@@ -187,11 +188,32 @@ def run_backtest(
         result.error = f"Datenfehler: {e}"
         return result
 
-    # ── Indikatoren berechnen ──────────────────────────────────────────────
+    # ── Signal-Zeitebene wählen (4h / 1D / 1W) ────────────────────────────
+    # Die Trade-SIMULATION läuft immer auf Tagesdaten; nur das SIGNAL wird
+    # auf der gewählten Ebene berechnet und auf den Tag des Auftretens
+    # übertragen. 4h: Kurshistorie ist quellenseitig auf ~2 Jahre begrenzt.
+    _agg = {"Open": "first", "High": "max", "Low": "min",
+            "Close": "last", "Volume": "sum"}
+    sig_df = df
+    if signal_tf == "1W":
+        sig_df = df.resample("W-FRI").agg(_agg).dropna()
+    elif signal_tf == "4h":
+        try:
+            _h1 = stock.history(period="730d", interval="1h")
+            if _h1 is not None and len(_h1) > 200:
+                _h1 = _h1[["Open", "High", "Low", "Close", "Volume"]].copy()
+                _h1.index = pd.to_datetime(_h1.index).tz_localize(None)
+                sig_df = _h1.resample("4h").agg(_agg).dropna()
+        except Exception:
+            sig_df = df
+        if len(sig_df) < 60:
+            sig_df = df
+
+    # ── Indikatoren berechnen (auf der Signal-Zeitebene) ──────────────────
     fast_len, slow_len = TREND_MODES.get(trend_mode, (2, 9))
-    close = df["Close"]
-    high  = df["High"]
-    low   = df["Low"]
+    close = sig_df["Close"]
+    high  = sig_df["High"]
+    low   = sig_df["Low"]
 
     fast_ema = calculate_ema(close, fast_len)
     slow_ema = calculate_ema(close, slow_len)
@@ -211,8 +233,8 @@ def run_backtest(
     stoch_k = stoch_k_raw.rolling(3).mean()
     stoch_cross_20_up = (stoch_k >= 20) & (stoch_k.shift(1) < 20)
 
-    # Historische Volatilität
-    hvol = _hist_vol(close, 20).bfill().clip(lower=min_iv, upper=2.0)
+    # Historische Volatilität — immer auf Tagesbasis (für die Options-Preisung)
+    hvol = _hist_vol(df["Close"], 20).bfill().clip(lower=min_iv, upper=2.0)
 
     # ── Stillhalter Confluence (identische Logik wie der TV-Indikator) ────
     # MACD Pro 10/35/5 Histogramm-Nulldurchgang
@@ -253,6 +275,19 @@ def run_backtest(
         signal = conf_evt & (conf_score >= 3)
     else:
         signal = sc_cross_up
+
+    # ── Signal von der Signal-Zeitebene auf Tagesbasis übertragen ─────────
+    if sig_df is not df:
+        _sig_daily = pd.Series(False, index=df.index)
+        for _d in signal.index[signal.fillna(False).astype(bool)]:
+            _pos = df.index.searchsorted(_d, side="right") - 1
+            if 0 <= _pos < len(_sig_daily):
+                _sig_daily.iloc[_pos] = True
+        signal = _sig_daily
+    # Ab hier läuft die Simulation ausschließlich auf Tagesdaten
+    close = df["Close"]
+    high  = df["High"]
+    low   = df["Low"]
 
     # ── Trade-Simulation ───────────────────────────────────────────────────
     T_years = dte / 365.0

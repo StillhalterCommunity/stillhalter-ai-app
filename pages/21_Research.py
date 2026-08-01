@@ -96,7 +96,7 @@ with tab_grid:
                                      "'SC Trend bullish' = regelmäßig verkaufen, solange "
                                      "der Trend passt (max. 1 Trade/Monat)")
 
-    gd1, gd2, gd3 = st.columns([3, 3, 2])
+    gd1, gd2, gd3, gd4 = st.columns([3, 3, 2, 2])
     with gd1:
         g_deltas = st.multiselect("Delta-Raster", [0.10, 0.15, 0.20, 0.25, 0.30, 0.35],
                                   default=[0.15, 0.25, 0.35], key="rs_deltas")
@@ -104,6 +104,13 @@ with tab_grid:
         g_dtes = st.multiselect("DTE-Raster (Laufzeit)", [7, 14, 21, 30, 45, 60],
                                 default=[30, 45], key="rs_dtes")
     with gd3:
+        g_sig_tf = st.selectbox("Signal-Zeitebene", ["1D", "1W", "4h"], key="rs_sig_tf",
+                                help="Auf welcher Zeitebene das Einstiegssignal berechnet "
+                                     "wird (Empfehlung wie im Scanner: DTE ≤ 14 → 4h · "
+                                     "15–42 → 1D · länger → 1W). Achtung 4h: Kurshistorie "
+                                     "quellenseitig nur ~2 Jahre verfügbar — der Test "
+                                     "wird automatisch auf diesen Zeitraum begrenzt.")
+    with gd4:
         g_exit = st.selectbox("Take Profit", ["Kein (bis Verfall)", "50%", "70%"],
                               key="rs_exit")
     _exit_pct = {"Kein (bis Verfall)": 0.0, "50%": 50.0, "70%": 70.0}[g_exit]
@@ -127,6 +134,7 @@ with tab_grid:
                         signal_type=g_signal, target_delta=float(d),
                         dte=int(t), period=g_period,
                         early_exit_pct=_exit_pct,
+                        signal_tf=g_sig_tf,
                     )
                     if res.error or res.n_trades == 0:
                         rows.append({"Delta": d, "DTE": t, "Trades": res.n_trades,
@@ -155,7 +163,7 @@ with tab_grid:
         st.session_state["rs_matrix"] = rows
         st.session_state["rs_matrix_meta"] = {
             "ticker": g_ticker, "strategy": g_strategy,
-            "period": g_period, "signal": g_signal, "exit": g_exit,
+            "period": g_period, "signal": f"{g_signal} ({g_sig_tf})", "exit": g_exit,
         }
 
     _rows = st.session_state.get("rs_matrix")
