@@ -3,7 +3,7 @@ Stillhalter Confluence — Python-Port des TradingView-Indikators (v0.9).
 
 Identische Logik wie pine/stillhalter_confluence.pine (dort gegeneinander
 validiert): Trend Model (EMA 2/9) + MACD Pro (10/35/5, Hist-Nulldurchgang)
-+ Dual Stochastic (14,3,3 bricht 20/80, während 35,10,5 überverkauft/-kauft),
++ Stochastik (14,3 bricht 20/80 — Single-Modus, Standard seit v0.9.7),
 Konfluenz-Fenster (Ereignis zählt, solange frisch UND Zustand gilt; Fenster-Standard 4 wie im TV-Indikator).
 
 confluence_now(df, win)   → Scores/Zustände der LETZTEN Kerze
@@ -50,9 +50,12 @@ def confluence_now(df: pd.DataFrame, win: int = 4,
         ll = l.rolling(length).min()
         hh = h.rolling(length).max()
         return (100 * (c - ll) / (hh - ll)).rolling(smooth).mean()
-    k1, k2 = _k(14, 3), _k(35, 10)
-    s_buy_evt  = (k1 > os_level) & (k1.shift(1) <= os_level) & (k2 < os_level)
-    s_sell_evt = (k1 < ob_level) & (k1.shift(1) >= ob_level) & (k2 > ob_level)
+    # Single-Stochastik (Standard seit v0.9.7 des TV-Indikators): nur die
+    # schnelle Linie muss die Schwelle brechen — die Konfluenz filtert das
+    # Rauschen besser als die langsame k2-Linie (Timing-Studie).
+    k1 = _k(14, 3)
+    s_buy_evt  = (k1 > os_level) & (k1.shift(1) <= os_level)
+    s_sell_evt = (k1 < ob_level) & (k1.shift(1) >= ob_level)
 
     t_b = bool((bull & (_since(t_buy_evt) < win)).iloc[-1])
     m_b = bool(((hist > 0) & (_since(m_buy_evt) < win)).iloc[-1])

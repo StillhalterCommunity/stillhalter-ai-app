@@ -2,12 +2,22 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.6
+//  Stillhalter Community® – CONFLUENCE v0.9.7
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.6 (nach Timing-Studie über 120 echte Kurstiefs, 8 Aktien, 1D):
+//  NEU in v0.9.7 (zweite Timing-Studie, gleiche 120 Kurstiefs):
+//   • Stochastik-Modus: SINGLE (k1 kreuzt 20/80) ist neuer Standard — die
+//     langsame k2-Linie verbesserte die Signalqualität kaum (69% vs. 67%
+//     Präzision), warf aber 2/3 der gültigen Tiefs weg (26% vs. 68%
+//     Abdeckung). Die Konfluenz selbst ist der bessere Filter.
+//     'Dual (klassisch)' bleibt wählbar.
+//   • MACD-Modus 'Früh (Histogramm dreht)' zuschaltbar: reagiert im Median
+//     +1 statt +4 Kerzen nach dem Tief (Konfluenz gesamt: +2 statt +3,
+//     93% statt 89% Abdeckung) — dafür etwas mehr Rauschen (58% statt
+//     65% Präzision). Standard bleibt die Kreuzung (Bestätiger-Rolle).
+//  v0.9.6 (nach Timing-Studie über 120 echte Kurstiefs, 8 Aktien, 1D):
 //   • Konfluenz-Fenster Standard 3 → 4: Dual Stochastik reagiert im Median
 //     +2 Kerzen nach dem Tief, Trend +3, MACD Pro +4 — im 90%-Fall liegen
 //     bis zu 5 Kerzen zwischen den Komponenten. Fenster 4 erwischt 88%
@@ -55,7 +65,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.6", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.7", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -83,6 +93,20 @@ osLevel  = input.int(20, "Stochastik überverkauft", minval = 5,  maxval = 40, g
 obLevel  = input.int(80, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC,
      tooltip = "Über diesem Wert gilt die Stochastik als überkauft (Kurs nahe am Hoch "
           + "der letzten Wochen → Rücksetzer wahrscheinlicher).")
+stochMode = input.string("Single (k1 kreuzt 20/80)", "Stochastik-Modus",
+     options = ["Single (k1 kreuzt 20/80)", "Dual (klassisch, k2-Filter)"], group = grpC,
+     tooltip = "Single = nur die schnelle Stochastik-Linie muss die Schwelle brechen "
+          + "(Standard — Studie: erfasst 68% statt 26% der Kurstiefs bei praktisch "
+          + "gleicher Signalqualität; das Rauschen filtert die Konfluenz). "
+          + "Dual = zusätzlich muss die langsame Linie überverkauft/überkauft sein "
+          + "(klassisch, sehr selektiv).")
+macdMode  = input.string("Kreuzung (klassisch)", "MACD-Modus",
+     options = ["Kreuzung (klassisch)", "Früh (Histogramm dreht)"], group = grpC,
+     tooltip = "Kreuzung = Histogramm-Nulldurchgang (MACD kreuzt Signallinie) — der "
+          + "klassische Bestätiger, im Median 4 Kerzen nach dem Tief. "
+          + "Früh = das Histogramm DREHT unter Null nach oben (Momentum-Wende vor "
+          + "der Kreuzung) — im Median nur 1 Kerze nach dem Tief, dafür etwas mehr "
+          + "Rauschen. Fürs frühere Timing: Früh + Mindest-Konfluenz 2.")
 
 grpX = "Zusatz-Komponenten (optional)"
 useRSI    = input.bool(false, "RSI (14) einbeziehen — UP: kreuzt 30 hoch · DOWN: kreuzt 70 runter", group = grpX,
@@ -234,15 +258,19 @@ macdLine = ta.ema(close, 10) - ta.ema(close, 35)
 sigLine  = ta.ema(macdLine, 5)
 hist     = macdLine - sigLine
 
-macdBuyEvt  = ta.crossover(hist, 0)
-macdSellEvt = ta.crossunder(hist, 0)
+macdFrueh = macdMode == "Früh (Histogramm dreht)"
+// Früh-Modus: Histogramm dreht unter Null nach oben (Momentum-Wende) —
+// kommt der Kreuzung im Median 3 Kerzen zuvor
+macdBuyEvt  = macdFrueh ? (hist > hist[1] and hist[1] <= hist[2] and hist < 0) : ta.crossover(hist, 0)
+macdSellEvt = macdFrueh ? (hist < hist[1] and hist[1] >= hist[2] and hist > 0) : ta.crossunder(hist, 0)
 
 // ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
 k1 = ta.sma(ta.stoch(close, high, low, 14), 3)
 k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
 
-stochBuyEvt  = ta.crossover(k1, osLevel)  and k2 < osLevel
-stochSellEvt = ta.crossunder(k1, obLevel) and k2 > obLevel
+dualStoch = stochMode == "Dual (klassisch, k2-Filter)"
+stochBuyEvt  = ta.crossover(k1, osLevel)  and (not dualStoch or k2 < osLevel)
+stochSellEvt = ta.crossunder(k1, obLevel) and (not dualStoch or k2 > obLevel)
 
 // ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
 rsi = ta.rsi(close, 14)
@@ -278,13 +306,13 @@ sinceStochSell = nz(ta.barssince(stochSellEvt), 99999)
 sinceRsiSell   = nz(ta.barssince(rsiSellEvt),   99999)
 
 trendBuyOK = bullTrend and sinceTrendBuy < confWin
-macdBuyOK  = hist > 0  and sinceMacdBuy  < confWin
+macdBuyOK  = (macdFrueh ? hist > hist[1] : hist > 0)  and sinceMacdBuy  < confWin
 stochBuyOK = sinceStochBuy < confWin
 rsiBuyOK   = useRSI and sinceRsiBuy < confWin
 mrBuyOK    = useMR and zS < -1.0
 
 trendSellOK = bearTrend and sinceTrendSell < confWin
-macdSellOK  = hist < 0  and sinceMacdSell  < confWin
+macdSellOK = (macdFrueh ? hist < hist[1] : hist < 0)  and sinceMacdSell < confWin
 stochSellOK = sinceStochSell < confWin
 rsiSellOK   = useRSI and sinceRsiSell < confWin
 mrSellOK    = useMR and zS > 1.0
