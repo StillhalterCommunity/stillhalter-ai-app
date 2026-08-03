@@ -1,0 +1,186 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © Stillhalter Community
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stillhalter Community® – MEAN REVERSION v1.1
+//  Optimiert als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik ·
+//  Stillhalter Confluence:
+//   • ⚡ NEU Re-Entry-Signale: sobald der Z-Score aus der Überdehnung ZURÜCK
+//     über die Schwelle kreuzt — kommt sofort mit Kerzenschluss (die alten
+//     Pivot-Punkte wurden erst N Kerzen später bestätigt) und ist damit als
+//     Live-Bestätigung für die anderen Indikatoren nutzbar.
+//   • 🎯 Pivot-Signale (exaktes Extrem, bestätigt) bleiben zuschaltbar.
+//   • Trend-Filter (EMA 50/200): keine UP-Signale im Abwärtstrend
+//     ('fallendes Messer'), keine DOWN-Signale im Aufwärtstrend.
+//   • Gleiche Sprache wie Confluence: UP/DOWN-Dreiecke in denselben Farben,
+//     Parameter identisch zur Confluence-Komponente (Länge 30, EMA-3-Glättung,
+//     Schwelle ±1σ) — was hier ⚡ zeigt, zählt dort als Mean-Reversion-Punkt.
+//   • Status-Tabelle (Z-Score + Zustand) · Alerts für alle Signale ·
+//     ⓘ-Erklärungen an allen Eingaben.
+// ─────────────────────────────────────────────────────────────────────────────
+strategy("Stillhalter Mean Reversion v1.1", shorttitle = "Stillhalter Mean Reversion",
+         overlay            = true,
+         initial_capital    = 100000,
+         default_qty_type   = strategy.percent_of_equity,
+         default_qty_value  = 10,
+         commission_type    = strategy.commission.percent,
+         commission_value   = 0.0,
+         max_bars_back      = 500)
+
+// ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
+grp_mr = "MEAN REVERT SETTINGS"
+trading_style  = input.string("neutral", "Trading Style", options = ["neutral", "bullish", "bearish"], group = grp_mr,
+     tooltip = "Verschiebt die Bänder leicht: bullish = Kauf-Seite kommt früher dran "
+          + "(Bänder etwas tiefer), bearish umgekehrt. Neutral = Standard.")
+noise_suppress = input.int(30, "BB Länge (SMA)", minval = 5, maxval = 100, group = grp_mr,
+     tooltip = "Anzahl Kerzen für Durchschnitt und Standardabweichung. 30 = Standard "
+          + "und identisch zur Mean-Reversion-Komponente im Stillhalter Confluence.")
+signal_thresh  = input.float(1.0, "Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.1, group = grp_mr,
+     tooltip = "Ab wie vielen Standardabweichungen der Kurs als überdehnt gilt. "
+          + "1.0 = identisch zum Confluence (±1σ). Höher = seltenere, extremere Signale.")
+
+// ─── Inputs: Signale ─────────────────────────────────────────────────────────
+grp_sig = "SIGNALE"
+useReentry = input.bool(true, "⚡ Re-Entry-Signale (früh, ohne Verzögerung)", group = grp_sig,
+     tooltip = "Signal, sobald der Z-Score aus der Überdehnung ZURÜCK über die "
+          + "Schwelle kreuzt — die Rückkehr zum Mittelwert hat begonnen. Kommt "
+          + "sofort mit Kerzenschluss und dient als Live-Bestätigung für die "
+          + "anderen Stillhalter-Indikatoren.")
+usePivot   = input.bool(true, "🎯 Pivot-Signale (exaktes Extrem, bestätigt)", group = grp_sig,
+     tooltip = "Markiert das exakte Hoch/Tief der Überdehnung — wird aber erst "
+          + "N Kerzen später bestätigt (der Kreis erscheint rückwirkend am Extrem). "
+          + "Gut zum Lernen/Analysieren, für Live-Entscheidungen ⚡ nutzen.")
+pivot_lb   = input.int(5, "Pivot Lookback", minval = 2, maxval = 20, group = grp_sig,
+     tooltip = "Ein Extrem gilt erst als Pivot, wenn links UND rechts so viele Kerzen "
+          + "weniger extrem sind. Größer = markantere Extreme, spätere Bestätigung.")
+trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EMA 200"], group = grp_sig,
+     tooltip = "UP-Signale nur OBERHALB, DOWN-Signale nur UNTERHALB der gewählten "
+          + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
+          + "Messer') — empfohlen: EMA 200 für Cash Secured Puts.")
+btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-Entry", "Pivot"], group = grp_sig,
+     tooltip = "Welche Signale der Strategie-Tester handelt: Einstieg am UP-Signal, "
+          + "Ausstieg am DOWN-Signal.")
+
+// ─── Inputs: Anzeige ─────────────────────────────────────────────────────────
+grp_st = "ANZEIGE"
+show_bg     = input.bool(false, "Hintergrundfarbe bei Überdehnung", group = grp_st,
+     tooltip = "Färbt den Chart-Hintergrund leicht grün (überdehnt unten) bzw. rot "
+          + "(überdehnt oben), solange der Zustand anhält.")
+showTable   = input.bool(true, "Status-Tabelle anzeigen", group = grp_st,
+     tooltip = "Kleine Übersicht: aktueller Z-Score und Zustand (überdehnt/neutral).")
+ma_clr      = input.color(color.white, "Mittellinie", group = grp_st)
+band_clr_ob = input.color(#FF1744, "OB Bänder (oben)",  group = grp_st,
+     tooltip = "Farbe der oberen Bänder — gleiche Signalfarbe wie im Confluence.")
+band_clr_os = input.color(#00C853, "OS Bänder (unten)", group = grp_st,
+     tooltip = "Farbe der unteren Bänder — gleiche Signalfarbe wie im Confluence.")
+
+// ─── Berechnung ──────────────────────────────────────────────────────────────
+float ma = ta.sma(close, noise_suppress)
+float sd = ta.stdev(close, noise_suppress)
+
+float bias_sd = switch trading_style
+    "bullish" => -0.12 * sd
+    "bearish" =>  0.12 * sd
+    =>            0.0
+
+float u1 = ma + bias_sd + 1.0 * sd
+float u2 = ma + bias_sd + 2.0 * sd
+float u3 = ma + bias_sd + 3.0 * sd
+float u4 = ma + bias_sd + 4.0 * sd
+float l1 = ma + bias_sd - 1.0 * sd
+float l2 = ma + bias_sd - 2.0 * sd
+float l3 = ma + bias_sd - 3.0 * sd
+float l4 = ma + bias_sd - 4.0 * sd
+
+float z_raw = sd != 0 ? (close - ma) / sd : 0.0
+float bias  = switch trading_style
+    "bullish" => -0.12
+    "bearish" =>  0.12
+    =>            0.0
+float z   = z_raw - bias
+float z_s = ta.ema(z, 3)   // identische Glättung wie im Stillhalter Confluence
+
+// ─── Trend-Filter ────────────────────────────────────────────────────────────
+float emaF = trendFilt == "EMA 50" ? ta.ema(close, 50) : trendFilt == "EMA 200" ? ta.ema(close, 200) : na
+bool upOK   = trendFilt == "Aus" or close > emaF
+bool downOK = trendFilt == "Aus" or close < emaF
+plot(trendFilt != "Aus" ? emaF : na, "Trend-Filter EMA", color = color.new(#EF6C00, 40), linewidth = 2)
+
+// ─── Signale ─────────────────────────────────────────────────────────────────
+// ⚡ Re-Entry (früh): Z-Score kreuzt aus der Überdehnung ZURÜCK über die Schwelle
+bool reBuy  = useReentry and ta.crossover(z_s, -signal_thresh)  and upOK
+bool reSell = useReentry and ta.crossunder(z_s, signal_thresh)  and downOK
+
+// 🎯 Pivot (bestätigt): exaktes Extrem, erscheint pivot_lb Kerzen später
+float ph = ta.pivothigh(z_s, pivot_lb, pivot_lb)
+float pl = ta.pivotlow(z_s,  pivot_lb, pivot_lb)
+bool pivSell = usePivot and not na(ph) and ph >  signal_thresh and downOK
+bool pivBuy  = usePivot and not na(pl) and pl < -signal_thresh and upOK
+
+// ─── Hintergrund ─────────────────────────────────────────────────────────────
+color bg_col = switch
+    show_bg and z_s >  signal_thresh => color.new(band_clr_ob, 88)
+    show_bg and z_s < -signal_thresh => color.new(band_clr_os, 88)
+    =>                                  color.new(color.black, 100)
+bgcolor(bg_col)
+
+// ─── Bollinger Bänder ────────────────────────────────────────────────────────
+plot(ma, "Mittellinie", color = color.new(ma_clr, 40), linewidth = 1)
+
+p_u1 = plot(u1, "BB +1σ", color = color.new(band_clr_ob, 70), linewidth = 1)
+p_u2 = plot(u2, "BB +2σ", color = color.new(band_clr_ob, 50), linewidth = 1)
+p_u3 = plot(u3, "BB +3σ", color = color.new(band_clr_ob, 30), linewidth = 1)
+p_u4 = plot(u4, "BB +4σ", color = color.new(band_clr_ob, 10), linewidth = 1)
+p_l1 = plot(l1, "BB -1σ", color = color.new(band_clr_os, 70), linewidth = 1)
+p_l2 = plot(l2, "BB -2σ", color = color.new(band_clr_os, 50), linewidth = 1)
+p_l3 = plot(l3, "BB -3σ", color = color.new(band_clr_os, 30), linewidth = 1)
+p_l4 = plot(l4, "BB -4σ", color = color.new(band_clr_os, 10), linewidth = 1)
+
+p_ma_ob = plot(ma, display = display.none, editable = false)
+p_ma_os = plot(ma, display = display.none, editable = false)
+
+fill(p_ma_ob, p_u1, color = color.new(band_clr_ob, 97))
+fill(p_u1,    p_u2, color = color.new(band_clr_ob, 93))
+fill(p_u2,    p_u3, color = color.new(band_clr_ob, 88))
+fill(p_u3,    p_u4, color = color.new(band_clr_ob, 80))
+fill(p_ma_os, p_l1, color = color.new(band_clr_os, 97))
+fill(p_l1,    p_l2, color = color.new(band_clr_os, 93))
+fill(p_l2,    p_l3, color = color.new(band_clr_os, 88))
+fill(p_l3,    p_l4, color = color.new(band_clr_os, 80))
+
+// ─── Signal-Marker ───────────────────────────────────────────────────────────
+// ⚡ Re-Entry: Dreiecke in Confluence-Optik (klein, weiß beschriftet, live)
+plotshape(reBuy,  "⚡ UP (Re-Entry)",   shape.triangleup,   location.belowbar,
+     color.new(band_clr_os, 0), text = "UP",   textcolor = color.white, size = size.tiny)
+plotshape(reSell, "⚡ DOWN (Re-Entry)", shape.triangledown, location.abovebar,
+     color.new(band_clr_ob, 0), text = "DOWN", textcolor = color.white, size = size.tiny)
+// 🎯 Pivot: Kreise rückwirkend am exakten Extrem (nur Visualisierung)
+plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
+     color.new(band_clr_ob, 30), size = size.tiny, offset = -pivot_lb)
+plotshape(pivBuy,  "🎯 Extrem unten", shape.circle, location.belowbar,
+     color.new(band_clr_os, 30), size = size.tiny, offset = -pivot_lb)
+
+// ─── Status-Tabelle ──────────────────────────────────────────────────────────
+var table t = table.new(position.bottom_right, 2, 2, border_width = 1)
+if barstate.islast and showTable
+    string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN — Rückkehr abwarten (⚡)" :
+         z_s > signal_thresh ? "🔴 überdehnt OBEN — Rückkehr abwarten (⚡)" : "· neutral"
+    table.cell(t, 0, 0, "Z-Score", text_color = color.white, bgcolor = color.new(color.black, 20))
+    table.cell(t, 1, 0, str.tostring(z_s, "#.##") + " σ", text_color = color.white, bgcolor = color.new(color.black, 20))
+    table.cell(t, 0, 1, "Zustand", text_color = color.white)
+    table.cell(t, 1, 1, zust, text_color = color.white)
+
+// ─── Strategy Orders ─────────────────────────────────────────────────────────
+bool stratBuy  = btSource == "Re-Entry" ? reBuy  : pivBuy
+bool stratSell = btSource == "Re-Entry" ? reSell : pivSell
+
+if stratBuy
+    strategy.entry("Long", strategy.long)
+if stratSell
+    strategy.close("Long")
+
+// ─── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(reBuy,   "⚡ Mean Reversion UP (Re-Entry)",   "Stillhalter Mean Reversion: UP — Rückkehr zum Mittelwert hat begonnen")
+alertcondition(reSell,  "⚡ Mean Reversion DOWN (Re-Entry)", "Stillhalter Mean Reversion: DOWN — Rückkehr zum Mittelwert hat begonnen")
+alertcondition(pivBuy,  "🎯 Extrem unten bestätigt",         "Stillhalter Mean Reversion: Tief-Extrem bestätigt")
+alertcondition(pivSell, "🎯 Extrem oben bestätigt",          "Stillhalter Mean Reversion: Hoch-Extrem bestätigt")

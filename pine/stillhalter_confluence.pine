@@ -2,12 +2,23 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.4
+//  Stillhalter Community® – CONFLUENCE v0.9.5
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.4:
+//  NEU in v0.9.5:
+//   • Dreiecke kleiner (voll = small, schwach = tiny) — verdecken den
+//     Preischart nicht mehr.
+//   • Options-Zonen basieren jetzt auf den KERZENKÖRPERN (Open/Close)
+//     statt der Dochte — für Optionen zählt der Körper (abschaltbar).
+//   • Zonen-Label zeigt zusätzlich die Anzahl der Berührungen
+//     ('🟢 PUT-Zone ★★ · 12.4% OTM · 5×').
+//   • Rückblick bis 48 Monate wählbar (Empfehlung: 12–24 auf 4h/1D,
+//     36+ auf dem Wochenchart).
+//   • EMA 50 / 100 / 200 als Linien einblendbar; liegt eine EMA in
+//     einer Zone → Bonus-Stern 'EMA-Bestätigung' (im Tooltip erklärt).
+//  v0.9.4:
 //   • Volumenprofil wird jetzt wie bei TradingView aus INTRABAR-Daten
 //     (feinere Zeitebene, automatisch gewählt) berechnet statt aus den
 //     Kerzen-Spannen des Charts → POC/VAH/VAL passen zum Original.
@@ -35,7 +46,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.4", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.5", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -105,36 +116,51 @@ pivLb     = input.int(10, "Pivot-Länge", minval = 3, maxval = 30, group = grpSR
 minTouch  = input.int(2, "Mindest-Bestätigungen des Levels", minval = 2, maxval = 5, group = grpSR,
      tooltip = "Ein Level gilt erst als markant, wenn es von mindestens so vielen "
           + "Pivots bestätigt wurde (2 = z. B. ein Doppeltief).")
+useBody   = input.bool(true, "Kerzenkörper statt Docht (Open/Close)", group = grpSR,
+     tooltip = "An = lokale Hochs/Tiefs werden aus den KERZENKÖRPERN (Open/Close) "
+          + "bestimmt, nicht aus den Dochten. Für Optionen ist der Körper relevant — "
+          + "Dochte sind oft nur kurzes Überschießen.")
 
 grpZ = "🟢🔴 Options-Zonen (Put/Call-Platzierung)"
 showZones  = input.bool(true, "Options-Zonen anzeigen", group = grpZ,
      tooltip = "Grüne Boxen unter dem Kurs = Short-Put-Zonen · rote Boxen über dem "
           + "Kurs = Short-Call-Zonen. Regel: Put-Strike UNTER die grüne Box, "
           + "Call-Strike ÜBER die rote Box.")
-zoneMonths = input.int(12, "Rückblick (Monate)", minval = 3, maxval = 24, group = grpZ,
+zoneMonths = input.int(12, "Rückblick (Monate)", minval = 3, maxval = 48, group = grpZ,
      tooltip = "Wie weit zurück lokale Hochs und Tiefs für die Zonen gesammelt werden. "
-          + "12 Monate = Standard.")
-zonesPerSide = input.int(2, "Zonen je Seite (max.)", minval = 1, maxval = 3, group = grpZ,
-     tooltip = "Höchstens so viele Put-Zonen unter und Call-Zonen über dem Kurs — "
-          + "bewusst wenige, damit der Chart aufgeräumt bleibt.")
-zoneDistMult = input.float(0.5, "Mindestabstand vom Kurs (× ATR14)", minval = 0.0,
+          + "Empfehlung: 12–24 auf 4h/1D · 36+ auf dem Wochenchart. Ältere Levels "
+          + "bleiben relevant, wenn sie oft bestätigt wurden — das regelt das "
+          + "Sterne-Rating.")
+zonesPerSide = input.int(3, "Zonen je Seite (max.)", minval = 1, maxval = 6, group = grpZ,
+     tooltip = "Höchstens so viele Put-Zonen unter und Call-Zonen über dem Kurs. "
+          + "3 = guter Kompromiss aus Vollständigkeit (gerade um den Kurs herum) "
+          + "und aufgeräumtem Chart.")
+zoneDistMult = input.float(0.3, "Mindestabstand vom Kurs (× ATR14)", minval = 0.0,
      maxval = 3.0, step = 0.1, group = grpZ,
      tooltip = "ATR14 = durchschnittliche Schwankung einer Kerze über die letzten 14 "
           + "Kerzen (Average True Range) — das Volatilitätsmaß dieses Indikators. "
-          + "0.5 heißt: Eine Zone muss mindestens eine halbe durchschnittliche "
-          + "Schwankung vom Kurs entfernt sein. Je volatiler die Aktie, desto weiter "
-          + "liegen die Zonen also automatisch weg. Näher am Kurs = mehr Prämie — "
-          + "die nächstgelegene STARKE Zone gewinnt.")
-zoneGapMult  = input.float(1.5, "Mindestabstand zwischen Zonen (× ATR14)", minval = 0.5,
+          + "0.3 heißt: Eine Zone muss mindestens knapp eine Drittel-Schwankung vom "
+          + "Kurs entfernt sein. Je volatiler die Aktie, desto weiter liegen die "
+          + "Zonen also automatisch weg. Näher am Kurs = mehr Prämie — die "
+          + "nächstgelegene STARKE Zone gewinnt.")
+zoneGapMult  = input.float(0.8, "Mindestabstand zwischen Zonen (× ATR14)", minval = 0.3,
      maxval = 5.0, step = 0.1, group = grpZ,
-     tooltip = "Verhindert, dass zwei Zonen direkt übereinander kleben: Die zweite Zone "
-          + "muss mindestens so viele ATR14 von der ersten entfernt sein.")
+     tooltip = "Verhindert, dass zwei Zonen direkt übereinander kleben: Die nächste "
+          + "Zone muss mindestens so viele ATR14 von der vorherigen entfernt sein. "
+          + "Kleiner = mehr Zonen dicht am Kurs.")
 zoneTolMult  = input.float(0.5, "Cluster-Toleranz (× ATR14)", minval = 0.2, maxval = 1.5,
      step = 0.1, group = grpZ,
      tooltip = "Pivots, die näher als diese Toleranz beieinander liegen, verschmelzen zu "
           + "EINER Zone — so werden Doppel-/Tripel-Tiefs automatisch als starke Zone "
           + "erkannt. Größer = breitere Zonen, kleiner = schmalere. (ATR14 = "
           + "durchschnittliche Kerzen-Schwankung der letzten 14 Kerzen.)")
+
+grpE = "EMA-Levels (50 / 100 / 200)"
+showEMAs = input.bool(true, "EMA 50 / 100 / 200 anzeigen", group = grpE,
+     tooltip = "Die drei meistbeachteten gleitenden Durchschnitte — wirken oft als "
+          + "dynamische Unterstützung/Widerstand, weil viele Marktteilnehmer dort "
+          + "kaufen/verkaufen. Liegt eine EMA in einer Options-Zone, bekommt die "
+          + "Zone einen Bonus-Stern (EMA-Bestätigung).")
 
 grpVP = "Volumenprofil (POC / VAH / VAL)"
 showVP = input.bool(true, "Volumenprofil anzeigen", group = grpVP,
@@ -272,27 +298,35 @@ colUpW   = color.new(colUp,   weakTransp)
 colDownW = color.new(colDown, weakTransp)
 
 // ══════════════════════════ DREIECKE ══════════════════════════
-plotshape(buyFull and labelTxt == "UP/DOWN",   "UP (voll)",   shape.triangleup, location.belowbar, colUp, text = "UP",   textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(buyWeak and labelTxt == "UP/DOWN",   "UP",          shape.triangleup, location.belowbar, colUpW, text = "UP",   textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(buyFull and labelTxt == "BULL/BEAR", "BULL (voll)", shape.triangleup, location.belowbar, colUp, text = "BULL", textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(buyWeak and labelTxt == "BULL/BEAR", "BULL",        shape.triangleup, location.belowbar, colUpW, text = "BULL", textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(buyFull and labelTxt == "PUT/CALL",  "PUT (voll)",  shape.triangleup, location.belowbar, colUp, text = "PUT",  textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(buyWeak and labelTxt == "PUT/CALL",  "PUT",         shape.triangleup, location.belowbar, colUpW, text = "PUT",  textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(buyFull and labelTxt == "BUY/SELL",  "BUY (voll)",  shape.triangleup, location.belowbar, colUp, text = "BUY",  textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(buyWeak and labelTxt == "BUY/SELL",  "BUY",         shape.triangleup, location.belowbar, colUpW, text = "BUY",  textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(sellFull and labelTxt == "UP/DOWN",   "DOWN (voll)", shape.triangledown, location.abovebar, colDown, text = "DOWN", textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(sellWeak and labelTxt == "UP/DOWN",   "DOWN",        shape.triangledown, location.abovebar, colDownW, text = "DOWN", textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(sellFull and labelTxt == "BULL/BEAR", "BEAR (voll)", shape.triangledown, location.abovebar, colDown, text = "BEAR", textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(sellWeak and labelTxt == "BULL/BEAR", "BEAR",        shape.triangledown, location.abovebar, colDownW, text = "BEAR", textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(sellFull and labelTxt == "PUT/CALL",  "CALL (voll)", shape.triangledown, location.abovebar, colDown, text = "CALL", textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.small,  display = display.pane)
-plotshape(sellFull and labelTxt == "BUY/SELL",  "SELL (voll)", shape.triangledown, location.abovebar, colDown, text = "SELL", textcolor = color.white, size = size.normal, display = display.pane)
-plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.small,  display = display.pane)
+plotshape(buyFull and labelTxt == "UP/DOWN",   "UP (voll)",   shape.triangleup, location.belowbar, colUp, text = "UP",   textcolor = color.white, size = size.small, display = display.pane)
+plotshape(buyWeak and labelTxt == "UP/DOWN",   "UP",          shape.triangleup, location.belowbar, colUpW, text = "UP",   textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyFull and labelTxt == "BULL/BEAR", "BULL (voll)", shape.triangleup, location.belowbar, colUp, text = "BULL", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(buyWeak and labelTxt == "BULL/BEAR", "BULL",        shape.triangleup, location.belowbar, colUpW, text = "BULL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyFull and labelTxt == "PUT/CALL",  "PUT (voll)",  shape.triangleup, location.belowbar, colUp, text = "PUT",  textcolor = color.white, size = size.small, display = display.pane)
+plotshape(buyWeak and labelTxt == "PUT/CALL",  "PUT",         shape.triangleup, location.belowbar, colUpW, text = "PUT",  textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyFull and labelTxt == "BUY/SELL",  "BUY (voll)",  shape.triangleup, location.belowbar, colUp, text = "BUY",  textcolor = color.white, size = size.small, display = display.pane)
+plotshape(buyWeak and labelTxt == "BUY/SELL",  "BUY",         shape.triangleup, location.belowbar, colUpW, text = "BUY",  textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellFull and labelTxt == "UP/DOWN",   "DOWN (voll)", shape.triangledown, location.abovebar, colDown, text = "DOWN", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(sellWeak and labelTxt == "UP/DOWN",   "DOWN",        shape.triangledown, location.abovebar, colDownW, text = "DOWN", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellFull and labelTxt == "BULL/BEAR", "BEAR (voll)", shape.triangledown, location.abovebar, colDown, text = "BEAR", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(sellWeak and labelTxt == "BULL/BEAR", "BEAR",        shape.triangledown, location.abovebar, colDownW, text = "BEAR", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellFull and labelTxt == "PUT/CALL",  "CALL (voll)", shape.triangledown, location.abovebar, colDown, text = "CALL", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellFull and labelTxt == "BUY/SELL",  "SELL (voll)", shape.triangledown, location.abovebar, colDown, text = "SELL", textcolor = color.white, size = size.small, display = display.pane)
+plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.tiny,  display = display.pane)
 
 // dezentes Trend-Band (Statuszeile bleibt sauber: display.pane)
 pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100), display = display.pane, editable = false)
 pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100), display = display.pane, editable = false)
 fill(pF, pS, color = bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85), title = "Trend Band")
+
+// ══════════════ EMA 50 / 100 / 200 (dynamische Unterstützung/Widerstand) ══════════════
+ema50  = ta.ema(close, 50)
+ema100 = ta.ema(close, 100)
+ema200 = ta.ema(close, 200)
+plot(showEMAs ? ema50  : na, "EMA 50",  color = color.new(#42A5F5, 30), linewidth = 1, display = display.pane)
+plot(showEMAs ? ema100 : na, "EMA 100", color = color.new(#FFCA28, 30), linewidth = 1, display = display.pane)
+plot(showEMAs ? ema200 : na, "EMA 200", color = color.new(#EF6C00, 25), linewidth = 2, display = display.pane)
 
 // ══════════════ MARKANTE S/R-PIVOTS (Basis der Options-Zonen) ══════════════
 // Pivots (mit Zeitstempel) sammeln; ein Level ist markant, wenn ≥ minTouch
@@ -301,18 +335,22 @@ var array<float> pivLows  = array.new_float()
 var array<int>   pivLowT  = array.new_int()
 var array<float> pivHighs = array.new_float()
 var array<int>   pivHighT = array.new_int()
-pl_ = ta.pivotlow(low,  pivLb, pivLb)
-ph_ = ta.pivothigh(high, pivLb, pivLb)
+// Für Optionen zählt der KÖRPER der Kerze (Open/Close) — Dochte sind oft
+// nur kurzes Überschießen (per Input umschaltbar).
+srcLoPiv = useBody ? math.min(open, close) : low
+srcHiPiv = useBody ? math.max(open, close) : high
+pl_ = ta.pivotlow(srcLoPiv,  pivLb, pivLb)
+ph_ = ta.pivothigh(srcHiPiv, pivLb, pivLb)
 if not na(pl_)
     array.push(pivLows, pl_)
     array.push(pivLowT, time[pivLb])
-    if array.size(pivLows) > 100
+    if array.size(pivLows) > 300
         array.shift(pivLows)
         array.shift(pivLowT)
 if not na(ph_)
     array.push(pivHighs, ph_)
     array.push(pivHighT, time[pivLb])
-    if array.size(pivHighs) > 100
+    if array.size(pivHighs) > 300
         array.shift(pivHighs)
         array.shift(pivHighT)
 
@@ -568,7 +606,8 @@ if barstate.islast and showZones
                     float midZ = (bHi + bLo) / 2
                     bLo := midZ - 0.075 * atr14
                     bHi := midZ + 0.075 * atr14
-                // Sterne: ★ = 2 Berührungen · ★★ = 3+ · +★ Seitenwechsel · +★ Volumen
+                // Sterne: ★ = 2 Berührungen · ★★ = 3+ · +★ Seitenwechsel ·
+                // +★ Volumen (VAL/VAH) · +★ EMA-Bestätigung — max. ★★★★
                 int stars = touches >= 3 ? 2 : 1
                 bool roleRev = nLo > 0 and nHi > 0
                 if roleRev
@@ -577,6 +616,17 @@ if barstate.islast and showZones
                 bool vaHit = not na(vaRef) and vaRef >= bLo - tolZ and vaRef <= bHi + tolZ
                 if vaHit
                     stars += 1
+                // EMA-Bestätigung: liegt eine der grossen EMAs in der Zone?
+                string emaHitName = ""
+                if ema50 >= bLo - tolZ and ema50 <= bHi + tolZ
+                    emaHitName := "EMA 50"
+                else if ema100 >= bLo - tolZ and ema100 <= bHi + tolZ
+                    emaHitName := "EMA 100"
+                else if ema200 >= bLo - tolZ and ema200 <= bHi + tolZ
+                    emaHitName := "EMA 200"
+                if emaHitName != ""
+                    stars += 1
+                stars := math.min(stars, 4)
                 color zCol = isSup ? colUp : colDown
                 // Zone über die GANZE betrachtete Periode: von der ersten
                 // Berührung des Levels bis heute (xloc.bar_time)
@@ -593,6 +643,7 @@ if barstate.islast and showZones
                 string txt = isSup ? "🟢 PUT-Zone " : "🔴 CALL-Zone "
                 txt += f_starsTxt(stars)
                 txt += " · " + str.tostring(otmPct, "#.#") + "% OTM"
+                txt += " · " + str.tostring(touches) + "×"
                 string tip = isSup ? "Put-Strike unter " : "Call-Strike über "
                 tip += str.tostring(strike, format.mintick)
                 tip += " (" + str.tostring(otmPct, "#.#") + "% vom Kurs entfernt)"
@@ -602,7 +653,9 @@ if barstate.islast and showZones
                     tip += isSup ? "\nSeitenwechsel: alter Widerstand = neue Unterstützung" : "\nSeitenwechsel: alte Unterstützung = neuer Widerstand"
                 if vaHit
                     tip += isSup ? "\nVolumen-Bestätigung (VAL)" : "\nVolumen-Bestätigung (VAH)"
-                tip += "\n★ = 2 Berührungen · ★★ = 3+ Berührungen · +★ Seitenwechsel · +★ Volumen-Bestätigung"
+                if emaHitName != ""
+                    tip += "\nEMA-Bestätigung (" + emaHitName + " liegt in der Zone)"
+                tip += "\n★ = 2 Berührungen · ★★ = 3+ · +★ Seitenwechsel · +★ Volumen · +★ EMA (max. ★★★★)"
                 array.push(zLabels, label.new(bar_index + 3, (bLo + bHi) / 2, txt,
                      style = label.style_label_left, color = color.new(zCol, 55),
                      textcolor = color.white, size = z == 1 ? size.normal : size.small,
