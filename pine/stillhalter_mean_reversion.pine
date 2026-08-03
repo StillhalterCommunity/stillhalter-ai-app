@@ -2,10 +2,21 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.2
+//  Stillhalter Community® – MEAN REVERSION v1.3
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.2 (Feedback):
+//  NEU in v1.3 (Raster-Studie über 120 Tiefs + 119 Hochs, 8 Aktien, 1D):
+//   • Basis-Länge Standard 30 → 40: präziser (86% statt 80%) UND
+//     seltener (nur ~12 Signale/Jahr statt 14) — die Mean Reversion ist
+//     damit der bewusste AUSNAHME-Marker neben dem Confluence-Modell.
+//   • SMA bestätigt (bewusst KEIN EMA): Der EMA läuft dem Kurs nach und
+//     verwässert die Standardabweichung — bei gleicher Länge 9 Punkte
+//     weniger Präzision. Basis trotzdem wählbar (SMA/EMA).
+//   • Schwelle ±1σ bestätigt: höhere Schwellen (±1.5/±2σ) waren in der
+//     Messung SCHLECHTER — der Rückweg über die ±1σ-Linie nach einem
+//     tieferen Extrem ist das saubere Signal.
+//   • Hintergrund-Schattierung der Bänder unverändert (Feedback: optimal).
+//  v1.2 (Feedback):
 //   • Jetzt INDIKATOR statt Strategie — die irreführenden Order-Pfeile mit
 //     Beschriftung und Stückzahl (automatische Strategie-Marker) sind weg.
 //     Backtest läuft stattdessen als kompakte Tabelle oben rechts
@@ -24,7 +35,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.2", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.3", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -32,12 +43,21 @@ grp_mr = "MEAN REVERT SETTINGS"
 trading_style  = input.string("neutral", "Trading Style", options = ["neutral", "bullish", "bearish"], group = grp_mr,
      tooltip = "Verschiebt die Bänder leicht: bullish = Kauf-Seite kommt früher dran "
           + "(Bänder etwas tiefer), bearish umgekehrt. Neutral = Standard.")
-noise_suppress = input.int(30, "BB Länge (SMA)", minval = 5, maxval = 100, group = grp_mr,
-     tooltip = "Anzahl Kerzen für Durchschnitt und Standardabweichung. 30 = Standard "
-          + "und identisch zur Mean-Reversion-Komponente im Stillhalter Confluence.")
+ma_basis       = input.string("SMA", "Basis (Mittellinie)", options = ["SMA", "EMA"], group = grp_mr,
+     tooltip = "SMA = Standard und Studien-Sieger: Der einfache Durchschnitt ist der "
+          + "stabile Anker, den Mean Reversion braucht. Der EMA läuft dem Kurs "
+          + "hinterher und verwässert die Überdehnungs-Messung (in der Studie ~9 "
+          + "Prozentpunkte weniger Präzision bei gleicher Länge).")
+noise_suppress = input.int(40, "Basis-Länge (Kerzen)", minval = 5, maxval = 100, group = grp_mr,
+     tooltip = "Anzahl Kerzen für Durchschnitt und Standardabweichung. 40 = Standard "
+          + "(Raster-Studie: präziseste Signale bei nur ~12 Signalen/Jahr — die "
+          + "Mean Reversion bleibt der seltene Ausnahme-Marker). Identisch zur "
+          + "Mean-Reversion-Komponente im Stillhalter Confluence.")
 signal_thresh  = input.float(1.0, "Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.1, group = grp_mr,
      tooltip = "Ab wie vielen Standardabweichungen der Kurs als überdehnt gilt. "
-          + "1.0 = identisch zum Confluence (±1σ). Höher = seltenere, extremere Signale.")
+          + "1.0 = Standard und Studien-Sieger — höhere Schwellen waren in der "
+          + "Messung schlechter, weil der Rückweg über die ±1σ-Linie nach einem "
+          + "tieferen Extrem das saubere Signal ist.")
 
 // ─── Inputs: Signale ─────────────────────────────────────────────────────────
 grp_sig = "SIGNALE"
@@ -88,7 +108,7 @@ btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-En
 initialCapital = input.float(10000, "Startkapital", minval = 1, group = grp_bt)
 
 // ─── Berechnung ──────────────────────────────────────────────────────────────
-float ma = ta.sma(close, noise_suppress)
+float ma = ma_basis == "EMA" ? ta.ema(close, noise_suppress) : ta.sma(close, noise_suppress)
 float sd = ta.stdev(close, noise_suppress)
 
 float bias_sd = switch trading_style

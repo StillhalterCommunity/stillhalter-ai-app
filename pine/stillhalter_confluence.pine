@@ -285,7 +285,7 @@ osLevel     = 25
 obLevel     = 75
 stochLen    = 14
 stochSmooth = 3
-mrLen       = 30
+mrLen       = 40
 
 // ══════════════════════════ 1) TREND MODEL ══════════════════════════
 fastLen = trendMode == "Very Tight" ? 2 : trendMode == "Tight" ? 4 : trendMode == "Loose" ? 6 : 13
