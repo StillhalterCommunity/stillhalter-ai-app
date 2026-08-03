@@ -2,12 +2,21 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.5
+//  Stillhalter Community® – CONFLUENCE v0.9.6
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.5:
+//  NEU in v0.9.6 (nach Timing-Studie über 120 echte Kurstiefs, 8 Aktien, 1D):
+//   • Konfluenz-Fenster Standard 3 → 4: Dual Stochastik reagiert im Median
+//     +2 Kerzen nach dem Tief, Trend +3, MACD Pro +4 — im 90%-Fall liegen
+//     bis zu 5 Kerzen zwischen den Komponenten. Fenster 4 erwischt 88%
+//     statt 85% der Tiefs bei nur ~7% mehr Signalen.
+//   • ☆ JUNGE ZONEN: Findet eine Seite weniger starke Zonen als erlaubt,
+//     werden 1-Berührungs-Levels und das jüngste (noch unbestätigte)
+//     Swing-Tief/-Hoch als '☆ jung' ergänzt — damit fehlen die
+//     naheliegendsten Zonen direkt am Kurs nicht mehr (abschaltbar).
+//  v0.9.5:
 //   • Dreiecke kleiner (voll = small, schwach = tiny) — verdecken den
 //     Preischart nicht mehr.
 //   • Options-Zonen basieren jetzt auf den KERZENKÖRPERN (Open/Close)
@@ -46,7 +55,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.5", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.6", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -59,10 +68,11 @@ trendMode = input.string("Very Tight", "Trend Mode",
           + "(weniger, dafür stabilere Signale).")
 
 grpC = "Confluence"
-confWin  = input.int(3, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
-     tooltip = "Wie lange ein Komponenten-Signal als 'frisch' zählt. Beispiel 3: dreht "
-          + "der Trend heute und die Stochastik vor 2 Kerzen, zählt beides zusammen "
-          + "als Konfluenz.")
+confWin  = input.int(4, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
+     tooltip = "Wie lange ein Komponenten-Signal als 'frisch' zählt. Standard 4 — aus "
+          + "einer Studie über 120 echte Kurstiefs: Stochastik reagiert im Median 2, "
+          + "Trend 3, MACD Pro 4 Kerzen nach dem Tief; Fenster 4 fängt so auch den "
+          + "MACD als Nachzügler ein (88% der Tiefs statt 85% bei Fenster 3).")
 minScore = input.int(2, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5, group = grpC,
      tooltip = "Wie viele Komponenten (Trend Model, MACD Pro, Dual Stochastik) gleichzeitig "
           + "in Trade-Richtung stehen müssen, damit ein Dreieck erscheint. "
@@ -126,6 +136,11 @@ showZones  = input.bool(true, "Options-Zonen anzeigen", group = grpZ,
      tooltip = "Grüne Boxen unter dem Kurs = Short-Put-Zonen · rote Boxen über dem "
           + "Kurs = Short-Call-Zonen. Regel: Put-Strike UNTER die grüne Box, "
           + "Call-Strike ÜBER die rote Box.")
+showYoung  = input.bool(true, "☆ Junge Zonen ergänzen (1× berührt / unbestätigt)", group = grpZ,
+     tooltip = "Findet eine Seite weniger STARKE Zonen als erlaubt, werden Levels mit "
+          + "nur 1 Berührung und das jüngste (noch unbestätigte) Swing-Tief/-Hoch "
+          + "als '☆ jung' ergänzt — so fehlen die naheliegendsten Zonen direkt am "
+          + "Kurs nicht mehr. Junge Zonen sind blasser und tragen ☆ statt ★.")
 zoneMonths = input.int(12, "Rückblick (Monate)", minval = 3, maxval = 48, group = grpZ,
      tooltip = "Wie weit zurück lokale Hochs und Tiefs für die Zonen gesammelt werden. "
           + "Empfehlung: 12–24 auf 4h/1D · 36+ auf dem Wochenchart. Ältere Levels "
@@ -549,6 +564,11 @@ f_firstTouch(array<float> arr, array<int> tArr, float lvl, float tol, int tMin) 
                 first := math.min(first, array.get(tArr, i))
     first
 
+// Jüngstes Swing-Tief/-Hoch (noch KEIN bestätigter Pivot — die ersten pivLb
+// Kerzen nach einem Umkehrpunkt existiert er offiziell noch nicht)
+recLoY = ta.lowest(srcLoPiv,  pivLb + 5)
+recHiY = ta.highest(srcHiPiv, pivLb + 5)
+
 var array<box>   zBoxes  = array.new<box>()
 var array<label> zLabels = array.new<label>()
 
@@ -595,10 +615,33 @@ if barstate.islast and showZones
                         if nLo + nHi >= minTouch
                             if na(best) or (isSup ? lvl > best : lvl < best)
                                 best := lvl
+            // ☆ Fallback: zu wenig starke Zonen → 1-Berührungs-Levels und das
+            // jüngste (unbestätigte) Swing-Level zulassen, damit die
+            // naheliegendsten Zonen am Kurs nicht fehlen
+            if na(best) and showYoung
+                if array.size(cands) > 0
+                    for i = 0 to array.size(cands) - 1
+                        lvl = array.get(cands, i)
+                        bool okSideY = isSup ? lvl <= close - zoneDistMult * atr14 : lvl >= close + zoneDistMult * atr14
+                        bool okGapY = true
+                        if not na(boundary)
+                            okGapY := isSup ? lvl <= boundary - zoneGapMult * atr14 : lvl >= boundary + zoneGapMult * atr14
+                        if okSideY and okGapY
+                            if na(best) or (isSup ? lvl > best : lvl < best)
+                                best := lvl
+                float recCand = isSup ? recLoY : recHiY
+                bool okSideR = isSup ? recCand <= close - zoneDistMult * atr14 : recCand >= close + zoneDistMult * atr14
+                bool okGapR = true
+                if not na(boundary)
+                    okGapR := isSup ? recCand <= boundary - zoneGapMult * atr14 : recCand >= boundary + zoneGapMult * atr14
+                if okSideR and okGapR
+                    if na(best) or (isSup ? recCand > best : recCand < best)
+                        best := recCand
             if not na(best)
                 nLo = f_countSince(pivLows,  pivLowT,  best, tolZ, tMinZ)
                 nHi = f_countSince(pivHighs, pivHighT, best, tolZ, tMinZ)
-                touches = nLo + nHi
+                touches = math.max(nLo + nHi, 1)
+                bool isYoung = touches < minTouch
                 // Zonenband = Spanne aller Cluster-Mitglieder (mind. 0.15 ATR dick)
                 float bLo = math.min(f_bandSince(pivLows, pivLowT, best, tolZ, tMinZ, true), f_bandSince(pivHighs, pivHighT, best, tolZ, tMinZ, true))
                 float bHi = math.max(f_bandSince(pivLows, pivLowT, best, tolZ, tMinZ, false), f_bandSince(pivHighs, pivHighT, best, tolZ, tMinZ, false))
@@ -634,17 +677,18 @@ if barstate.islast and showZones
                      f_firstTouch(pivHighs, pivHighT, best, tolZ, tMinZ))
                 array.push(zBoxes, box.new(firstT, bHi, time, bLo,
                      xloc = xloc.bar_time,
-                     border_color = color.new(zCol, 35), border_width = 1,
-                     bgcolor = color.new(zCol, z == 1 ? 82 : 90)))
+                     border_color = color.new(zCol, isYoung ? 60 : 35), border_width = 1,
+                     bgcolor = color.new(zCol, isYoung ? 93 : z == 1 ? 82 : 90)))
                 float strike = isSup ? bLo : bHi
                 float otmPct = isSup ? (close - strike) / close * 100 : (strike - close) / close * 100
                 // Label bewusst schlank: Richtung + Sterne + OTM % —
                 // exakte Preise & Begründung nur im Hover-Tooltip
                 string txt = isSup ? "🟢 PUT-Zone " : "🔴 CALL-Zone "
-                txt += f_starsTxt(stars)
+                txt += isYoung ? "☆ jung" : f_starsTxt(stars)
                 txt += " · " + str.tostring(otmPct, "#.#") + "% OTM"
                 txt += " · " + str.tostring(touches) + "×"
-                string tip = isSup ? "Put-Strike unter " : "Call-Strike über "
+                string tip = isYoung ? "☆ JUNGES LEVEL — erst 1× berührt bzw. noch nicht als Pivot bestätigt\n" : ""
+                tip += isSup ? "Put-Strike unter " : "Call-Strike über "
                 tip += str.tostring(strike, format.mintick)
                 tip += " (" + str.tostring(otmPct, "#.#") + "% vom Kurs entfernt)"
                 tip += "\nZone " + str.tostring(bLo, format.mintick) + " – " + str.tostring(bHi, format.mintick)

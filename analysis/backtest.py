@@ -252,7 +252,7 @@ def run_backtest(
         _last = pd.Series(np.where(evt.values, _idx, np.nan), index=evt.index).ffill()
         return pd.Series(_idx, index=evt.index) - _last
 
-    _cw = 3   # Konfluenz-Fenster (Kerzen) — wie Indikator-Standard
+    _cw = 4   # Konfluenz-Fenster (Kerzen) — wie Indikator-Standard (Timing-Studie)
     _t_ok = sc_bullish & (_bars_since(sc_cross_up) < _cw)
     _m_ok = (_macd_hist > 0) & (_bars_since(_macd_cross_up) < _cw)
     _s_ok = _bars_since(_stoch_evt) < _cw

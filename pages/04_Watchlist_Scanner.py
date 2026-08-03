@@ -1413,7 +1413,7 @@ else:
 
     # ── 🚦 Stillhalter Confluence je (Ticker, Zeitebene) ──────────────────────
     # Suchbasis beider Modi: identische Logik wie der TradingView-Indikator
-    # (Trend Model + MACD Pro + Dual Stochastik, Konfluenz-Fenster 3).
+    # (Trend Model + MACD Pro + Dual Stochastik, Konfluenz-Fenster 4).
     if "🚦 Confluence" not in results.columns and "Ticker" in results.columns:
         from analysis.confluence import confluence_for as _conf_for
 

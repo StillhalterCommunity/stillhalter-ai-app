@@ -4,7 +4,7 @@ Stillhalter Confluence — Python-Port des TradingView-Indikators (v0.9).
 Identische Logik wie pine/stillhalter_confluence.pine (dort gegeneinander
 validiert): Trend Model (EMA 2/9) + MACD Pro (10/35/5, Hist-Nulldurchgang)
 + Dual Stochastic (14,3,3 bricht 20/80, während 35,10,5 überverkauft/-kauft),
-Konfluenz-Fenster (Ereignis zählt, solange frisch UND Zustand gilt).
+Konfluenz-Fenster (Ereignis zählt, solange frisch UND Zustand gilt; Fenster-Standard 4 wie im TV-Indikator).
 
 confluence_now(df, win)   → Scores/Zustände der LETZTEN Kerze
 confluence_for(ticker, tf) → holt Kursdaten der Zeitebene (4h/1D/1W) und
@@ -24,7 +24,7 @@ def _since(evt: pd.Series) -> pd.Series:
     return pd.Series(idx, index=evt.index) - last
 
 
-def confluence_now(df: pd.DataFrame, win: int = 3,
+def confluence_now(df: pd.DataFrame, win: int = 4,
                    os_level: int = 20, ob_level: int = 80) -> dict:
     """Bewertet die letzte Kerze. Erwartet Spalten High/Low/Close.
     Rückgabe: buy_score/sell_score (0–3), Komponenten-Flags, frische Trigger."""
@@ -72,7 +72,7 @@ def confluence_now(df: pd.DataFrame, win: int = 3,
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def confluence_for(ticker: str, tf: str = "1D", win: int = 3) -> dict:
+def confluence_for(ticker: str, tf: str = "1D", win: int = 4) -> dict:
     """Confluence-Lage eines Tickers auf einer Zeitebene ('4h'|'1D'|'1W')."""
     try:
         from analysis.multi_timeframe import _fetch_tf_data, _resample_to_4h

@@ -92,7 +92,7 @@ with tab_grid:
                                 key="rs_signal",
                                 help="Stillhalter Confluence = identische Logik wie der "
                                      "TradingView-Indikator (Trend Model + MACD Pro + "
-                                     "Dual Stochastik, Konfluenz-Fenster 3). "
+                                     "Dual Stochastik, Konfluenz-Fenster 4). "
                                      "'SC Trend bullish' = regelmäßig verkaufen, solange "
                                      "der Trend passt (max. 1 Trade/Monat)")
 
