@@ -2,12 +2,21 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.7
+//  Stillhalter Community® – CONFLUENCE v0.9.8
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.7 (zweite Timing-Studie, gleiche 120 Kurstiefs):
+//  NEU in v0.9.8 (Stochastik-Raster-Studie über 120 Tiefs + 119 Hochs):
+//   • Stochastik bleibt die 14,3 — aber Schwellen-Standard jetzt 25/75
+//     statt 20/80: erkennt 81% statt 68% der Tiefs (Hochs 77% statt 71%)
+//     bei sogar HÖHERER Präzision (77% statt 69%). Länge/Glättung jetzt
+//     einstellbar (wer mehr Extrempunkte will: 10,3 · 25/75).
+//   • Aufgeräumte Standard-Anzeige: Dreiecke OHNE Text (Beschriftung
+//     zuschaltbar), Trend-Band-Schleier aus (zuschaltbar), Volumen-Balken
+//     aus (zuschaltbar). 2/3-Dreiecke klein + halbtransparent ('in
+//     Entstehung'), 3/3 größer + kräftig.
+//  v0.9.7 (zweite Timing-Studie, gleiche 120 Kurstiefs):
 //   • Stochastik-Modus: SINGLE (k1 kreuzt 20/80) ist neuer Standard — die
 //     langsame k2-Linie verbesserte die Signalqualität kaum (69% vs. 67%
 //     Präzision), warf aber 2/3 der gültigen Tiefs weg (26% vs. 68%
@@ -65,7 +74,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.7", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.8", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -87,12 +96,19 @@ minScore = input.int(2, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5
      tooltip = "Wie viele Komponenten (Trend Model, MACD Pro, Dual Stochastik) gleichzeitig "
           + "in Trade-Richtung stehen müssen, damit ein Dreieck erscheint. "
           + "2 von 3 = bewährter Standard.")
-osLevel  = input.int(20, "Stochastik überverkauft", minval = 5,  maxval = 40, group = grpC,
-     tooltip = "Unter diesem Wert gilt die Stochastik als überverkauft (Kurs nahe am "
-          + "Boden der letzten Wochen → Erholung wahrscheinlicher).")
-obLevel  = input.int(80, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC,
-     tooltip = "Über diesem Wert gilt die Stochastik als überkauft (Kurs nahe am Hoch "
-          + "der letzten Wochen → Rücksetzer wahrscheinlicher).")
+osLevel  = input.int(25, "Stochastik überverkauft", minval = 5,  maxval = 40, group = grpC,
+     tooltip = "Unter diesem Wert gilt die Stochastik als überverkauft. Standard 25 — "
+          + "Raster-Studie über 120 Tiefs: 25 erkennt 81% statt 68% (bei 20) der "
+          + "Kurstiefs, mit sogar höherer Präzision.")
+obLevel  = input.int(75, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC,
+     tooltip = "Über diesem Wert gilt die Stochastik als überkauft. Standard 75 — "
+          + "erkennt 77% statt 71% (bei 80) der Kurshochs.")
+stochLen    = input.int(14, "Stochastik Länge", minval = 5, maxval = 30, group = grpC,
+     tooltip = "Länge der schnellen Stochastik-Linie. 14 = Standard (bester Kompromiss "
+          + "der Studie). Wer mehr Extrempunkte erwischen will: 10 (mehr Signale, "
+          + "etwas mehr Rauschen).")
+stochSmooth = input.int(3, "Stochastik Glättung", minval = 1, maxval = 10, group = grpC,
+     tooltip = "Glättung der Stochastik-Linie. 3 = Standard.")
 stochMode = input.string("Single (k1 kreuzt 20/80)", "Stochastik-Modus",
      options = ["Single (k1 kreuzt 20/80)", "Dual (klassisch, k2-Filter)"], group = grpC,
      tooltip = "Single = nur die schnelle Stochastik-Linie muss die Schwelle brechen "
@@ -126,17 +142,24 @@ adxFilter = input.bool(false, "ADX-Filter: Signale nur bei ADX(14) > 20", group 
           + "Seitwärtsphasen aus.")
 
 grpS = "Anzeige"
-labelTxt  = input.string("UP/DOWN", "Dreieck-Beschriftung",
-     options = ["UP/DOWN", "BULL/BEAR", "PUT/CALL", "BUY/SELL"], group = grpS,
-     tooltip = "Nur Optik: Welches Wort am Dreieck steht. PUT/CALL = Stillhalter-Sicht "
-          + "(grünes Dreieck = Short-Put-Gelegenheit, rotes = Short-Call).")
+labelTxt  = input.string("Ohne Text", "Dreieck-Beschriftung",
+     options = ["Ohne Text", "UP/DOWN", "BULL/BEAR", "PUT/CALL", "BUY/SELL"], group = grpS,
+     tooltip = "Standard: reine Dreiecke ohne Wort (aufgeräumter Chart). Wer eine "
+          + "Beschriftung möchte: UP/DOWN, BULL/BEAR, PUT/CALL oder BUY/SELL. "
+          + "PUT/CALL = Stillhalter-Sicht (grün = Short-Put-Gelegenheit, "
+          + "rot = Short-Call).")
 colUp     = input.color(#00C853, "UP-Farbe (knallgrün)",  group = grpS,
      tooltip = "Farbe der UP-Dreiecke und der Put-Zonen.")
 colDown   = input.color(#FF1744, "DOWN-Farbe (knallrot)", group = grpS,
      tooltip = "Farbe der DOWN-Dreiecke und der Call-Zonen.")
-weakTransp = input.int(40, "Transparenz schwächere Stufe (%)", minval = 10, maxval = 85, group = grpS,
-     tooltip = "VOLLE Konfluenz = großes, kräftiges Dreieck · schwächere (z. B. 2 von 3) "
-          + "= kleineres Dreieck mit dieser Transparenz.")
+weakTransp = input.int(50, "Transparenz schwächere Stufe (%)", minval = 10, maxval = 85, group = grpS,
+     tooltip = "VOLLE Konfluenz (z. B. 3/3) = größeres, kräftiges Dreieck · schwächere "
+          + "(z. B. 2/3) = kleineres, halbtransparentes Dreieck — wie ein Signal, "
+          + "das gerade in der Entstehung ist.")
+showTrendBand = input.bool(false, "Trend-Band (Schleier) anzeigen", group = grpS,
+     tooltip = "Färbt den Bereich zwischen schneller und langsamer Trendlinie wie beim "
+          + "Trend-Model-Indikator (grün = aufwärts, gelb = abwärts). Standard aus — "
+          + "wer das Trend Model separat auf dem Chart hat, braucht es doppelt nicht.")
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS,
      tooltip = "Kleine Übersicht unten rechts: welche Komponente aktuell auf UP (▲) "
           + "bzw. DOWN (▼) steht.")
@@ -207,7 +230,7 @@ showVP = input.bool(true, "Volumenprofil anzeigen", group = grpVP,
           + "meistgehandelter Preis · VAH/VAL = obere/untere Grenze der Zone, in der "
           + "70 % des Volumens umgesetzt wurden. Diese Levels wirken oft als "
           + "Unterstützung/Widerstand.")
-showVPBars = input.bool(true, "Volumen-Balken anzeigen", group = grpVP,
+showVPBars = input.bool(false, "Volumen-Balken anzeigen", group = grpVP,
      tooltip = "Zeichnet die horizontalen Volumen-Balken am linken Rand der Periode "
           + "(wie TradingViews Volume Profile). Value-Area-Zeilen kräftig, Rest blass, "
           + "POC-Zeile hervorgehoben.")
@@ -265,7 +288,7 @@ macdBuyEvt  = macdFrueh ? (hist > hist[1] and hist[1] <= hist[2] and hist < 0) :
 macdSellEvt = macdFrueh ? (hist < hist[1] and hist[1] >= hist[2] and hist > 0) : ta.crossunder(hist, 0)
 
 // ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
-k1 = ta.sma(ta.stoch(close, high, low, 14), 3)
+k1 = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
 k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
 
 dualStoch = stochMode == "Dual (klassisch, k2-Filter)"
@@ -357,11 +380,15 @@ plotshape(sellFull and labelTxt == "PUT/CALL",  "CALL (voll)", shape.triangledow
 plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.tiny,  display = display.pane)
 plotshape(sellFull and labelTxt == "BUY/SELL",  "SELL (voll)", shape.triangledown, location.abovebar, colDown, text = "SELL", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyFull  and labelTxt == "Ohne Text", "UP (voll, ohne Text)",   shape.triangleup,   location.belowbar, colUp,    size = size.small, display = display.pane)
+plotshape(buyWeak  and labelTxt == "Ohne Text", "UP (ohne Text)",         shape.triangleup,   location.belowbar, colUpW,   size = size.tiny,  display = display.pane)
+plotshape(sellFull and labelTxt == "Ohne Text", "DOWN (voll, ohne Text)", shape.triangledown, location.abovebar, colDown,  size = size.small, display = display.pane)
+plotshape(sellWeak and labelTxt == "Ohne Text", "DOWN (ohne Text)",       shape.triangledown, location.abovebar, colDownW, size = size.tiny,  display = display.pane)
 
 // dezentes Trend-Band (Statuszeile bleibt sauber: display.pane)
 pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100), display = display.pane, editable = false)
 pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100), display = display.pane, editable = false)
-fill(pF, pS, color = bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85), title = "Trend Band")
+fill(pF, pS, color = showTrendBand ? (bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85)) : na, title = "Trend Band")
 
 // ══════════════ EMA 50 / 100 / 200 (dynamische Unterstützung/Widerstand) ══════════════
 ema50  = ta.ema(close, 50)

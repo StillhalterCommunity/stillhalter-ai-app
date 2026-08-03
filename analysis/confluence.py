@@ -25,7 +25,7 @@ def _since(evt: pd.Series) -> pd.Series:
 
 
 def confluence_now(df: pd.DataFrame, win: int = 4,
-                   os_level: int = 20, ob_level: int = 80) -> dict:
+                   os_level: int = 25, ob_level: int = 75) -> dict:
     """Bewertet die letzte Kerze. Erwartet Spalten High/Low/Close.
     Rückgabe: buy_score/sell_score (0–3), Komponenten-Flags, frische Trigger."""
     if df is None or len(df) < 40:
