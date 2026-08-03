@@ -2,12 +2,28 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.9
+//  Stillhalter Community® – CONFLUENCE v0.9.10
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.9 (Fix: naheliegende Zonen fehlten — MRVL-Fall):
+//  NEU in v0.9.10:
+//   • Berührungen werden EHRLICH gezählt: echte Kerzen-Kontakte mit der
+//     Zone (aufeinanderfolgende Kerzen = 1 Berührung). Messung: die
+//     Pivot-Zählung unterschätzte um Faktor ~4 (Ø 2,5 statt real 9,5).
+//     Pivots dienen nur noch der Level-Findung (Standard-Länge 6).
+//   • Mean-Reversion-Komponente = die bestätigten Umkehr-PUNKTE des
+//     Mean-Reversion-Indikators (Extrem jenseits der Bänder dreht) —
+//     inkl. grüner/roter Punkte im Chart, wenn aktiviert.
+//   • Trend-Band in den ORIGINALFARBEN des Trend-Model-Indikators
+//     (einstellbar), weiterhin standardmäßig aus.
+//   • Dreiecke: EINE Farbe, EINE Größe — 2/3 unterscheidet sich nur
+//     durch Transparenz ('in Entstehung').
+//   • Standard: Dual-Stochastik · MACD-Kreuzung. Volumenprofil
+//     standardmäßig komplett aus.
+//   • Einstellungen ohne interne Kennzahlen (Geschäftsgeheimnis) —
+//     Parameter sind fest einkalibriert statt sichtbar.
+//  v0.9.9 (Fix: naheliegende Zonen fehlten — MRVL-Fall):
 //   • Die NÄCHSTGELEGENE relevante Zone gewinnt jetzt IMMER den ersten
 //     Slot — stark ODER ☆ jung (max. 1 junge Zone je Seite). Vorher
 //     blockierten weiter entfernte starke Alt-Zonen die naheliegenden.
@@ -85,7 +101,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.9", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.10", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -107,26 +123,13 @@ minScore = input.int(2, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 5
      tooltip = "Wie viele Komponenten (Trend Model, MACD Pro, Dual Stochastik) gleichzeitig "
           + "in Trade-Richtung stehen müssen, damit ein Dreieck erscheint. "
           + "2 von 3 = bewährter Standard.")
-osLevel  = input.int(25, "Stochastik überverkauft", minval = 5,  maxval = 40, group = grpC,
-     tooltip = "Unter diesem Wert gilt die Stochastik als überverkauft. Standard 25 — "
-          + "Raster-Studie über 120 Tiefs: 25 erkennt 81% statt 68% (bei 20) der "
-          + "Kurstiefs, mit sogar höherer Präzision.")
-obLevel  = input.int(75, "Stochastik überkauft",    minval = 60, maxval = 95, group = grpC,
-     tooltip = "Über diesem Wert gilt die Stochastik als überkauft. Standard 75 — "
-          + "erkennt 77% statt 71% (bei 80) der Kurshochs.")
-stochLen    = input.int(14, "Stochastik Länge", minval = 5, maxval = 30, group = grpC,
-     tooltip = "Länge der schnellen Stochastik-Linie. 14 = Standard (bester Kompromiss "
-          + "der Studie). Wer mehr Extrempunkte erwischen will: 10 (mehr Signale, "
-          + "etwas mehr Rauschen).")
-stochSmooth = input.int(3, "Stochastik Glättung", minval = 1, maxval = 10, group = grpC,
-     tooltip = "Glättung der Stochastik-Linie. 3 = Standard.")
-stochMode = input.string("Single (k1 kreuzt 20/80)", "Stochastik-Modus",
-     options = ["Single (k1 kreuzt 20/80)", "Dual (klassisch, k2-Filter)"], group = grpC,
-     tooltip = "Single = nur die schnelle Stochastik-Linie muss die Schwelle brechen "
-          + "(Standard — Studie: erfasst 68% statt 26% der Kurstiefs bei praktisch "
-          + "gleicher Signalqualität; das Rauschen filtert die Konfluenz). "
-          + "Dual = zusätzlich muss die langsame Linie überverkauft/überkauft sein "
-          + "(klassisch, sehr selektiv).")
+stochMode = input.string("Dual (klassisch)", "Stochastik-Modus",
+     options = ["Dual (klassisch)", "Single (nur schnelle Linie)"], group = grpC,
+     tooltip = "Dual (Standard) = beide Stochastik-Linien müssen den überdehnten "
+          + "Bereich bestätigen — sehr selektiv, die klassische Stillhalter-Logik. "
+          + "Single = nur die schnelle Linie muss aus der Überdehnung drehen — "
+          + "erfasst laut Studie deutlich mehr Kurstiefs bei ähnlicher Qualität "
+          + "(das Rauschen filtert die Konfluenz).")
 macdMode  = input.string("Kreuzung (klassisch)", "MACD-Modus",
      options = ["Kreuzung (klassisch)", "Früh (Histogramm dreht)"], group = grpC,
      tooltip = "Kreuzung = Histogramm-Nulldurchgang (MACD kreuzt Signallinie) — der "
@@ -136,20 +139,18 @@ macdMode  = input.string("Kreuzung (klassisch)", "MACD-Modus",
           + "Rauschen. Fürs frühere Timing: Früh + Mindest-Konfluenz 2.")
 
 grpX = "Zusatz-Komponenten (optional)"
-useRSI    = input.bool(false, "RSI (14) einbeziehen — UP: kreuzt 30 hoch · DOWN: kreuzt 70 runter", group = grpX,
-     tooltip = "Vierte Konfluenz-Komponente: RSI misst die Stärke der letzten 14 Kerzen. "
-          + "Kreuzt er 30 nach oben, endet oft ein Ausverkauf — kreuzt er 70 nach "
-          + "unten, endet oft eine Übertreibung.")
-useMR     = input.bool(false, "Mean Reversion einbeziehen — UP: Z-Score < −1σ · DOWN: > +1σ", group = grpX,
-     tooltip = "Zusatz-Komponente 'Rückkehr zum Mittelwert': Der Z-Score misst, wie weit "
-          + "der Kurs von seinem Durchschnitt entfernt ist (in Standardabweichungen). "
-          + "Unter −1 = ungewöhnlich billig, über +1 = ungewöhnlich teuer.")
-mrLen     = input.int(30, "Mean-Reversion Länge (SMA/SD)", minval = 5, maxval = 100, group = grpX,
-     tooltip = "Anzahl Kerzen, über die Durchschnitt und Standardabweichung für den "
-          + "Z-Score berechnet werden.")
-adxFilter = input.bool(false, "ADX-Filter: Signale nur bei ADX(14) > 20", group = grpX,
-     tooltip = "Der ADX misst die Trendstärke (nicht die Richtung). Filter an = Dreiecke "
-          + "nur, wenn überhaupt ein Trend läuft — sortiert richtungslose "
+useRSI    = input.bool(false, "RSI einbeziehen — dreht aus der Überdehnung", group = grpX,
+     tooltip = "Vierte Konfluenz-Komponente: UP, wenn der RSI den überverkauften "
+          + "Bereich nach oben verlässt (Ausverkauf endet) — DOWN, wenn er den "
+          + "überkauften Bereich nach unten verlässt.")
+useMR     = input.bool(false, "Mean Reversion einbeziehen (Punkte des MR-Indikators)", group = grpX,
+     tooltip = "Nutzt die bestätigten Umkehr-PUNKTE des Stillhalter Mean-Reversion-"
+          + "Indikators: Ein Tief-Extrem jenseits der unteren Bänder, das nach oben "
+          + "dreht, zählt als UP-Punkt (grüner Punkt) — ein Hoch-Extrem jenseits der "
+          + "oberen Bänder als DOWN-Punkt (roter Punkt).")
+adxFilter = input.bool(false, "Trendstärke-Filter (nur bei laufendem Trend)", group = grpX,
+     tooltip = "Misst die Stärke der Kursbewegung (nicht die Richtung). Filter an = "
+          + "Dreiecke nur, wenn überhaupt ein Trend läuft — sortiert richtungslose "
           + "Seitwärtsphasen aus.")
 
 grpS = "Anzeige"
@@ -164,23 +165,27 @@ colUp     = input.color(#00C853, "UP-Farbe (knallgrün)",  group = grpS,
 colDown   = input.color(#FF1744, "DOWN-Farbe (knallrot)", group = grpS,
      tooltip = "Farbe der DOWN-Dreiecke und der Call-Zonen.")
 weakTransp = input.int(50, "Transparenz schwächere Stufe (%)", minval = 10, maxval = 85, group = grpS,
-     tooltip = "VOLLE Konfluenz (z. B. 3/3) = größeres, kräftiges Dreieck · schwächere "
-          + "(z. B. 2/3) = kleineres, halbtransparentes Dreieck — wie ein Signal, "
-          + "das gerade in der Entstehung ist.")
+     tooltip = "Alle Dreiecke haben dieselbe Farbe und Größe. VOLLE Konfluenz = "
+          + "kräftig · schwächere Stufe (z. B. 2/3) = halbtransparent, wie ein "
+          + "Signal, das gerade in der Entstehung ist.")
 showTrendBand = input.bool(false, "Trend-Band (Schleier) anzeigen", group = grpS,
-     tooltip = "Färbt den Bereich zwischen schneller und langsamer Trendlinie wie beim "
-          + "Trend-Model-Indikator (grün = aufwärts, gelb = abwärts). Standard aus — "
-          + "wer das Trend Model separat auf dem Chart hat, braucht es doppelt nicht.")
+     tooltip = "Färbt den Bereich zwischen schneller und langsamer Trendlinie — in den "
+          + "ORIGINALFARBEN des Trend-Model-Indikators. Standard aus — wer das Trend "
+          + "Model separat auf dem Chart hat, braucht es doppelt nicht.")
+colTrendUp   = input.color(color.new(#007700, 0), "Trend-Band aufwärts",  group = grpS,
+     tooltip = "Originalfarbe des Trend-Model-Indikators (aufwärts).")
+colTrendDown = input.color(color.new(#ffff99, 0), "Trend-Band abwärts", group = grpS,
+     tooltip = "Originalfarbe des Trend-Model-Indikators (abwärts).")
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS,
      tooltip = "Kleine Übersicht unten rechts: welche Komponente aktuell auf UP (▲) "
           + "bzw. DOWN (▼) steht.")
 
 grpSR = "S/R-Pivots (Basis der Options-Zonen)"
-pivLb     = input.int(10, "Pivot-Länge", minval = 3, maxval = 30, group = grpSR,
+pivLb     = input.int(6, "Pivot-Länge", minval = 3, maxval = 30, group = grpSR,
      tooltip = "Ein lokales Hoch/Tief zählt erst als Pivot, wenn links UND rechts davon "
-          + "so viele Kerzen tiefer/höher liegen. Größer = nur die markantesten "
-          + "Wendepunkte (weniger Zonen), kleiner = mehr, dafür schwächere Levels. "
-          + "10 = Standard.")
+          + "so viele Kerzen tiefer/höher liegen. 6 = Standard — erkennt auch dicht "
+          + "aufeinanderfolgende Tests als eigene Wendepunkte. Größer = nur die "
+          + "markantesten Wendepunkte (weniger Zonen).")
 minTouch  = input.int(2, "Mindest-Bestätigungen des Levels", minval = 2, maxval = 5, group = grpSR,
      tooltip = "Ein Level gilt erst als markant, wenn es von mindestens so vielen "
           + "Pivots bestätigt wurde (2 = z. B. ein Doppeltief).")
@@ -236,7 +241,7 @@ showEMAs = input.bool(true, "EMA 50 / 100 / 200 anzeigen", group = grpE,
           + "Zone einen Bonus-Stern (EMA-Bestätigung).")
 
 grpVP = "Volumenprofil (POC / VAH / VAL)"
-showVP = input.bool(true, "Volumenprofil anzeigen", group = grpVP,
+showVP = input.bool(false, "Volumenprofil anzeigen", group = grpVP,
      tooltip = "Zeigt, auf welchen Preisniveaus am meisten gehandelt wurde: POC = "
           + "meistgehandelter Preis · VAH/VAL = obere/untere Grenze der Zone, in der "
           + "70 % des Volumens umgesetzt wurden. Diese Levels wirken oft als "
@@ -275,6 +280,13 @@ btFrom     = input.time(timestamp("2020-01-01T00:00:00"), "Backtest Start", grou
 btTo       = input.time(timestamp("2099-01-01T00:00:00"), "Backtest Ende",  group = grpB)
 initialCapital = input.float(10000, "Startkapital", minval = 1, group = grpB)
 
+// ── Interne Kalibrierung (datenbasiert optimiert; bewusst KEINE Eingaben) ──
+osLevel     = 25
+obLevel     = 75
+stochLen    = 14
+stochSmooth = 3
+mrLen       = 30
+
 // ══════════════════════════ 1) TREND MODEL ══════════════════════════
 fastLen = trendMode == "Very Tight" ? 2 : trendMode == "Tight" ? 4 : trendMode == "Loose" ? 6 : 13
 slowLen = trendMode == "Very Tight" ? 9 : trendMode == "Tight" ? 16 : trendMode == "Loose" ? 28 : 35
@@ -302,7 +314,7 @@ macdSellEvt = macdFrueh ? (hist < hist[1] and hist[1] >= hist[2] and hist > 0) :
 k1 = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
 k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
 
-dualStoch = stochMode == "Dual (klassisch, k2-Filter)"
+dualStoch = stochMode == "Dual (klassisch)"
 stochBuyEvt  = ta.crossover(k1, osLevel)  and (not dualStoch or k2 < osLevel)
 stochSellEvt = ta.crossunder(k1, obLevel) and (not dualStoch or k2 > obLevel)
 
@@ -316,6 +328,17 @@ mrMa = ta.sma(close, mrLen)
 mrSd = ta.stdev(close, mrLen)
 zRaw = mrSd != 0 ? (close - mrMa) / mrSd : 0.0
 zS   = ta.ema(zRaw, 3)
+// Bestätigte Umkehr-Punkte wie im Stillhalter Mean-Reversion-Indikator:
+// Extrem jenseits der Bänder dreht (Pivot des geglätteten Z-Scores)
+mrPl = ta.pivotlow(zS, 5, 5)
+mrPh = ta.pivothigh(zS, 5, 5)
+mrBuyEvt  = useMR and not na(mrPl) and mrPl < -1.0
+mrSellEvt = useMR and not na(mrPh) and mrPh >  1.0
+// grüne/rote Punkte am Extrem (nur wenn Komponente aktiv)
+plotshape(mrBuyEvt,  "MR Tief-Punkt", shape.circle, location.belowbar,
+     color.new(colUp, 30),   size = size.tiny, offset = -5, display = display.pane)
+plotshape(mrSellEvt, "MR Hoch-Punkt", shape.circle, location.abovebar,
+     color.new(colDown, 30), size = size.tiny, offset = -5, display = display.pane)
 
 // ══════════════════════════ ADX (14) — optionaler Filter ══════════════════════════
 tr_     = math.max(math.max(high - low, math.abs(high - close[1])), math.abs(low - close[1]))
@@ -338,18 +361,20 @@ sinceTrendSell = nz(ta.barssince(trendSellEvt), 99999)
 sinceMacdSell  = nz(ta.barssince(macdSellEvt),  99999)
 sinceStochSell = nz(ta.barssince(stochSellEvt), 99999)
 sinceRsiSell   = nz(ta.barssince(rsiSellEvt),   99999)
+sinceMrBuy     = nz(ta.barssince(mrBuyEvt),      99999)
+sinceMrSell    = nz(ta.barssince(mrSellEvt),     99999)
 
 trendBuyOK = bullTrend and sinceTrendBuy < confWin
 macdBuyOK  = (macdFrueh ? hist > hist[1] : hist > 0)  and sinceMacdBuy  < confWin
 stochBuyOK = sinceStochBuy < confWin
 rsiBuyOK   = useRSI and sinceRsiBuy < confWin
-mrBuyOK    = useMR and zS < -1.0
+mrBuyOK    = useMR and sinceMrBuy < confWin
 
 trendSellOK = bearTrend and sinceTrendSell < confWin
 macdSellOK = (macdFrueh ? hist < hist[1] : hist < 0)  and sinceMacdSell < confWin
 stochSellOK = sinceStochSell < confWin
 rsiSellOK   = useRSI and sinceRsiSell < confWin
-mrSellOK    = useMR and zS > 1.0
+mrSellOK   = useMR and sinceMrSell < confWin
 
 nComp = 3 + (useRSI ? 1 : 0) + (useMR ? 1 : 0)
 
@@ -358,8 +383,8 @@ buyScore  = (trendBuyOK ? 1 : 0) + (macdBuyOK ? 1 : 0) + (stochBuyOK ? 1 : 0)
 sellScore = (trendSellOK ? 1 : 0) + (macdSellOK ? 1 : 0) + (stochSellOK ? 1 : 0)
           + (rsiSellOK ? 1 : 0)  + (mrSellOK ? 1 : 0)
 
-buyEvtNow  = trendBuyEvt  or macdBuyEvt  or stochBuyEvt  or (useRSI and rsiBuyEvt)
-sellEvtNow = trendSellEvt or macdSellEvt or stochSellEvt or (useRSI and rsiSellEvt)
+buyEvtNow  = trendBuyEvt  or macdBuyEvt  or stochBuyEvt  or (useRSI and rsiBuyEvt)  or mrBuyEvt
+sellEvtNow = trendSellEvt or macdSellEvt or stochSellEvt or (useRSI and rsiSellEvt) or mrSellEvt
 
 buyTrigger  = buyEvtNow  and buyScore  >= minScore and adxOK
 sellTrigger = sellEvtNow and sellScore >= minScore and adxOK
@@ -376,30 +401,30 @@ colDownW = color.new(colDown, weakTransp)
 
 // ══════════════════════════ DREIECKE ══════════════════════════
 plotshape(buyFull and labelTxt == "UP/DOWN",   "UP (voll)",   shape.triangleup, location.belowbar, colUp, text = "UP",   textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyWeak and labelTxt == "UP/DOWN",   "UP",          shape.triangleup, location.belowbar, colUpW, text = "UP",   textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyWeak and labelTxt == "UP/DOWN",   "UP",          shape.triangleup, location.belowbar, colUpW, text = "UP",   textcolor = color.white, size = size.small, display = display.pane)
 plotshape(buyFull and labelTxt == "BULL/BEAR", "BULL (voll)", shape.triangleup, location.belowbar, colUp, text = "BULL", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyWeak and labelTxt == "BULL/BEAR", "BULL",        shape.triangleup, location.belowbar, colUpW, text = "BULL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyWeak and labelTxt == "BULL/BEAR", "BULL",        shape.triangleup, location.belowbar, colUpW, text = "BULL", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(buyFull and labelTxt == "PUT/CALL",  "PUT (voll)",  shape.triangleup, location.belowbar, colUp, text = "PUT",  textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyWeak and labelTxt == "PUT/CALL",  "PUT",         shape.triangleup, location.belowbar, colUpW, text = "PUT",  textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyWeak and labelTxt == "PUT/CALL",  "PUT",         shape.triangleup, location.belowbar, colUpW, text = "PUT",  textcolor = color.white, size = size.small, display = display.pane)
 plotshape(buyFull and labelTxt == "BUY/SELL",  "BUY (voll)",  shape.triangleup, location.belowbar, colUp, text = "BUY",  textcolor = color.white, size = size.small, display = display.pane)
-plotshape(buyWeak and labelTxt == "BUY/SELL",  "BUY",         shape.triangleup, location.belowbar, colUpW, text = "BUY",  textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(buyWeak and labelTxt == "BUY/SELL",  "BUY",         shape.triangleup, location.belowbar, colUpW, text = "BUY",  textcolor = color.white, size = size.small, display = display.pane)
 plotshape(sellFull and labelTxt == "UP/DOWN",   "DOWN (voll)", shape.triangledown, location.abovebar, colDown, text = "DOWN", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellWeak and labelTxt == "UP/DOWN",   "DOWN",        shape.triangledown, location.abovebar, colDownW, text = "DOWN", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellWeak and labelTxt == "UP/DOWN",   "DOWN",        shape.triangledown, location.abovebar, colDownW, text = "DOWN", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(sellFull and labelTxt == "BULL/BEAR", "BEAR (voll)", shape.triangledown, location.abovebar, colDown, text = "BEAR", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellWeak and labelTxt == "BULL/BEAR", "BEAR",        shape.triangledown, location.abovebar, colDownW, text = "BEAR", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellWeak and labelTxt == "BULL/BEAR", "BEAR",        shape.triangledown, location.abovebar, colDownW, text = "BEAR", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(sellFull and labelTxt == "PUT/CALL",  "CALL (voll)", shape.triangledown, location.abovebar, colDown, text = "CALL", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellWeak and labelTxt == "PUT/CALL",  "CALL",        shape.triangledown, location.abovebar, colDownW, text = "CALL", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(sellFull and labelTxt == "BUY/SELL",  "SELL (voll)", shape.triangledown, location.abovebar, colDown, text = "SELL", textcolor = color.white, size = size.small, display = display.pane)
-plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.tiny,  display = display.pane)
+plotshape(sellWeak and labelTxt == "BUY/SELL",  "SELL",        shape.triangledown, location.abovebar, colDownW, text = "SELL", textcolor = color.white, size = size.small, display = display.pane)
 plotshape(buyFull  and labelTxt == "Ohne Text", "UP (voll, ohne Text)",   shape.triangleup,   location.belowbar, colUp,    size = size.small, display = display.pane)
-plotshape(buyWeak  and labelTxt == "Ohne Text", "UP (ohne Text)",         shape.triangleup,   location.belowbar, colUpW,   size = size.tiny,  display = display.pane)
+plotshape(buyWeak  and labelTxt == "Ohne Text", "UP (ohne Text)",         shape.triangleup,   location.belowbar, colUpW,   size = size.small, display = display.pane)
 plotshape(sellFull and labelTxt == "Ohne Text", "DOWN (voll, ohne Text)", shape.triangledown, location.abovebar, colDown,  size = size.small, display = display.pane)
-plotshape(sellWeak and labelTxt == "Ohne Text", "DOWN (ohne Text)",       shape.triangledown, location.abovebar, colDownW, size = size.tiny,  display = display.pane)
+plotshape(sellWeak and labelTxt == "Ohne Text", "DOWN (ohne Text)",       shape.triangledown, location.abovebar, colDownW, size = size.small, display = display.pane)
 
 // dezentes Trend-Band (Statuszeile bleibt sauber: display.pane)
 pF = plot(trendFast, "Trend Fast", color = color.new(color.white, 100), display = display.pane, editable = false)
 pS = plot(trendSlow, "Trend Slow", color = color.new(color.white, 100), display = display.pane, editable = false)
-fill(pF, pS, color = showTrendBand ? (bullTrend ? color.new(#007700, 85) : color.new(#ffff99, 85)) : na, title = "Trend Band")
+fill(pF, pS, color = showTrendBand ? (bullTrend ? colTrendUp : colTrendDown) : na, title = "Trend Band")
 
 // ══════════════ EMA 50 / 100 / 200 (dynamische Unterstützung/Widerstand) ══════════════
 ema50  = ta.ema(close, 50)
@@ -630,6 +655,21 @@ f_firstTouch(array<float> arr, array<int> tArr, float lvl, float tol, int tMin) 
                 first := math.min(first, array.get(tArr, i))
     first
 
+f_barTouches(float zLo, float zHi, float tol) =>
+    // EHRLICHE Berührungszählung: Kerzen-Kontakte mit der Zone, wobei
+    // aufeinanderfolgende Kerzen in der Zone als EINE Berührung zählen
+    int cnt = 0
+    bool inT = false
+    int maxB = math.min(bar_index, 420)
+    for i = 0 to maxB
+        float pLo = useBody ? math.min(open[i], close[i]) : low[i]
+        float pHi = useBody ? math.max(open[i], close[i]) : high[i]
+        bool hit = pLo <= zHi + tol and pHi >= zLo - tol
+        if hit and not inT
+            cnt += 1
+        inT := hit
+    cnt
+
 f_lastTouch(array<float> arr, array<int> tArr, float lvl, float tol) =>
     int last = 0
     if array.size(arr) > 0
@@ -725,7 +765,6 @@ if barstate.islast and showZones
                 nLo = f_countSince(pivLows,  pivLowT,  best, tolZ, 0)
                 nHi = f_countSince(pivHighs, pivHighT, best, tolZ, 0)
                 bool retestB = math.abs((isSup ? recLoY : recHiY) - best) <= tolZ
-                touches = math.max(nLo + nHi + (retestB ? 1 : 0), 1)
                 bool isYoung = bestYoung
                 // Zonenband = Spanne aller Cluster-Mitglieder (mind. 0.15 ATR dick)
                 float bLo = math.min(f_bandSince(pivLows, pivLowT, best, tolZ, 0, true), f_bandSince(pivHighs, pivHighT, best, tolZ, 0, true))
@@ -734,6 +773,9 @@ if barstate.islast and showZones
                     float midZ = (bHi + bLo) / 2
                     bLo := midZ - 0.075 * atr14
                     bHi := midZ + 0.075 * atr14
+                // Berührungen ehrlich zählen (Kerzen-Cluster in der Zone) —
+                // die reine Pivot-Zählung unterschätzte um Faktor ~4
+                touches = math.max(f_barTouches(bLo, bHi, tolZ * 0.25), 1)
                 // Sterne: ★ = 2 Berührungen · ★★ = 3+ · +★ Seitenwechsel ·
                 // +★ Volumen (VAL/VAH) · +★ EMA-Bestätigung — max. ★★★★
                 int stars = touches >= 3 ? 2 : 1

@@ -245,8 +245,8 @@ def run_backtest(
     _ll35 = low.rolling(35).min()
     _hh35 = high.rolling(35).max()
     _stoch_k2 = (100 * (close - _ll35) / (_hh35 - _ll35 + 1e-10)).rolling(10).mean()
-    # Single-Stochastik, Schwelle 25 (Standard seit v0.9.8 des TV-Indikators)
-    _stoch_evt = (stoch_k >= 25) & (stoch_k.shift(1) < 25)
+    # Dual-Stochastik, Schwelle 25 (Standard wie TV-Indikator v0.9.10)
+    _stoch_evt = (stoch_k >= 25) & (stoch_k.shift(1) < 25) & (_stoch_k2 < 25)
 
     def _bars_since(evt: pd.Series) -> pd.Series:
         _idx = np.arange(len(evt))

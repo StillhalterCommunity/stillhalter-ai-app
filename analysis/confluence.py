@@ -50,12 +50,11 @@ def confluence_now(df: pd.DataFrame, win: int = 4,
         ll = l.rolling(length).min()
         hh = h.rolling(length).max()
         return (100 * (c - ll) / (hh - ll)).rolling(smooth).mean()
-    # Single-Stochastik (Standard seit v0.9.7 des TV-Indikators): nur die
-    # schnelle Linie muss die Schwelle brechen — die Konfluenz filtert das
-    # Rauschen besser als die langsame k2-Linie (Timing-Studie).
-    k1 = _k(14, 3)
-    s_buy_evt  = (k1 > os_level) & (k1.shift(1) <= os_level)
-    s_sell_evt = (k1 < ob_level) & (k1.shift(1) >= ob_level)
+    # Dual-Stochastik (Standard wie im TV-Indikator v0.9.10): schnelle Linie
+    # bricht die Schwelle, während die langsame den überdehnten Bereich bestätigt
+    k1, k2 = _k(14, 3), _k(35, 10)
+    s_buy_evt  = (k1 > os_level) & (k1.shift(1) <= os_level) & (k2 < os_level)
+    s_sell_evt = (k1 < ob_level) & (k1.shift(1) >= ob_level) & (k2 > ob_level)
 
     t_b = bool((bull & (_since(t_buy_evt) < win)).iloc[-1])
     m_b = bool(((hist > 0) & (_since(m_buy_evt) < win)).iloc[-1])
