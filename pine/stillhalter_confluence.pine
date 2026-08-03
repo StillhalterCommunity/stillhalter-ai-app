@@ -2,12 +2,23 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v0.9.8
+//  Stillhalter Community® – CONFLUENCE v0.9.9
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v0.9.8 (Stochastik-Raster-Studie über 120 Tiefs + 119 Hochs):
+//  NEU in v0.9.9 (Fix: naheliegende Zonen fehlten — MRVL-Fall):
+//   • Die NÄCHSTGELEGENE relevante Zone gewinnt jetzt IMMER den ersten
+//     Slot — stark ODER ☆ jung (max. 1 junge Zone je Seite). Vorher
+//     blockierten weiter entfernte starke Alt-Zonen die naheliegenden.
+//   • Berührungen zählen über das GESAMTE Pivot-Gedächtnis; der
+//     'Rückblick (Monate)' filtert nur noch die AKTUALITÄT (letzter Test
+//     höchstens N Monate her — oder der Kurs testet gerade erneut).
+//   • Ein aktueller Retest (jüngstes Swing-Level trifft ein altes Level)
+//     zählt als zusätzliche Berührung — Level, deren Berührungen dicht
+//     beieinander liegen (1 Pivot trotz mehrerer Tests), werden so
+//     nicht mehr unterschätzt.
+//  v0.9.8 (Stochastik-Raster-Studie über 120 Tiefs + 119 Hochs):
 //   • Stochastik bleibt die 14,3 — aber Schwellen-Standard jetzt 25/75
 //     statt 20/80: erkennt 81% statt 68% der Tiefs (Hochs 77% statt 71%)
 //     bei sogar HÖHERER Präzision (77% statt 69%). Länge/Glättung jetzt
@@ -74,7 +85,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v0.9.8", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v0.9.9", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -188,11 +199,11 @@ showYoung  = input.bool(true, "☆ Junge Zonen ergänzen (1× berührt / unbest�
           + "nur 1 Berührung und das jüngste (noch unbestätigte) Swing-Tief/-Hoch "
           + "als '☆ jung' ergänzt — so fehlen die naheliegendsten Zonen direkt am "
           + "Kurs nicht mehr. Junge Zonen sind blasser und tragen ☆ statt ★.")
-zoneMonths = input.int(12, "Rückblick (Monate)", minval = 3, maxval = 48, group = grpZ,
-     tooltip = "Wie weit zurück lokale Hochs und Tiefs für die Zonen gesammelt werden. "
-          + "Empfehlung: 12–24 auf 4h/1D · 36+ auf dem Wochenchart. Ältere Levels "
-          + "bleiben relevant, wenn sie oft bestätigt wurden — das regelt das "
-          + "Sterne-Rating.")
+zoneMonths = input.int(12, "Aktualität: letzter Test max. (Monate)", minval = 3, maxval = 48, group = grpZ,
+     tooltip = "AKTUALITÄTS-Filter: Eine Zone erscheint nur, wenn ihr LETZTER Test "
+          + "höchstens so viele Monate zurückliegt — oder der Kurs sie gerade erneut "
+          + "testet. Die STÄRKE (Anzahl Berührungen, Sterne) zählt dagegen über die "
+          + "gesamte gespeicherte Historie. Empfehlung: 12–24 auf 4h/1D · 36+ auf 1W.")
 zonesPerSide = input.int(3, "Zonen je Seite (max.)", minval = 1, maxval = 6, group = grpZ,
      tooltip = "Höchstens so viele Put-Zonen unter und Call-Zonen über dem Kurs. "
           + "3 = guter Kompromiss aus Vollständigkeit (gerade um den Kurs herum) "
@@ -619,6 +630,14 @@ f_firstTouch(array<float> arr, array<int> tArr, float lvl, float tol, int tMin) 
                 first := math.min(first, array.get(tArr, i))
     first
 
+f_lastTouch(array<float> arr, array<int> tArr, float lvl, float tol) =>
+    int last = 0
+    if array.size(arr) > 0
+        for i = 0 to array.size(arr) - 1
+            if math.abs(array.get(arr, i) - lvl) <= tol
+                last := math.max(last, array.get(tArr, i))
+    last
+
 // Jüngstes Swing-Tief/-Hoch (noch KEIN bestätigter Pivot — die ersten pivLb
 // Kerzen nach einem Umkehrpunkt existiert er offiziell noch nicht)
 recLoY = ta.lowest(srcLoPiv,  pivLb + 5)
@@ -641,22 +660,34 @@ if barstate.islast and showZones
     int   tMinZ = time - zoneMonths * 2629800000   // Monate → Millisekunden
     float tolZ  = zoneTolMult * atr14
 
-    // Kandidaten-Levels: Tiefs + Hochs der letzten N Monate
+    // Kandidaten-Levels: ALLE gespeicherten Pivots — die Aktualität (letzter
+    // Test innerhalb des Rückblicks ODER aktueller Retest) wird je Kandidat
+    // geprüft; die Stärke zählt über das gesamte Gedächtnis
     array<float> cands = array.new_float()
     if array.size(pivLows) > 0
         for i = 0 to array.size(pivLows) - 1
-            if array.get(pivLowT, i) >= tMinZ
-                array.push(cands, array.get(pivLows, i))
+            array.push(cands, array.get(pivLows, i))
     if array.size(pivHighs) > 0
         for i = 0 to array.size(pivHighs) - 1
-            if array.get(pivHighT, i) >= tMinZ
-                array.push(cands, array.get(pivHighs, i))
+            array.push(cands, array.get(pivHighs, i))
+    // Vorberechnung je Kandidat: Berührungen gesamt + Zeitpunkt des letzten Tests
+    array<int> candN    = array.new_int()
+    array<int> candLast = array.new_int()
+    if array.size(cands) > 0
+        for i = 0 to array.size(cands) - 1
+            float cl = array.get(cands, i)
+            array.push(candN, f_countSince(pivLows, pivLowT, cl, tolZ, 0) + f_countSince(pivHighs, pivHighT, cl, tolZ, 0))
+            array.push(candLast, math.max(f_lastTouch(pivLows, pivLowT, cl, tolZ), f_lastTouch(pivHighs, pivHighT, cl, tolZ)))
 
     for side = 0 to 1                    // 0 = Put-Zonen (unten) · 1 = Call-Zonen (oben)
         bool  isSup     = side == 0
         float boundary  = na             // Außenkante der zuletzt gewählten Zone
+        int   youngUsed = 0              // max. 1 ☆-Zone je Seite (kein Clutter)
         for z = 1 to zonesPerSide
             float best = na
+            bool  bestYoung = false
+            // EIN Durchlauf: der nächstgelegene RELEVANTE Level gewinnt —
+            // stark (genug Berührungen) oder ☆ jung (max. 1 je Seite)
             if array.size(cands) > 0
                 for i = 0 to array.size(cands) - 1
                     lvl = array.get(cands, i)
@@ -665,25 +696,19 @@ if barstate.islast and showZones
                     if not na(boundary)
                         okGap := isSup ? lvl <= boundary - zoneGapMult * atr14 : lvl >= boundary + zoneGapMult * atr14
                     if okSide and okGap
-                        nLo = f_countSince(pivLows,  pivLowT,  lvl, tolZ, tMinZ)
-                        nHi = f_countSince(pivHighs, pivHighT, lvl, tolZ, tMinZ)
-                        if nLo + nHi >= minTouch
+                        int nAll = array.get(candN, i)
+                        bool retest = math.abs((isSup ? recLoY : recHiY) - lvl) <= tolZ
+                        if retest
+                            nAll += 1
+                        bool aktuell  = array.get(candLast, i) >= tMinZ or retest
+                        bool strongOk = nAll >= minTouch and aktuell
+                        bool youngOk  = showYoung and youngUsed < 1 and aktuell
+                        if strongOk or youngOk
                             if na(best) or (isSup ? lvl > best : lvl < best)
                                 best := lvl
-            // ☆ Fallback: zu wenig starke Zonen → 1-Berührungs-Levels und das
-            // jüngste (unbestätigte) Swing-Level zulassen, damit die
-            // naheliegendsten Zonen am Kurs nicht fehlen
-            if na(best) and showYoung
-                if array.size(cands) > 0
-                    for i = 0 to array.size(cands) - 1
-                        lvl = array.get(cands, i)
-                        bool okSideY = isSup ? lvl <= close - zoneDistMult * atr14 : lvl >= close + zoneDistMult * atr14
-                        bool okGapY = true
-                        if not na(boundary)
-                            okGapY := isSup ? lvl <= boundary - zoneGapMult * atr14 : lvl >= boundary + zoneGapMult * atr14
-                        if okSideY and okGapY
-                            if na(best) or (isSup ? lvl > best : lvl < best)
-                                best := lvl
+                                bestYoung := not strongOk
+            // Jüngstes (unbestätigtes) Swing-Level als eigener ☆-Kandidat
+            if showYoung and youngUsed < 1
                 float recCand = isSup ? recLoY : recHiY
                 bool okSideR = isSup ? recCand <= close - zoneDistMult * atr14 : recCand >= close + zoneDistMult * atr14
                 bool okGapR = true
@@ -691,15 +716,20 @@ if barstate.islast and showZones
                     okGapR := isSup ? recCand <= boundary - zoneGapMult * atr14 : recCand >= boundary + zoneGapMult * atr14
                 if okSideR and okGapR
                     if na(best) or (isSup ? recCand > best : recCand < best)
+                        int nAllR = f_countSince(pivLows, pivLowT, recCand, tolZ, 0) + f_countSince(pivHighs, pivHighT, recCand, tolZ, 0) + 1
                         best := recCand
+                        bestYoung := nAllR < minTouch
             if not na(best)
-                nLo = f_countSince(pivLows,  pivLowT,  best, tolZ, tMinZ)
-                nHi = f_countSince(pivHighs, pivHighT, best, tolZ, tMinZ)
-                touches = math.max(nLo + nHi, 1)
-                bool isYoung = touches < minTouch
+                if bestYoung
+                    youngUsed += 1
+                nLo = f_countSince(pivLows,  pivLowT,  best, tolZ, 0)
+                nHi = f_countSince(pivHighs, pivHighT, best, tolZ, 0)
+                bool retestB = math.abs((isSup ? recLoY : recHiY) - best) <= tolZ
+                touches = math.max(nLo + nHi + (retestB ? 1 : 0), 1)
+                bool isYoung = bestYoung
                 // Zonenband = Spanne aller Cluster-Mitglieder (mind. 0.15 ATR dick)
-                float bLo = math.min(f_bandSince(pivLows, pivLowT, best, tolZ, tMinZ, true), f_bandSince(pivHighs, pivHighT, best, tolZ, tMinZ, true))
-                float bHi = math.max(f_bandSince(pivLows, pivLowT, best, tolZ, tMinZ, false), f_bandSince(pivHighs, pivHighT, best, tolZ, tMinZ, false))
+                float bLo = math.min(f_bandSince(pivLows, pivLowT, best, tolZ, 0, true), f_bandSince(pivHighs, pivHighT, best, tolZ, 0, true))
+                float bHi = math.max(f_bandSince(pivLows, pivLowT, best, tolZ, 0, false), f_bandSince(pivHighs, pivHighT, best, tolZ, 0, false))
                 if bHi - bLo < 0.15 * atr14
                     float midZ = (bHi + bLo) / 2
                     bLo := midZ - 0.075 * atr14
@@ -728,8 +758,8 @@ if barstate.islast and showZones
                 color zCol = isSup ? colUp : colDown
                 // Zone über die GANZE betrachtete Periode: von der ersten
                 // Berührung des Levels bis heute (xloc.bar_time)
-                int firstT = math.min(f_firstTouch(pivLows, pivLowT, best, tolZ, tMinZ),
-                     f_firstTouch(pivHighs, pivHighT, best, tolZ, tMinZ))
+                int firstT = math.min(f_firstTouch(pivLows, pivLowT, best, tolZ, 0),
+                     f_firstTouch(pivHighs, pivHighT, best, tolZ, 0))
                 array.push(zBoxes, box.new(firstT, bHi, time, bLo,
                      xloc = xloc.bar_time,
                      border_color = color.new(zCol, isYoung ? 60 : 35), border_width = 1,
@@ -747,7 +777,9 @@ if barstate.islast and showZones
                 tip += str.tostring(strike, format.mintick)
                 tip += " (" + str.tostring(otmPct, "#.#") + "% vom Kurs entfernt)"
                 tip += "\nZone " + str.tostring(bLo, format.mintick) + " – " + str.tostring(bHi, format.mintick)
-                tip += "\n" + str.tostring(touches) + "× berührt in " + str.tostring(zoneMonths) + " Monaten"
+                tip += "\n" + str.tostring(touches) + "× berührt insgesamt"
+                if retestB
+                    tip += " (inkl. aktuellem Retest)"
                 if roleRev
                     tip += isSup ? "\nSeitenwechsel: alter Widerstand = neue Unterstützung" : "\nSeitenwechsel: alte Unterstützung = neuer Widerstand"
                 if vaHit
