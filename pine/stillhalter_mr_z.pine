@@ -1,0 +1,109 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0
+// © Stillhalter Community
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+//  Stillhalter Community® – MEAN REVERSION Z-PANEL v1.0
+//  Der Z-Score als eigener Graph unter dem Chart (wie die IA-Vorlage):
+//   • Blaue Linie = (Schlusskurs − Durchschnitt) ÷ Standardabweichung,
+//     geglättet — misst je Kerze, wie viele Standardabweichungen der Kurs
+//     von seinem Mittelwert entfernt ist. Identische Berechnung wie im
+//     Stillhalter Mean Reversion (Bänder) und in der Confluence-Komponente
+//     (Basis SMA · Länge 40 · Glättung 3 — datenbasiert kalibriert).
+//   • Rote Zone oben / grüne Zone unten ab der Zonen-Schwelle.
+//   • Rote/grüne PUNKTE = bestätigte Wendepunkte der Linie innerhalb der
+//     Zonen (Hoch dreht in Rot = DOWN-Punkt · Tief dreht in Grün = UP-Punkt).
+//   • Gestrichelte ±1σ-Linien = Signal-Schwelle der ⚡ Re-Entry-Logik.
+//  Zusammenspiel: Dieses Panel ist die Lupe auf die Mean Reversion —
+//  die Bänder-Version zeigt dasselbe auf dem Preischart, die Confluence
+//  zählt die hier bestätigten Punkte als 4. Komponente.
+// ─────────────────────────────────────────────────────────────────────────────
+indicator("Stillhalter Mean Reversion Z v1.0", shorttitle = "Stillhalter MR-Z",
+     overlay = false, max_bars_back = 500)
+
+// ─── Inputs ──────────────────────────────────────────────────────────────────
+grp_mr = "MEAN REVERT SETTINGS"
+trading_style  = input.string("neutral", "Trading Style", options = ["neutral", "bullish", "bearish"], group = grp_mr,
+     tooltip = "Verschiebt die Messung leicht: bullish = Kauf-Seite kommt früher dran, "
+          + "bearish umgekehrt. Neutral = Standard. Identisch zum Bänder-Indikator.")
+ma_basis       = input.string("SMA", "Basis (Mittellinie)", options = ["SMA", "EMA"], group = grp_mr,
+     tooltip = "SMA = Standard und Studien-Sieger: stabiler Anker für die "
+          + "Überdehnungs-Messung. EMA läuft dem Kurs hinterher und verwässert sie.")
+noise_suppress = input.int(40, "Basis-Länge (Kerzen)", minval = 5, maxval = 100, group = grp_mr,
+     tooltip = "Anzahl Kerzen für Durchschnitt und Standardabweichung. 40 = Standard "
+          + "(identisch zu Bänder-Indikator und Confluence-Komponente).")
+
+grp_sig = "SIGNALE & ZONEN"
+zone_thresh = input.float(0.25, "Zonen-Schwelle (×SD)", minval = 0.1, maxval = 2.0, step = 0.05, group = grp_sig,
+     tooltip = "Ab hier beginnen die rote (oben) und grüne (unten) Zone — und nur "
+          + "Wendepunkte INNERHALB der Zonen bekommen einen Punkt. 0.25 = Optik "
+          + "der Vorlage (viele Punkte). Wer nur die starken Extreme will: auf "
+          + "1.0 stellen (dann identisch zur ⚡ Signal-Schwelle).")
+signal_thresh = input.float(1.0, "⚡ Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.1, group = grp_sig,
+     tooltip = "Die gestrichelten ±1σ-Linien: Kreuzt die blaue Linie aus der "
+          + "Überdehnung hierüber ZURÜCK, ist das das ⚡ Re-Entry-Signal — "
+          + "identisch zum Bänder-Indikator und zur Confluence-Komponente.")
+pivot_lb    = input.int(5, "Pivot Lookback", minval = 2, maxval = 20, group = grp_sig,
+     tooltip = "Ein Wendepunkt der Linie gilt erst als bestätigt, wenn links UND "
+          + "rechts so viele Kerzen weniger extrem sind — der Punkt erscheint "
+          + "rückwirkend am Extrem.")
+zone_top    = input.float(2.5, "Zonen-Obergrenze (Anzeige)", minval = 1.5, maxval = 5.0, step = 0.5, group = grp_sig,
+     tooltip = "Nur Optik: bis wohin die rote/grüne Fläche gezeichnet wird.")
+
+grp_st = "ANZEIGE"
+line_clr    = input.color(#4C6EF5, "Z-Linie", group = grp_st,
+     tooltip = "Farbe der Z-Score-Linie (Standard: Blau wie die Vorlage).")
+zone_clr_ob = input.color(#B71C1C, "Zone oben (rot)",   group = grp_st)
+zone_clr_os = input.color(#1B5E20, "Zone unten (grün)", group = grp_st)
+dot_clr_dn  = input.color(#FF1744, "DOWN-Punkte", group = grp_st,
+     tooltip = "Gleiche Signalfarbe wie im Confluence.")
+dot_clr_up  = input.color(#00C853, "UP-Punkte",   group = grp_st,
+     tooltip = "Gleiche Signalfarbe wie im Confluence.")
+
+// ─── Berechnung (identisch zu Bänder-Indikator & Confluence-Komponente) ──────
+float ma = ma_basis == "EMA" ? ta.ema(close, noise_suppress) : ta.sma(close, noise_suppress)
+float sd = ta.stdev(close, noise_suppress)
+
+float bias = switch trading_style
+    "bullish" => -0.12
+    "bearish" =>  0.12
+    =>            0.0
+
+float z_raw = sd != 0 ? (close - ma) / sd : 0.0
+float z_s   = ta.ema(z_raw - bias, 3)   // DIE blaue Linie: geglätteter Z-Score
+
+// ─── Zonen (statisch, wie die Vorlage) ────────────────────────────────────────
+h_zu  = hline(zone_thresh,  "Zonen-Schwelle oben",  color = color.new(color.white, 60), linestyle = hline.style_dashed)
+h_zt  = hline(zone_top,     "Zonen-Obergrenze",     color = color.new(color.white, 85), linestyle = hline.style_dashed)
+h_zd  = hline(-zone_thresh, "Zonen-Schwelle unten", color = color.new(color.white, 60), linestyle = hline.style_dashed)
+h_zb  = hline(-zone_top,    "Zonen-Untergrenze",    color = color.new(color.white, 85), linestyle = hline.style_dashed)
+fill(h_zu, h_zt, color = color.new(zone_clr_ob, 75), title = "Rote Zone (überdehnt oben)")
+fill(h_zd, h_zb, color = color.new(zone_clr_os, 75), title = "Grüne Zone (überdehnt unten)")
+
+// ⚡ Signal-Schwellen (±1σ) als feine Referenzlinien
+hline(signal_thresh,  "⚡ Schwelle oben",  color = color.new(color.white, 80), linestyle = hline.style_dotted)
+hline(-signal_thresh, "⚡ Schwelle unten", color = color.new(color.white, 80), linestyle = hline.style_dotted)
+hline(0, "Nulllinie", color = color.new(color.gray, 70))
+
+// ─── Die blaue Linie ──────────────────────────────────────────────────────────
+plot(z_s, "Z-Score", color = line_clr, linewidth = 2)
+
+// ─── Punkte: bestätigte Wendepunkte der Linie in den Zonen ────────────────────
+float ph = ta.pivothigh(z_s, pivot_lb, pivot_lb)
+float pl = ta.pivotlow(z_s,  pivot_lb, pivot_lb)
+bool dotDown = not na(ph) and ph >  zone_thresh
+bool dotUp   = not na(pl) and pl < -zone_thresh
+
+plotshape(dotDown, "🔴 Hoch dreht (DOWN-Punkt)", shape.circle, location.absolute,
+     color.new(dot_clr_dn, 0), size = size.tiny, offset = -pivot_lb)
+plotshape(dotUp,   "🟢 Tief dreht (UP-Punkt)",   shape.circle, location.absolute,
+     color.new(dot_clr_up, 0), size = size.tiny, offset = -pivot_lb)
+
+// ─── ⚡ Re-Entry (identisch zum Bänder-Indikator) ─────────────────────────────
+bool reBuy  = ta.crossover(z_s, -signal_thresh)
+bool reSell = ta.crossunder(z_s, signal_thresh)
+
+// ─── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(dotUp,   "🟢 UP-Punkt bestätigt",             "Stillhalter MR-Z: Tief-Extrem bestätigt (grüner Punkt)")
+alertcondition(dotDown, "🔴 DOWN-Punkt bestätigt",           "Stillhalter MR-Z: Hoch-Extrem bestätigt (roter Punkt)")
+alertcondition(reBuy,   "⚡ Mean Reversion UP (Re-Entry)",   "Stillhalter MR-Z: UP — Rückkehr zum Mittelwert hat begonnen")
+alertcondition(reSell,  "⚡ Mean Reversion DOWN (Re-Entry)", "Stillhalter MR-Z: DOWN — Rückkehr zum Mittelwert hat begonnen")
