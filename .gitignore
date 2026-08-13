@@ -34,3 +34,8 @@ data/login_log.csv
 # Laufzeit-Scan-Cache (gehoert NICHT ins Repo, lebt im Volume)
 data/last_scan_cache.pkl
 data/_disk_cache/
+
+# Familien-Finanzen: Datenbank enthaelt private Finanzdaten (NIEMALS committen!)
+familienfinanzen/*.db
+familienfinanzen/*.db-wal
+familienfinanzen/*.db-shm
