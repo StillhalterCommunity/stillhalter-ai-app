@@ -8,7 +8,7 @@ import pandas as pd
 import json
 import os
 import math
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 st.set_page_config(
     page_title="Trade Monitor · Stillhalter AI App",
