@@ -265,6 +265,7 @@ def parse_all_positions(xml_str: str) -> pd.DataFrame:
                 "strike":     float(a.get("strike", 0) or 0),
                 "expiry":     a.get("expiry", ""),
                 "put_call":   put_call,
+                "cost_price": float(a.get("costBasisPrice", 0) or 0),
             })
         except Exception:
             continue

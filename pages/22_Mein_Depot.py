@@ -291,23 +291,94 @@ if not allpos.empty:
         st.plotly_chart(_pie(secs.index, secs.values, "Branchen"),
                         use_container_width=True, config={"displayModeBar": False})
 
-    # ── Offene Optionspositionen ─────────────────────────────────────────────
+    # ── Trade Management: Optionspositionen im Trade-Monitor-Look ────────────
     opts = allpos[allpos["category"] == "OPT"].copy()
     if not opts.empty:
-        st.markdown("#### 🧾 Offene Optionspositionen")
-        show = opts[["symbol", "typ", "strike", "expiry", "qty", "mark", "value", "pnl"]] \
-            .rename(columns={"symbol": "Ticker", "typ": "Typ", "strike": "Strike",
-                             "expiry": "Verfall", "qty": "Kontrakte", "mark": "Preis",
-                             "value": "Marktwert", "pnl": "P&L"})
-        st.dataframe(show.sort_values("Verfall"), use_container_width=True, hide_index=True,
-                     column_config={
-                         "Strike":    st.column_config.NumberColumn(format="$%.2f"),
-                         "Preis":     st.column_config.NumberColumn(format="$%.2f"),
-                         "Marktwert": st.column_config.NumberColumn(format="$%.0f"),
-                         "P&L":       st.column_config.NumberColumn(format="$%.0f"),
-                     })
-        st.caption("➡️ Bewertung nach Stillhalter-Regeln: **Seite 7 · Trade Management** "
-                   "(dort denselben Flex-Abruf nutzen).")
+        from ui.trade_cards import depot_option_card_html
+        from data.fetcher import fetch_stock_info as _fsi
+
+        _CARD_BG2 = "#eef8f5" if _IS_GREEN else "#0e0e0e"
+        _TXT_SUB = "#475569" if _IS_GREEN else "#ffffff"
+        _TXT_MUTED = "#94a3b8" if _IS_GREEN else "#e8e8e8"
+
+        st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
+        st.markdown(f"#### ⚖️ Trade Management — {len(opts)} Optionspositionen")
+        st.caption("Balken = Laufzeit · Farbe: 🟢 OK · 🟡 nah am Strike · 🔴 im Geld — "
+                   "gleiche Ansicht wie der Trade Monitor, Daten direkt aus deinem IBKR-Abruf.")
+
+        _ev_key = f"md_evals_{_user}"
+        _c_ev1, _c_ev2 = st.columns([2, 5])
+        _run_eval = _c_ev1.button("📊 Nach Stillhalter-Regeln bewerten", type="secondary",
+                                  use_container_width=True)
+        _c_ev2.caption("Ergänzt jede Karte um die Trade-Management-Empfehlung "
+                       "(Theta-Verlauf, Trend, Earnings, Roll-Optionen) — dauert ein paar Sekunden.")
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _stock_price(tkr: str) -> float:
+            try:
+                return float(_fsi(tkr).get("price") or 0)
+            except Exception:
+                return 0.0
+
+        def _norm_expiry(v) -> str:
+            s = str(v or "")
+            return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if (len(s) == 8 and s.isdigit()) else s[:10]
+
+        if _run_eval:
+            from trading.position_eval import evaluate_position as _evalpos
+            _evs = {}
+            with st.spinner("Bewerte Positionen nach Stillhalter-Regeln…"):
+                for _, _o in opts.iterrows():
+                    _key = f"{_o['symbol']}|{_o['strike']}|{_o['expiry']}|{_o['put_call']}"
+                    try:
+                        _evs[_key] = _evalpos(
+                            _o["symbol"], "CALL" if _o["put_call"] == "C" else "PUT",
+                            float(_o["strike"]), _norm_expiry(_o["expiry"]),
+                            int(_o["qty"]), abs(float(_o.get("cost_price", 0) or 0)),
+                            praemie_akt_pre=float(_o["mark"] or 0) or None,
+                            pnl_usd_pre=float(_o["pnl"] or 0),
+                        )
+                    except Exception:
+                        continue
+            st.session_state[_ev_key] = _evs
+        _evals = st.session_state.get(_ev_key, {})
+
+        opts["_dte_sort"] = opts["expiry"].map(_norm_expiry)
+        for _, _o in opts.sort_values("_dte_sort").iterrows():
+            _key = f"{_o['symbol']}|{_o['strike']}|{_o['expiry']}|{_o['put_call']}"
+            _ev = _evals.get(_key)
+            _pos = {
+                "ticker":   _o["symbol"],
+                "is_call":  _o["put_call"] == "C",
+                "is_short": float(_o["qty"]) < 0,
+                "strike":   float(_o["strike"]),
+                "expiry":   _norm_expiry(_o["expiry"]),
+                "qty":      int(_o["qty"]),
+                "mark":     float(_o["mark"] or 0),
+                "premium":  abs(float(_o.get("cost_price", 0) or 0)),
+                "pnl_usd":  float(_o["pnl"] or 0),
+                "kurs":     (_ev or {}).get("kurs") or _stock_price(_o["symbol"]),
+            }
+            st.html(depot_option_card_html(_pos, _TXT, _TXT_SUB, _TXT_MUTED,
+                                           _CARD_BG2, ev=_ev))
+            if _ev and _ev.get("details"):
+                with st.expander(f"🔍 Detail-Bewertung {_o['symbol']} "
+                                 f"{'CALL' if _o['put_call'] == 'C' else 'PUT'} ${_o['strike']:g}"):
+                    for _icon, _txt in _ev["details"]:
+                        st.markdown(f"{_icon} {_txt}")
+
+        with st.expander("📋 Tabellenansicht"):
+            show = opts[["symbol", "typ", "strike", "expiry", "qty", "mark", "value", "pnl"]] \
+                .rename(columns={"symbol": "Ticker", "typ": "Typ", "strike": "Strike",
+                                 "expiry": "Verfall", "qty": "Kontrakte", "mark": "Preis",
+                                 "value": "Marktwert", "pnl": "P&L"})
+            st.dataframe(show.sort_values("Verfall"), use_container_width=True, hide_index=True,
+                         column_config={
+                             "Strike":    st.column_config.NumberColumn(format="$%.2f"),
+                             "Preis":     st.column_config.NumberColumn(format="$%.2f"),
+                             "Marktwert": st.column_config.NumberColumn(format="$%.0f"),
+                             "P&L":       st.column_config.NumberColumn(format="$%.0f"),
+                         })
 
 if not summ.get("nlv"):
     st.info("ℹ️ **Tipp:** Deine Flex Query liefert aktuell keine NAV-/Cash-Daten — "
