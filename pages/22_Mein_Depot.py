@@ -133,7 +133,8 @@ if _do_fetch:
     xmls, _fails = [], []
     import time as _time
     with st.spinner(f"Hole Depot von IBKR… ({len(_qids)} "
-                    f"Quer{'ies' if len(_qids) > 1 else 'y'}, je bis zu 45 Sek.)"):
+                    f"Quer{'ies' if len(_qids) > 1 else 'y'} — kann bis zu ~4 Min. "
+                    f"dauern, wenn IBKR das Statement erst erzeugen muss)"):
         for _qi, _qid in enumerate(_qids):
             if _qi > 0:
                 _time.sleep(4)   # IBKR-Rate-Limit schonen (gleiches Token)

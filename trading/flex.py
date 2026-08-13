@@ -30,6 +30,13 @@ IBKR_GET_URLS = {
 IBKR_HEADERS = {"User-Agent": "Mozilla/5.0"}
 _RATE_LIMIT_CODES = {"1018"}
 _TRANSIENT_CODES  = {"1019", "1021"}
+# Endgueltige Fehler: weitere Versuche/Endpoint-Wechsel sind zwecklos
+_TOKEN_CODES = {"1012": "abgelaufen", "1015": "ungültig", "1016": "deaktiviert"}
+_QUERY_CODES = {"1020", "1003"}
+# Wartezeiten Step 1 ('Statement could not be generated'): ~2 Min Gesamtbudget
+_S1_DELAYS = (0, 15, 30, 60)
+# Wartezeiten Polling (GetStatement, 'generation in progress'): ~110 s
+_POLL_DELAYS = (3, 3, 5, 5, 8, 8, 13, 13, 21, 21)
 
 
 def fetch_flex(token: str, query_id: str, timeout: int = 30):
@@ -55,11 +62,12 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
             # 'Statement could not be generated at this time' ist ein
             # VORÜBERGEHENDER Fehler auf Statement-Ebene: Endpoint-Wechsel
             # hilft nicht und verbrennt nur das Token-Rate-Limit (Code 1018).
-            # → gleichen Endpoint mit Wartezeit bis zu 3× wiederholen.
-            for s1_try in range(3):
-                if s1_try > 0:
-                    debug.append("…Statement wird IBKR-seitig noch erzeugt → 12 s warten, GLEICHER Endpoint")
-                    time.sleep(12)
+            # → gleichen Endpoint mit wachsender Wartezeit wiederholen
+            #   (IBKR braucht dafür oft 1-3 Minuten).
+            for s1_try, s1_delay in enumerate(_S1_DELAYS):
+                if s1_delay:
+                    debug.append(f"…Statement wird IBKR-seitig noch erzeugt → {s1_delay} s warten, GLEICHER Endpoint")
+                    time.sleep(s1_delay)
                 r1 = requests.get(url1, headers=IBKR_HEADERS, timeout=timeout)
                 debug.append(f"Step1 (Versuch {s1_try+1}): HTTP {r1.status_code}, {len(r1.content)} bytes")
                 try:
@@ -81,9 +89,21 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
                         f"⏱️ IBKR Rate Limit (Code {err_code}): Zu viele Anfragen mit diesem Token.\n"
                         "Bitte **5–10 Minuten warten** und dann erneut versuchen."
                     ), "\n".join(debug)
+                if err_code in _TOKEN_CODES:
+                    return None, (
+                        f"🔑 Dein Flex-Token ist **{_TOKEN_CODES[err_code]}** (IBKR-Code {err_code}).\n"
+                        "In der IBKR-Kontoverwaltung unter *Einstellungen → Flex-Webdienst* "
+                        "einen neuen Prüfcode erzeugen und hier speichern."
+                    ), "\n".join(debug)
+                if err_code in _QUERY_CODES:
+                    return None, (
+                        f"❌ IBKR kann die Query nicht verarbeiten (Code {err_code}: {err1}).\n"
+                        "Bitte prüfen: Stimmt die **Query-ID**? Ist es eine **Activity Flex Query** "
+                        "(Handelsbestätigungs-Queries gehören ins zweite Feld)?"
+                    ), "\n".join(debug)
                 if not (err_code in _TRANSIENT_CODES
                         or "could not be generated" in err1.lower()):
-                    break   # dauerhafter Fehler → Endpoint-Wechsel versuchen
+                    break   # unbekannter Fehler → Endpoint-Wechsel versuchen
 
             if parse_fail:
                 continue
@@ -91,10 +111,17 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
                 conn_errors.append(f"{host}: Status='{stat1}', Fehler='{err1}'")
                 if err_code in _TRANSIENT_CODES or "could not be generated" in err1.lower():
                     return None, (
-                        "⏳ IBKR kann das Statement **gerade** nicht erzeugen "
-                        "('Statement could not be generated at this time') — das ist "
-                        "ein vorübergehender IBKR-Serverzustand, kein Fehler deiner "
-                        "Zugangsdaten. Bitte in **1–2 Minuten** erneut versuchen."
+                        "⏳ IBKR konnte das Statement auch nach mehreren Versuchen über "
+                        "~2 Minuten nicht erzeugen ('Statement could not be generated "
+                        "at this time'). Meist ist das ein vorübergehender IBKR-Zustand — "
+                        "bitte in **ein paar Minuten** erneut versuchen.\n\n"
+                        "Wenn es **wiederholt** fehlschlägt, liegt es fast immer an der "
+                        "Query-Konfiguration bei IBKR:\n"
+                        "- Zeitraum der Query auf **'Letzter Geschäftstag'** oder wenige Tage "
+                        "stellen (sehr lange Zeiträume schlagen oft fehl)\n"
+                        "- Prüfen, ob es eine **Activity Flex Query** ist (keine Handelsbestätigungs-Query)\n"
+                        "- Während der IBKR-Wartungsfenster (nachts ~23:45–00:45 New Yorker Zeit, "
+                        "samstags länger) schlägt die Erzeugung generell fehl."
                     ), "\n".join(debug)
                 debug.append("Kein ReferenceCode → nächsten Endpoint versuchen")
                 continue
@@ -105,8 +132,8 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
                     url2 = url2.replace(old_h, host)
             debug.append(f"Polling-URL: {url2}")
 
-            for attempt in range(10):
-                time.sleep(3)
+            for attempt, poll_delay in enumerate(_POLL_DELAYS):
+                time.sleep(poll_delay)
                 r2 = requests.get(f"{url2}?q={ref}&t={token}&v=3",
                                   headers=IBKR_HEADERS, timeout=timeout)
                 size = len(r2.content)
@@ -119,14 +146,23 @@ def fetch_flex(token: str, query_id: str, timeout: int = 30):
                     if size > 500:
                         return r2.text, None, "\n".join(debug)
                     continue
-                st2  = root2.findtext("Status") or ""
-                err2 = root2.findtext("ErrorMessage") or root2.findtext("Message") or ""
+                st2   = root2.findtext("Status") or ""
+                err2  = root2.findtext("ErrorMessage") or root2.findtext("Message") or ""
+                code2 = root2.findtext("ErrorCode") or ""
                 if st2 == "Success":
                     return r2.text, None, "\n".join(debug)
-                if st2 not in ("", "Processing", "Statement generation in progress"):
-                    return None, f"IBKR: Status='{st2}', Meldung='{err2}'", "\n".join(debug)
+                # 'Statement generation in progress' kommt je nach Endpoint auch als
+                # Status='Warn' mit ErrorCode 1019 → weiter pollen, NICHT abbrechen.
+                if (code2 == "1019" or "in progress" in err2.lower()
+                        or "try again" in err2.lower()
+                        or st2 in ("", "Processing", "Statement generation in progress")):
+                    debug.append(f"…noch in Arbeit (Status={st2!r}, Code={code2!r})")
+                    continue
+                return None, f"IBKR: Status='{st2}', Meldung='{err2}'", "\n".join(debug)
 
-            return None, "Timeout: kein Ergebnis nach 30 Sek.", "\n".join(debug)
+            return None, ("Timeout: Statement war nach ~110 Sek. noch nicht fertig — "
+                          "bitte erneut auf 'Depot jetzt aktualisieren' klicken "
+                          "(IBKR erzeugt es im Hintergrund weiter)."), "\n".join(debug)
 
         except (requests.exceptions.ConnectionError, requests.exceptions.SSLError) as e:
             debug.append(f"Verbindungsfehler: {str(e)[:120]}")
