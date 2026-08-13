@@ -12,6 +12,17 @@ COL_EINNAHMEN = PALETTE[2]  # aqua
 COL_SCHULDEN = PALETTE[1]   # orange
 
 
+def secret(name: str, default: str = "") -> str:
+    """Konfigwert aus Umgebungsvariable ODER st.secrets (Streamlit Community Cloud)."""
+    val = os.environ.get(name, "")
+    if val:
+        return val
+    try:
+        return str(st.secrets.get(name, default))
+    except Exception:
+        return default
+
+
 def eur(x: float) -> str:
     """1234.5 -> '1.234,50 €' (deutsche Schreibweise)."""
     if x is None:
@@ -54,8 +65,8 @@ def month_label(month: str) -> str:
 
 
 def guard() -> None:
-    """Optionaler Familien-PIN (Umgebungsvariable FINANZEN_PIN)."""
-    pin = os.environ.get("FINANZEN_PIN", "")
+    """Optionaler Familien-PIN (Umgebungsvariable oder Streamlit-Secret FINANZEN_PIN)."""
+    pin = secret("FINANZEN_PIN")
     if not pin:
         return
     if st.session_state.get("_pin_ok"):

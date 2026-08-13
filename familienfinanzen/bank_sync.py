@@ -22,14 +22,26 @@ import requests
 BASE = "https://bankaccountdata.gocardless.com/api/v2"
 
 
+def _secret(name: str) -> str:
+    """Umgebungsvariable oder st.secrets (Streamlit Community Cloud)."""
+    val = os.environ.get(name, "")
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return str(st.secrets.get(name, ""))
+    except Exception:
+        return ""
+
+
 def credentials_present() -> bool:
-    return bool(os.environ.get("GOCARDLESS_SECRET_ID") and os.environ.get("GOCARDLESS_SECRET_KEY"))
+    return bool(_secret("GOCARDLESS_SECRET_ID") and _secret("GOCARDLESS_SECRET_KEY"))
 
 
 class GoCardlessClient:
     def __init__(self, secret_id: Optional[str] = None, secret_key: Optional[str] = None):
-        self.secret_id = secret_id or os.environ.get("GOCARDLESS_SECRET_ID", "")
-        self.secret_key = secret_key or os.environ.get("GOCARDLESS_SECRET_KEY", "")
+        self.secret_id = secret_id or _secret("GOCARDLESS_SECRET_ID")
+        self.secret_key = secret_key or _secret("GOCARDLESS_SECRET_KEY")
         self._token: Optional[str] = None
 
     # --- intern ---------------------------------------------------------
