@@ -2,10 +2,19 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.5
+//  Stillhalter Community® – MEAN REVERSION v1.6
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.5 — SIGNAL-BEREINIGUNG + Backtest-Ausbau:
+//  NEU in v1.6 — WÄHLBARER SIGNAL-AUSLÖSER (Studie: Klassisch vs. Abprall):
+//   • 'Klassisch (Rückkehr über Schwelle)' = Standard: Z-Score erobert die
+//     ±1σ-Linie zurück — gemessen der präziseste Auslöser (88%), aber
+//     +4 Kerzen nach dem Tief.
+//   • 'Früh (Abprall vom Extrem)': Signal, sobald der Z-Score um X σ
+//     (Standard 0.5) von seinem Episoden-Extrem abgeprallt ist — feuert
+//     +2 Kerzen früher und NAHE AM MAXIMUM (gerade bei tiefen Episoden),
+//     dafür ~76% Präzision. Empfehlung: Früh-Modus nur zusammen mit
+//     Confluence-Bestätigung und ab Stufe 2 handeln.
+//  v1.5 — SIGNAL-BEREINIGUNG + Backtest-Ausbau:
 //   • Signal-Bereinigung (Noise Suppression): Innerhalb von N Kerzen
 //     (Standard 30) nach einem ⚡-Signal werden schwächere und gleich
 //     starke Signale derselben Richtung unterdrückt — nur eine HÖHERE
@@ -52,7 +61,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.5", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.6", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -78,11 +87,24 @@ signal_thresh  = input.float(1.0, "Signal-Schwelle (×SD)", minval = 0.5, maxval
 
 // ─── Inputs: Signale ─────────────────────────────────────────────────────────
 grp_sig = "SIGNALE"
-useReentry = input.bool(true, "⚡ Re-Entry-Signale (früh, ohne Verzögerung)", group = grp_sig,
-     tooltip = "◆-Raute, sobald der Z-Score aus der Überdehnung ZURÜCK über die "
-          + "Schwelle kreuzt — die Rückkehr zum Mittelwert hat begonnen. Kommt "
-          + "sofort mit Kerzenschluss und dient als Live-Bestätigung für die "
-          + "anderen Stillhalter-Indikatoren.")
+useReentry = input.bool(true, "⚡ Wende-Signale (Rauten) anzeigen", group = grp_sig,
+     tooltip = "◆-Raute, sobald die Rückkehr zum Mittelwert beginnt — live mit "
+          + "Kerzenschluss, Auslöser wählbar (siehe '⚡ Signal-Auslöser').")
+trigMode   = input.string("Klassisch (Rückkehr über Schwelle)", "⚡ Signal-Auslöser",
+     options = ["Klassisch (Rückkehr über Schwelle)", "Früh (Abprall vom Extrem)"], group = grp_sig,
+     tooltip = "Klassisch = der Z-Score erobert die ±1σ-Linie zurück. Studie: 88% "
+          + "Präzision, aber ~4 Kerzen nach dem Tief — die Rückeroberung ist ein "
+          + "eingebauter Qualitätsfilter. "
+          + "Früh = Signal schon beim Abprall vom Episoden-Extrem (siehe "
+          + "'Wende-Bestätigung') — ~2 Kerzen früher und nahe am Maximum, dafür "
+          + "~76% Präzision. Empfehlung Früh-Modus: nur mit Confluence-Bestätigung "
+          + "und ab Stufe 2 handeln.")
+rebound    = input.float(0.5, "Wende-Bestätigung im Früh-Modus (×SD)", minval = 0.2, maxval = 1.5,
+     step = 0.05, group = grp_sig,
+     tooltip = "Nur im Früh-Modus: Um wie viele Standardabweichungen der Z-Score von "
+          + "seinem Episoden-Extrem abgeprallt sein muss, damit die Wende als "
+          + "begonnen gilt. 0.5 = gemessener Kompromiss (kleiner = früher aber "
+          + "fehleranfälliger, größer = näher am Klassisch-Verhalten).")
 usePivot   = input.bool(true, "🎯 Pivot-Signale (exaktes Extrem, bestätigt)", group = grp_sig,
      tooltip = "Punkt am exakten Hoch/Tief der Überdehnung — wird aber erst "
           + "N Kerzen später bestätigt (der Punkt erscheint rückwirkend am Extrem). "
@@ -166,29 +188,49 @@ bool upOK   = trendFilt == "Aus" or close > emaF
 bool downOK = trendFilt == "Aus" or close < emaF
 plot(trendFilt != "Aus" ? emaF : na, "Trend-Filter EMA", color = color.new(#EF6C00, 55), linewidth = 1)
 
-// ─── Signale ─────────────────────────────────────────────────────────────────
-// ⚡ Re-Entry (früh): Z-Score kreuzt aus der Überdehnung ZURÜCK über die Schwelle
-bool reBuyRaw  = useReentry and ta.crossover(z_s, -signal_thresh)  and upOK
-bool reSellRaw = useReentry and ta.crossunder(z_s, signal_thresh)  and downOK
+// ─── Episoden-Verfolgung + Signal-Auslöser ───────────────────────────────────
+// Eine Episode beginnt, wenn der Z-Score die Schwelle überschreitet; ihr
+// Extrem wird mitgeführt. Auslöser je Modus:
+//   Klassisch = Rückkehr über die Schwelle (präziseste Variante)
+//   Früh      = Abprall um 'rebound' σ vom Episoden-Extrem (nahe am Maximum)
+// Nach einem Signal wird die Episode erst wieder scharf, wenn ein NEUES,
+// extremeres Extrem entsteht — sonst keine Doppel-Signale.
+trigFrueh = trigMode == "Früh (Abprall vom Extrem)"
+
+var bool  armB = false
+var float extB = 0.0
+if z_s < -signal_thresh
+    if armB
+        extB := math.min(extB, z_s)
+    else if extB == 0.0 or z_s < extB
+        armB := true
+        extB := extB == 0.0 ? z_s : math.min(extB, z_s)
+else if not armB
+    extB := 0.0
+bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB + rebound : ta.crossover(z_s, -signal_thresh))
+
+var bool  armS = false
+var float extS = 0.0
+if z_s > signal_thresh
+    if armS
+        extS := math.max(extS, z_s)
+    else if extS == 0.0 or z_s > extS
+        armS := true
+        extS := extS == 0.0 ? z_s : math.max(extS, z_s)
+else if not armS
+    extS := 0.0
+bool reSellRaw = useReentry and armS and downOK and (trigFrueh ? z_s <= extS - rebound : ta.crossunder(z_s, signal_thresh))
 
 // ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
 // Stufe 1 = 1–2σ · Stufe 2 = 2–3σ (STARK) · Stufe 3 = ≥3σ (EXTREM).
-// Je tiefer die Überdehnung, desto mehr spricht die Rückkehr für
-// Trendwechsel und neue Trendstärke.
-var float epLo = 0.0
-var float epHi = 0.0
-if z_s < -signal_thresh
-    epLo := math.min(epLo, z_s)
-if z_s > signal_thresh
-    epHi := math.max(epHi, z_s)
-int stageBuyRaw  = reBuyRaw  ? (-epLo >= 3.0 ? 3 : -epLo >= 2.0 ? 2 : 1) : 0
-int stageSellRaw = reSellRaw ? (epHi  >= 3.0 ? 3 : epHi  >= 2.0 ? 2 : 1) : 0
-float depthBuy  = -epLo
-float depthSell = epHi
+int stageBuyRaw  = reBuyRaw  ? (-extB >= 3.0 ? 3 : -extB >= 2.0 ? 2 : 1) : 0
+int stageSellRaw = reSellRaw ? (extS  >= 3.0 ? 3 : extS  >= 2.0 ? 2 : 1) : 0
+float depthBuy  = -extB
+float depthSell = extS
 if reBuyRaw
-    epLo := 0.0
+    armB := false
 if reSellRaw
-    epHi := 0.0
+    armS := false
 
 // ─── SIGNAL-BEREINIGUNG (Noise Suppression) ──────────────────────────────────
 // Innerhalb von noiseBars Kerzen nach einem Signal werden schwächere und
