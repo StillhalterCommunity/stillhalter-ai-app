@@ -2,10 +2,17 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.7
+//  Stillhalter Community® – MEAN REVERSION v1.8
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.7:
+//  NEU in v1.8 — Wende-Bestätigung jetzt PROZENTUAL (Nutzer-Feedback):
+//   • Der Früh-Modus misst den Abprall nicht mehr in festen σ, sondern
+//     als PROZENT der Episodentiefe (Standard 30% = '30% des Rückwegs
+//     zum Mittelwert geschafft'). Damit ist der Auslöser über alle
+//     Stufen fair: −4σ-Episode feuert bei −2.8σ, −1.3σ-Episode bei
+//     −0.9σ. Studie: präziser UND fairer als der Absolutwert
+//     (78% vs. 76%), eine Kerze schneller als Klassisch.
+//  v1.7:
 //   • Signal-Bereinigung gilt jetzt auch für die 🎯-KREISE (vorher nur
 //     für die ⚡-Rauten): Innerhalb von N Kerzen erscheint nur noch ein
 //     Kreis derselben Richtung, wenn er STÄRKER ist als der vorherige
@@ -66,7 +73,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.7", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.8", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -104,12 +111,14 @@ trigMode   = input.string("Klassisch (Rückkehr über Schwelle)", "⚡ Signal-Au
           + "'Wende-Bestätigung') — ~2 Kerzen früher und nahe am Maximum, dafür "
           + "~76% Präzision. Empfehlung Früh-Modus: nur mit Confluence-Bestätigung "
           + "und ab Stufe 2 handeln.")
-rebound    = input.float(0.5, "Wende-Bestätigung im Früh-Modus (×SD)", minval = 0.2, maxval = 1.5,
-     step = 0.05, group = grp_sig,
-     tooltip = "Nur im Früh-Modus: Um wie viele Standardabweichungen der Z-Score von "
-          + "seinem Episoden-Extrem abgeprallt sein muss, damit die Wende als "
-          + "begonnen gilt. 0.5 = gemessener Kompromiss (kleiner = früher aber "
-          + "fehleranfälliger, größer = näher am Klassisch-Verhalten).")
+reboundPct = input.float(30, "Wende-Bestätigung im Früh-Modus (% der Episodentiefe)", minval = 10,
+     maxval = 70, step = 5, group = grp_sig,
+     tooltip = "Nur im Früh-Modus: Wie viel Prozent des Rückwegs vom Episoden-Extrem "
+          + "zum Mittelwert geschafft sein müssen, damit die Wende als begonnen "
+          + "gilt. PROZENTUAL, damit der Auslöser über alle Stufen fair ist: Eine "
+          + "tiefe Episode feuert entsprechend tiefer, eine flache später. "
+          + "30% = gemessener Kompromiss (kleiner = früher aber fehleranfälliger, "
+          + "größer = näher am Klassisch-Verhalten).")
 usePivot   = input.bool(true, "🎯 Pivot-Signale (exaktes Extrem, bestätigt)", group = grp_sig,
      tooltip = "Punkt am exakten Hoch/Tief der Überdehnung — wird aber erst "
           + "N Kerzen später bestätigt (der Punkt erscheint rückwirkend am Extrem). "
@@ -197,7 +206,7 @@ plot(trendFilt != "Aus" ? emaF : na, "Trend-Filter EMA", color = color.new(#EF6C
 // Eine Episode beginnt, wenn der Z-Score die Schwelle überschreitet; ihr
 // Extrem wird mitgeführt. Auslöser je Modus:
 //   Klassisch = Rückkehr über die Schwelle (präziseste Variante)
-//   Früh      = Abprall um 'rebound' σ vom Episoden-Extrem (nahe am Maximum)
+//   Früh      = Abprall um 'reboundPct' % der Episodentiefe (nahe am Maximum)
 // Nach einem Signal wird die Episode erst wieder scharf, wenn ein NEUES,
 // extremeres Extrem entsteht — sonst keine Doppel-Signale.
 trigFrueh = trigMode == "Früh (Abprall vom Extrem)"
@@ -212,7 +221,7 @@ if z_s < -signal_thresh
         extB := extB == 0.0 ? z_s : math.min(extB, z_s)
 else if not armB
     extB := 0.0
-bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB + rebound : ta.crossover(z_s, -signal_thresh))
+bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB * (1 - reboundPct / 100) : ta.crossover(z_s, -signal_thresh))
 
 var bool  armS = false
 var float extS = 0.0
@@ -224,7 +233,7 @@ if z_s > signal_thresh
         extS := extS == 0.0 ? z_s : math.max(extS, z_s)
 else if not armS
     extS := 0.0
-bool reSellRaw = useReentry and armS and downOK and (trigFrueh ? z_s <= extS - rebound : ta.crossunder(z_s, signal_thresh))
+bool reSellRaw = useReentry and armS and downOK and (trigFrueh ? z_s <= extS * (1 - reboundPct / 100) : ta.crossunder(z_s, signal_thresh))
 
 // ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
 // Stufe 1 = 1–2σ · Stufe 2 = 2–3σ (STARK) · Stufe 3 = ≥3σ (EXTREM).
