@@ -2,10 +2,15 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.6
+//  Stillhalter Community® – MEAN REVERSION v1.7
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.6 — WÄHLBARER SIGNAL-AUSLÖSER (Studie: Klassisch vs. Abprall):
+//  NEU in v1.7:
+//   • Signal-Bereinigung gilt jetzt auch für die 🎯-KREISE (vorher nur
+//     für die ⚡-Rauten): Innerhalb von N Kerzen erscheint nur noch ein
+//     Kreis derselben Richtung, wenn er STÄRKER ist als der vorherige
+//     (Stärke = Tiefe des Extrems in σ, gleiche Stufen wie die Rauten).
+//  v1.6 — WÄHLBARER SIGNAL-AUSLÖSER (Studie: Klassisch vs. Abprall):
 //   • 'Klassisch (Rückkehr über Schwelle)' = Standard: Z-Score erobert die
 //     ±1σ-Linie zurück — gemessen der präziseste Auslöser (88%), aber
 //     +4 Kerzen nach dem Tief.
@@ -61,7 +66,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.6", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.7", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -117,10 +122,10 @@ trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EM
           + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
           + "Messer') — empfohlen: EMA 200 für Cash Secured Puts.")
 noiseBars  = input.int(30, "Signal-Bereinigung (Kerzen)", minval = 0, maxval = 200, group = grp_sig,
-     tooltip = "Unterdrückt schwächere ⚡-Signale, wenn innerhalb der letzten N Kerzen "
-          + "bereits ein gleich starkes oder stärkeres Signal derselben Richtung kam — "
-          + "nur eine HÖHERE Stufe schlägt noch durch. Räumt zappelige Bodenbildungen "
-          + "auf (eine Wende = ein Zeichen). 0 = aus.")
+     tooltip = "Unterdrückt schwächere ⚡-Rauten UND 🎯-Kreise, wenn innerhalb der "
+          + "letzten N Kerzen bereits ein gleich starkes oder stärkeres Signal "
+          + "derselben Richtung kam — nur eine HÖHERE Stufe schlägt noch durch. "
+          + "Räumt zappelige Bodenbildungen auf (eine Wende = ein Zeichen). 0 = aus.")
 
 // ─── Inputs: Anzeige ─────────────────────────────────────────────────────────
 grp_st = "ANZEIGE"
@@ -257,11 +262,26 @@ if reSell
     lastDepth := depthSell
     lastStage := stageSell
 
-// 🎯 Pivot (bestätigt): exaktes Extrem, erscheint pivot_lb Kerzen später
+// 🎯 Pivot (bestätigt): exaktes Extrem, erscheint pivot_lb Kerzen später —
+// Signal-Bereinigung gilt auch hier (Stärke = Tiefe des Extrems in σ)
 float ph = ta.pivothigh(z_s, pivot_lb, pivot_lb)
 float pl = ta.pivotlow(z_s,  pivot_lb, pivot_lb)
-bool pivSell = usePivot and not na(ph) and ph >  signal_thresh and downOK
-bool pivBuy  = usePivot and not na(pl) and pl < -signal_thresh and upOK
+bool pivSellRaw = usePivot and not na(ph) and ph >  signal_thresh and downOK
+bool pivBuyRaw  = usePivot and not na(pl) and pl < -signal_thresh and upOK
+int pivStageB = pivBuyRaw  ? (-pl >= 3.0 ? 3 : -pl >= 2.0 ? 2 : 1) : 0
+int pivStageS = pivSellRaw ? (ph  >= 3.0 ? 3 : ph  >= 2.0 ? 2 : 1) : 0
+var int lastPivBuyBar    = -100000
+var int lastPivBuyStage  = 0
+var int lastPivSellBar   = -100000
+var int lastPivSellStage = 0
+bool pivBuy  = pivStageB > 0 and (noiseBars == 0 or bar_index - lastPivBuyBar  > noiseBars or pivStageB > lastPivBuyStage)
+bool pivSell = pivStageS > 0 and (noiseBars == 0 or bar_index - lastPivSellBar > noiseBars or pivStageS > lastPivSellStage)
+if pivBuy
+    lastPivBuyBar   := bar_index
+    lastPivBuyStage := pivStageB
+if pivSell
+    lastPivSellBar   := bar_index
+    lastPivSellStage := pivStageS
 
 // ─── Hintergrund ─────────────────────────────────────────────────────────────
 color bg_col = switch
