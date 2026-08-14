@@ -2,10 +2,19 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.4
+//  Stillhalter Community® – MEAN REVERSION v1.5
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.4 — SIGNALSTÄRKE nach Tiefe der Überdehnung:
+//  NEU in v1.5 — SIGNAL-BEREINIGUNG + Backtest-Ausbau:
+//   • Signal-Bereinigung (Noise Suppression): Innerhalb von N Kerzen
+//     (Standard 30) nach einem ⚡-Signal werden schwächere und gleich
+//     starke Signale derselben Richtung unterdrückt — nur eine HÖHERE
+//     Stufe schlägt noch durch. Eine Wende = ein Zeichen, zappelige
+//     Bodenbildungen erzeugen keine Rauten-Ketten mehr. 0 = aus.
+//   • Backtest ausgebaut: Zeitraum (Start/Ende), Gebühr je Order (%),
+//     Max Drawdown in der Tabelle — und er handelt die BEREINIGTEN
+//     Signale (wie sie im Chart stehen).
+//  v1.4 — SIGNALSTÄRKE nach Tiefe der Überdehnung:
 //   • Jede ⚡-Raute hat jetzt eine Stufe, gemessen am tiefsten Punkt der
 //     Überdehnungs-Episode: Stufe 1 (1–2σ) = kleine Raute · Stufe 2
 //     (2–3σ, STARK) = mittlere Raute · Stufe 3 (≥3σ, EXTREM) = große
@@ -43,7 +52,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.4", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.5", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -85,6 +94,11 @@ trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EM
      tooltip = "UP-Signale nur OBERHALB, DOWN-Signale nur UNTERHALB der gewählten "
           + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
           + "Messer') — empfohlen: EMA 200 für Cash Secured Puts.")
+noiseBars  = input.int(30, "Signal-Bereinigung (Kerzen)", minval = 0, maxval = 200, group = grp_sig,
+     tooltip = "Unterdrückt schwächere ⚡-Signale, wenn innerhalb der letzten N Kerzen "
+          + "bereits ein gleich starkes oder stärkeres Signal derselben Richtung kam — "
+          + "nur eine HÖHERE Stufe schlägt noch durch. Räumt zappelige Bodenbildungen "
+          + "auf (eine Wende = ein Zeichen). 0 = aus.")
 
 // ─── Inputs: Anzeige ─────────────────────────────────────────────────────────
 grp_st = "ANZEIGE"
@@ -113,6 +127,11 @@ btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-En
      tooltip = "Welche Signale der Backtest handelt. Hinweis: Pivot-Signale werden "
           + "erst N Kerzen nach dem Extrem bestätigt — gehandelt wird ehrlich "
           + "zum Bestätigungszeitpunkt, nicht am Extrem.")
+btFrom     = input.time(timestamp("2019-01-01T00:00:00"), "Backtest Start", group = grp_bt)
+btTo       = input.time(timestamp("2099-01-01T00:00:00"), "Backtest Ende",  group = grp_bt)
+feePct     = input.float(0.0, "Gebühr je Order (%)", minval = 0.0, maxval = 1.0, step = 0.01, group = grp_bt,
+     tooltip = "Prozentuale Gebühr pro Kauf und pro Verkauf — wird vom Trade-Ergebnis "
+          + "abgezogen (2× je Roundtrip).")
 initialCapital = input.float(10000, "Startkapital", minval = 1, group = grp_bt)
 
 // ─── Berechnung ──────────────────────────────────────────────────────────────
@@ -149,8 +168,8 @@ plot(trendFilt != "Aus" ? emaF : na, "Trend-Filter EMA", color = color.new(#EF6C
 
 // ─── Signale ─────────────────────────────────────────────────────────────────
 // ⚡ Re-Entry (früh): Z-Score kreuzt aus der Überdehnung ZURÜCK über die Schwelle
-bool reBuy  = useReentry and ta.crossover(z_s, -signal_thresh)  and upOK
-bool reSell = useReentry and ta.crossunder(z_s, signal_thresh)  and downOK
+bool reBuyRaw  = useReentry and ta.crossover(z_s, -signal_thresh)  and upOK
+bool reSellRaw = useReentry and ta.crossunder(z_s, signal_thresh)  and downOK
 
 // ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
 // Stufe 1 = 1–2σ · Stufe 2 = 2–3σ (STARK) · Stufe 3 = ≥3σ (EXTREM).
@@ -162,18 +181,39 @@ if z_s < -signal_thresh
     epLo := math.min(epLo, z_s)
 if z_s > signal_thresh
     epHi := math.max(epHi, z_s)
-int stageBuy  = reBuy  ? (-epLo >= 3.0 ? 3 : -epLo >= 2.0 ? 2 : 1) : 0
-int stageSell = reSell ? (epHi  >= 3.0 ? 3 : epHi  >= 2.0 ? 2 : 1) : 0
+int stageBuyRaw  = reBuyRaw  ? (-epLo >= 3.0 ? 3 : -epLo >= 2.0 ? 2 : 1) : 0
+int stageSellRaw = reSellRaw ? (epHi  >= 3.0 ? 3 : epHi  >= 2.0 ? 2 : 1) : 0
+float depthBuy  = -epLo
+float depthSell = epHi
+if reBuyRaw
+    epLo := 0.0
+if reSellRaw
+    epHi := 0.0
+
+// ─── SIGNAL-BEREINIGUNG (Noise Suppression) ──────────────────────────────────
+// Innerhalb von noiseBars Kerzen nach einem Signal werden schwächere und
+// gleich starke Signale derselben Richtung unterdrückt — nur eine HÖHERE
+// Stufe schlägt noch durch. Eine Wende = ein Zeichen.
+var int lastBuyBar    = -100000
+var int lastBuyStage  = 0
+var int lastSellBar   = -100000
+var int lastSellStage = 0
+bool reBuy  = stageBuyRaw  > 0 and (noiseBars == 0 or bar_index - lastBuyBar  > noiseBars or stageBuyRaw  > lastBuyStage)
+bool reSell = stageSellRaw > 0 and (noiseBars == 0 or bar_index - lastSellBar > noiseBars or stageSellRaw > lastSellStage)
+int stageBuy  = reBuy  ? stageBuyRaw  : 0
+int stageSell = reSell ? stageSellRaw : 0
 var float lastDepth = 0.0
 var int   lastStage = 0
 if reBuy
-    lastDepth := -epLo
+    lastBuyBar   := bar_index
+    lastBuyStage := stageBuyRaw
+    lastDepth := depthBuy
     lastStage := stageBuy
-    epLo := 0.0
 if reSell
-    lastDepth := epHi
+    lastSellBar   := bar_index
+    lastSellStage := stageSellRaw
+    lastDepth := depthSell
     lastStage := stageSell
-    epHi := 0.0
 
 // 🎯 Pivot (bestätigt): exaktes Extrem, erscheint pivot_lb Kerzen später
 float ph = ta.pivothigh(z_s, pivot_lb, pivot_lb)
@@ -230,8 +270,9 @@ plotshape(pivBuy,  "🎯 Extrem unten", shape.circle, location.belowbar,
      color.new(band_clr_os, 40), size = size.small, offset = -pivot_lb)
 
 // ─── Backtest (Tabelle statt Order-Pfeile — wie Stillhalter Confluence) ──────
-bool stratBuy  = btSource == "Re-Entry" ? reBuy  : pivBuy
-bool stratSell = btSource == "Re-Entry" ? reSell : pivSell
+inWindow = time >= btFrom and time <= btTo
+bool stratBuy  = inWindow and (btSource == "Re-Entry" ? reBuy  : pivBuy)
+bool stratSell = inWindow and (btSource == "Re-Entry" ? reSell : pivSell)
 
 var float equity     = na
 var float entryPrice = na
@@ -240,6 +281,8 @@ var int   trades     = 0
 var int   wins       = 0
 var bool  pendingBuy  = false
 var bool  pendingSell = false
+var float peakEq = 0.0
+var float maxDD  = 0.0
 
 if enableBT
     if na(equity)
@@ -253,8 +296,10 @@ if enableBT
         entryPrice := open
         pendingBuy := false
     if pendingSell[1] and inPos
-        pnlPct  = (open - entryPrice) / entryPrice
+        pnlPct  = (open - entryPrice) / entryPrice - 2 * feePct / 100
         equity  := equity * (1 + pnlPct)
+        peakEq  := math.max(peakEq, equity)
+        maxDD   := math.max(maxDD, peakEq > 0 ? (peakEq - equity) / peakEq * 100 : 0.0)
         trades  += 1
         if pnlPct > 0
             wins += 1
@@ -264,7 +309,7 @@ if enableBT
 winrate = trades > 0 ? wins * 100.0 / trades : 0.0
 roiPct  = enableBT and not na(equity) ? (equity / initialCapital - 1) * 100 : 0.0
 
-var table bt = table.new(position.top_right, 2, 4, border_width = 1)
+var table bt = table.new(position.top_right, 2, 5, border_width = 1)
 if barstate.islast and enableBT
     table.cell(bt, 0, 0, "Trades",  text_color = color.white)
     table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
@@ -274,6 +319,8 @@ if barstate.islast and enableBT
     table.cell(bt, 1, 2, str.tostring(roiPct, "#.#") + " %", text_color = color.white)
     table.cell(bt, 0, 3, "Equity",  text_color = color.white)
     table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
+    table.cell(bt, 0, 4, "Max DD",  text_color = color.white)
+    table.cell(bt, 1, 4, str.tostring(maxDD, "#.#") + " %", text_color = color.white)
 
 // ─── Status-Tabelle ──────────────────────────────────────────────────────────
 var table t = table.new(position.bottom_right, 2, 3, border_width = 1)
