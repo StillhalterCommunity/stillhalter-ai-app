@@ -2,10 +2,18 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.3
+//  Stillhalter Community® – MEAN REVERSION v1.4
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.3 (Raster-Studie über 120 Tiefs + 119 Hochs, 8 Aktien, 1D):
+//  NEU in v1.4 — SIGNALSTÄRKE nach Tiefe der Überdehnung:
+//   • Jede ⚡-Raute hat jetzt eine Stufe, gemessen am tiefsten Punkt der
+//     Überdehnungs-Episode: Stufe 1 (1–2σ) = kleine Raute · Stufe 2
+//     (2–3σ, STARK) = mittlere Raute · Stufe 3 (≥3σ, EXTREM) = große
+//     Raute. Je tiefer die Überdehnung war, desto mehr spricht die
+//     Rückkehr für Trendwechsel UND neue Trendstärke.
+//   • Status-Tabelle zeigt die Stufe des letzten Signals; eigene Alerts
+//     für STARKE Signale (≥2σ).
+//  v1.3 (Raster-Studie über 120 Tiefs + 119 Hochs, 8 Aktien, 1D):
 //   • Basis-Länge Standard 30 → 40: präziser (86% statt 80%) UND
 //     seltener (nur ~12 Signale/Jahr statt 14) — die Mean Reversion ist
 //     damit der bewusste AUSNAHME-Marker neben dem Confluence-Modell.
@@ -35,7 +43,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.3", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.4", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -144,6 +152,29 @@ plot(trendFilt != "Aus" ? emaF : na, "Trend-Filter EMA", color = color.new(#EF6C
 bool reBuy  = useReentry and ta.crossover(z_s, -signal_thresh)  and upOK
 bool reSell = useReentry and ta.crossunder(z_s, signal_thresh)  and downOK
 
+// ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
+// Stufe 1 = 1–2σ · Stufe 2 = 2–3σ (STARK) · Stufe 3 = ≥3σ (EXTREM).
+// Je tiefer die Überdehnung, desto mehr spricht die Rückkehr für
+// Trendwechsel und neue Trendstärke.
+var float epLo = 0.0
+var float epHi = 0.0
+if z_s < -signal_thresh
+    epLo := math.min(epLo, z_s)
+if z_s > signal_thresh
+    epHi := math.max(epHi, z_s)
+int stageBuy  = reBuy  ? (-epLo >= 3.0 ? 3 : -epLo >= 2.0 ? 2 : 1) : 0
+int stageSell = reSell ? (epHi  >= 3.0 ? 3 : epHi  >= 2.0 ? 2 : 1) : 0
+var float lastDepth = 0.0
+var int   lastStage = 0
+if reBuy
+    lastDepth := -epLo
+    lastStage := stageBuy
+    epLo := 0.0
+if reSell
+    lastDepth := epHi
+    lastStage := stageSell
+    epHi := 0.0
+
 // 🎯 Pivot (bestätigt): exaktes Extrem, erscheint pivot_lb Kerzen später
 float ph = ta.pivothigh(z_s, pivot_lb, pivot_lb)
 float pl = ta.pivotlow(z_s,  pivot_lb, pivot_lb)
@@ -179,10 +210,19 @@ fill(p_l3, p_l4, color = color.new(band_clr_os, 95))
 // ─── Signal-Marker ───────────────────────────────────────────────────────────
 // ⚡ Re-Entry: kleine RAUTE ohne Text (klar unterscheidbar von den
 // Confluence-Dreiecken) — grün unten = Rückkehr nach Überdehnung unten
-plotshape(reBuy,  "⚡ Re-Entry unten", shape.diamond, location.belowbar,
+// Rauten-Größe = Signalstärke (Stufe 1 klein · Stufe 2 mittel · Stufe 3 groß)
+plotshape(stageBuy == 1,  "⚡ UP Stufe 1",           shape.diamond, location.belowbar,
      color.new(band_clr_os, 0), size = size.tiny)
-plotshape(reSell, "⚡ Re-Entry oben",  shape.diamond, location.abovebar,
+plotshape(stageBuy == 2,  "⚡ UP Stufe 2 (stark)",   shape.diamond, location.belowbar,
+     color.new(band_clr_os, 0), size = size.small)
+plotshape(stageBuy == 3,  "⚡ UP Stufe 3 (extrem)",  shape.diamond, location.belowbar,
+     color.new(band_clr_os, 0), size = size.normal)
+plotshape(stageSell == 1, "⚡ DOWN Stufe 1",          shape.diamond, location.abovebar,
      color.new(band_clr_ob, 0), size = size.tiny)
+plotshape(stageSell == 2, "⚡ DOWN Stufe 2 (stark)",  shape.diamond, location.abovebar,
+     color.new(band_clr_ob, 0), size = size.small)
+plotshape(stageSell == 3, "⚡ DOWN Stufe 3 (extrem)", shape.diamond, location.abovebar,
+     color.new(band_clr_ob, 0), size = size.normal)
 // 🎯 Pivot: Punkt rückwirkend am exakten Extrem (nur Visualisierung)
 plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
      color.new(band_clr_ob, 40), size = size.small, offset = -pivot_lb)
@@ -236,7 +276,7 @@ if barstate.islast and enableBT
     table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
 
 // ─── Status-Tabelle ──────────────────────────────────────────────────────────
-var table t = table.new(position.bottom_right, 2, 2, border_width = 1)
+var table t = table.new(position.bottom_right, 2, 3, border_width = 1)
 if barstate.islast and showTable
     string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN — Rückkehr abwarten (⚡)" :
          z_s > signal_thresh ? "🔴 überdehnt OBEN — Rückkehr abwarten (⚡)" : "· neutral"
@@ -244,9 +284,14 @@ if barstate.islast and showTable
     table.cell(t, 1, 0, str.tostring(z_s, "#.##") + " σ", text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 0, 1, "Zustand", text_color = color.white)
     table.cell(t, 1, 1, zust, text_color = color.white)
+    table.cell(t, 0, 2, "Letztes ⚡", text_color = color.white)
+    table.cell(t, 1, 2, lastStage == 0 ? "–" : str.tostring(lastDepth, "#.#") + "σ · Stufe " + str.tostring(lastStage)
+         + (lastStage >= 3 ? " (extrem)" : lastStage == 2 ? " (stark)" : ""), text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
 alertcondition(reBuy,   "⚡ Mean Reversion UP (Re-Entry)",   "Stillhalter Mean Reversion: UP — Rückkehr zum Mittelwert hat begonnen")
 alertcondition(reSell,  "⚡ Mean Reversion DOWN (Re-Entry)", "Stillhalter Mean Reversion: DOWN — Rückkehr zum Mittelwert hat begonnen")
 alertcondition(pivBuy,  "🎯 Extrem unten bestätigt",         "Stillhalter Mean Reversion: Tief-Extrem bestätigt")
 alertcondition(pivSell, "🎯 Extrem oben bestätigt",          "Stillhalter Mean Reversion: Hoch-Extrem bestätigt")
+alertcondition(stageBuy  >= 2, "⚡ UP STARK (≥2σ)",   "Stillhalter Mean Reversion: STARKES UP — Überdehnung ≥2σ dreht (Trendwechsel-Kandidat)")
+alertcondition(stageSell >= 2, "⚡ DOWN STARK (≥2σ)", "Stillhalter Mean Reversion: STARKES DOWN — Überdehnung ≥2σ dreht (Trendwechsel-Kandidat)")
