@@ -2,10 +2,23 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.8
+//  Stillhalter Community® – MEAN REVERSION v1.9
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.8 — Wende-Bestätigung jetzt PROZENTUAL (Nutzer-Feedback):
+//  NEU in v1.9 — Stillhalter-Ausbau (alles optional zuschaltbar):
+//   • 🎩 STILLHALTER-BACKTEST: simuliert nach jedem UP-Signal einen
+//     Short Put mit Strike unter dem Episodentief (einstellbarer Puffer)
+//     und Verfall am ERSTEN FREITAG nach mind. N Kalendertagen (Standard
+//     10 = i. d. R. Freitag der übernächsten Woche, immer mit Wochenende).
+//     Tabelle zeigt Verfallsquote und schlimmste Strike-Verletzung.
+//   • 📍 STRIKE-REFERENZ: Beim UP-Signal erscheint live eine Linie am
+//     Episodentief — 'Put-Strike ≤ X' (abschaltbar).
+//   • ⚠ TREND-KENNZEICHNUNG: Signale gegen den langfristigen Trend
+//     werden mit einem grauen ✕ markiert statt versteckt (abschaltbar).
+//   • 💰 PRÄMIEN-UMFELD: Status-Tabelle zeigt, ob die aktuelle Schwankung
+//     im eigenen Jahresvergleich hoch/normal/niedrig ist — hoch = fette
+//     Prämien, der beste Moment für Stillhalter.
+//  v1.8 — Wende-Bestätigung jetzt PROZENTUAL (Nutzer-Feedback):
 //   • Der Früh-Modus misst den Abprall nicht mehr in festen σ, sondern
 //     als PROZENT der Episodentiefe (Standard 30% = '30% des Rückwegs
 //     zum Mittelwert geschafft'). Damit ist der Auslöser über alle
@@ -73,7 +86,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.8", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.9", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -130,6 +143,15 @@ trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EM
      tooltip = "UP-Signale nur OBERHALB, DOWN-Signale nur UNTERHALB der gewählten "
           + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
           + "Messer') — empfohlen: EMA 200 für Cash Secured Puts.")
+showStrikeRef = input.bool(false, "📍 Strike-Referenz am Episodentief", group = grp_sig,
+     tooltip = "Zeichnet beim UP-Signal live eine gestrichelte Linie am Tief der "
+          + "Episode mit 'Put-Strike ≤ X' — die natürliche Strike-Referenz für "
+          + "Cash Secured Puts. Es bleibt immer die jüngste Linie sichtbar.")
+markCounter   = input.bool(false, "⚠ Signale gegen den Trend kennzeichnen", group = grp_sig,
+     tooltip = "Markiert Signale, die gegen den langfristigen Trend laufen (UP unter "
+          + "der langfristigen Durchschnittslinie bzw. DOWN darüber), mit einem "
+          + "grauen ✕ — Information statt Blockade: 'fallendes Messer' auf einen "
+          + "Blick erkennbar, ohne Signale zu verstecken.")
 noiseBars  = input.int(30, "Signal-Bereinigung (Kerzen)", minval = 0, maxval = 200, group = grp_sig,
      tooltip = "Unterdrückt schwächere ⚡-Rauten UND 🎯-Kreise, wenn innerhalb der "
           + "letzten N Kerzen bereits ein gleich starkes oder stärkeres Signal "
@@ -147,6 +169,11 @@ show_bg     = input.bool(false, "Hintergrundfarbe bei Überdehnung", group = grp
           + "(überdehnt oben), solange der Zustand anhält.")
 showTable   = input.bool(true, "Status-Tabelle anzeigen", group = grp_st,
      tooltip = "Kleine Übersicht: aktueller Z-Score und Zustand (überdehnt/neutral).")
+showPremium = input.bool(true, "💰 Prämien-Umfeld in der Tabelle", group = grp_st,
+     tooltip = "Zeigt, ob die aktuelle Schwankungsbreite im Vergleich zum eigenen "
+          + "letzten Jahr hoch, normal oder niedrig ist. Hoch = fette Options-"
+          + "prämien — Signal + hohes Prämien-Umfeld ist der beste "
+          + "Stillhalter-Moment.")
 ma_clr      = input.color(color.white, "Mittellinie", group = grp_st)
 band_clr_ob = input.color(#FF1744, "OB Bänder (oben)",  group = grp_st,
      tooltip = "Farbe der oberen Bänder — gleiche Signalfarbe wie im Confluence.")
@@ -159,6 +186,23 @@ enableBT   = input.bool(true, "Backtest aktivieren (Tabelle oben rechts)", group
      tooltip = "Simuliert: Einstieg am ⚡/🎯-UP-Signal, Ausstieg am DOWN-Signal — "
           + "jeweils zur Eröffnung der NÄCHSTEN Kerze (kein Blick in die Zukunft). "
           + "Keine Order-Pfeile im Chart, nur die Kennzahlen-Tabelle.")
+btMode     = input.string("Aktie (Long)", "🎩 Backtest-Modus", options = ["Aktie (Long)", "Stillhalter (Short Put)"], group = grp_bt,
+     tooltip = "Aktie = klassisch (Einstieg UP, Ausstieg DOWN). "
+          + "Stillhalter = nach jedem UP-Signal wird ein Short Put simuliert: "
+          + "Strike unter dem Episodentief (siehe Puffer), Verfall am ersten "
+          + "Freitag nach der Mindest-Laufzeit — die Tabelle zeigt die "
+          + "VERFALLSQUOTE, deine wichtigste Kennzahl.")
+strikeBufPct = input.float(0.0, "Strike-Puffer unter Episodentief (%)", minval = 0.0, maxval = 10.0,
+     step = 0.5, group = grp_bt,
+     tooltip = "Nur Stillhalter-Modus: Der simulierte Strike liegt so viele Prozent "
+          + "UNTER dem Episodentief. 0 = Strike genau am Tief (streng), "
+          + "2–3 = realistischer Sicherheitsabstand.")
+minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5, maxval = 45,
+     group = grp_bt,
+     tooltip = "Nur Stillhalter-Modus: Der Verfall ist der erste FREITAG, der "
+          + "mindestens so viele Kalendertage nach dem Einstieg liegt. Standard 10 "
+          + "= in der Regel der Freitag der übernächsten Woche — garantiert mit "
+          + "mindestens einem Wochenende Laufzeit.")
 btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-Entry", "Pivot"], group = grp_bt,
      tooltip = "Welche Signale der Backtest handelt. Hinweis: Pivot-Signale werden "
           + "erst N Kerzen nach dem Extrem bestätigt — gehandelt wird ehrlich "
@@ -213,14 +257,18 @@ trigFrueh = trigMode == "Früh (Abprall vom Extrem)"
 
 var bool  armB = false
 var float extB = 0.0
+var float epLoPx = 0.0   // Episodentief in PREIS (Strike-Referenz)
 if z_s < -signal_thresh
     if armB
         extB := math.min(extB, z_s)
+        epLoPx := math.min(epLoPx, low)
     else if extB == 0.0 or z_s < extB
         armB := true
         extB := extB == 0.0 ? z_s : math.min(extB, z_s)
+        epLoPx := epLoPx == 0.0 ? low : math.min(epLoPx, low)
 else if not armB
     extB := 0.0
+    epLoPx := 0.0
 bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB * (1 - reboundPct / 100) : ta.crossover(z_s, -signal_thresh))
 
 var bool  armS = false
@@ -340,6 +388,26 @@ plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
 plotshape(pivBuy,  "🎯 Extrem unten", shape.circle, location.belowbar,
      color.new(band_clr_os, 40), size = size.small, offset = -pivot_lb)
 
+// ⚠ Trend-Kennzeichnung: Signal gegen den langfristigen Trend → graues ✕
+ema200ref = ta.ema(close, 200)
+plotshape(markCounter and reBuy  and close < ema200ref, "⚠ UP gegen den Trend",
+     shape.xcross, location.belowbar, color.new(color.gray, 20), size = size.tiny)
+plotshape(markCounter and reSell and close > ema200ref, "⚠ DOWN gegen den Trend",
+     shape.xcross, location.abovebar, color.new(color.gray, 20), size = size.tiny)
+
+// 📍 Strike-Referenz: Linie am Episodentief beim UP-Signal (live)
+var line  strikeLn = na
+var label strikeLb = na
+if showStrikeRef and reBuy and epLoPx > 0
+    float skRef = epLoPx * (1 - strikeBufPct / 100)
+    line.delete(strikeLn)
+    label.delete(strikeLb)
+    strikeLn := line.new(bar_index, skRef, bar_index + 20, skRef,
+         color = color.new(band_clr_os, 30), style = line.style_dashed, width = 1)
+    strikeLb := label.new(bar_index + 20, skRef, "Put-Strike ≤ " + str.tostring(skRef, format.mintick),
+         style = label.style_label_left, color = color.new(band_clr_os, 60),
+         textcolor = color.white, size = size.small)
+
 // ─── Backtest (Tabelle statt Order-Pfeile — wie Stillhalter Confluence) ──────
 inWindow = time >= btFrom and time <= btTo
 bool stratBuy  = inWindow and (btSource == "Re-Entry" ? reBuy  : pivBuy)
@@ -377,24 +445,73 @@ if enableBT
         inPos       := false
         pendingSell := false
 
+// 🎩 Stillhalter-Modus: Short Put mit Strike unterm Episodentief,
+// Verfall am ersten Freitag nach mind. minCalDays Kalendertagen
+f_fridayAfter(int t0) =>
+    int tt = t0
+    while dayofweek(tt) != dayofweek.friday
+        tt += 86400000
+    tt
+
+var bool  spPend   = false
+var float spPendSk = na
+var bool  spOpen   = false
+var float spStrike = na
+var int   spExpiry = na
+var int   spTrades  = 0
+var int   spExpired = 0
+var float spWorst   = 0.0
+
+if enableBT and btMode == "Stillhalter (Short Put)"
+    if stratBuy and not spOpen and not spPend and epLoPx > 0
+        spPend   := true
+        spPendSk := epLoPx * (1 - strikeBufPct / 100)
+    if spPend[1] and not spOpen
+        spOpen   := true
+        spStrike := spPendSk
+        spExpiry := f_fridayAfter(time + minCalDays * 86400000)
+        spPend   := false
+    if spOpen and time >= spExpiry
+        spTrades += 1
+        if close >= spStrike
+            spExpired += 1
+        else
+            spWorst := math.min(spWorst, (close / spStrike - 1) * 100)
+        spOpen := false
+
+spQuote = spTrades > 0 ? spExpired * 100.0 / spTrades : 0.0
+
 winrate = trades > 0 ? wins * 100.0 / trades : 0.0
 roiPct  = enableBT and not na(equity) ? (equity / initialCapital - 1) * 100 : 0.0
 
 var table bt = table.new(position.top_right, 2, 5, border_width = 1)
 if barstate.islast and enableBT
-    table.cell(bt, 0, 0, "Trades",  text_color = color.white)
-    table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
-    table.cell(bt, 0, 1, "Winrate", text_color = color.white)
-    table.cell(bt, 1, 1, str.tostring(winrate, "#.#") + " %", text_color = color.white)
-    table.cell(bt, 0, 2, "ROI",     text_color = color.white)
-    table.cell(bt, 1, 2, str.tostring(roiPct, "#.#") + " %", text_color = color.white)
-    table.cell(bt, 0, 3, "Equity",  text_color = color.white)
-    table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
-    table.cell(bt, 0, 4, "Max DD",  text_color = color.white)
-    table.cell(bt, 1, 4, str.tostring(maxDD, "#.#") + " %", text_color = color.white)
+    if btMode == "Stillhalter (Short Put)"
+        table.cell(bt, 0, 0, "🎩 Short Puts", text_color = color.white)
+        table.cell(bt, 1, 0, str.tostring(spTrades) + (spOpen ? " (+1 offen)" : ""), text_color = color.white)
+        table.cell(bt, 0, 1, "Verfallsquote", text_color = color.white)
+        table.cell(bt, 1, 1, str.tostring(spQuote, "#.#") + " %", text_color = color.white)
+        table.cell(bt, 0, 2, "Schlimmster Fall", text_color = color.white)
+        table.cell(bt, 1, 2, spWorst < 0 ? str.tostring(spWorst, "#.#") + " % unter Strike" : "–", text_color = color.white)
+        table.cell(bt, 0, 3, "Regel", text_color = color.white)
+        table.cell(bt, 1, 3, "Strike Tief −" + str.tostring(strikeBufPct, "#.#") + "% · Fr ≥ " + str.tostring(minCalDays) + "d", text_color = color.white)
+        table.cell(bt, 0, 4, "", text_color = color.white)
+        table.cell(bt, 1, 4, "", text_color = color.white)
+    else
+        table.cell(bt, 0, 0, "Trades",  text_color = color.white)
+        table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
+        table.cell(bt, 0, 1, "Winrate", text_color = color.white)
+        table.cell(bt, 1, 1, str.tostring(winrate, "#.#") + " %", text_color = color.white)
+        table.cell(bt, 0, 2, "ROI",     text_color = color.white)
+        table.cell(bt, 1, 2, str.tostring(roiPct, "#.#") + " %", text_color = color.white)
+        table.cell(bt, 0, 3, "Equity",  text_color = color.white)
+        table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
+        table.cell(bt, 0, 4, "Max DD",  text_color = color.white)
+        table.cell(bt, 1, 4, str.tostring(maxDD, "#.#") + " %", text_color = color.white)
 
 // ─── Status-Tabelle ──────────────────────────────────────────────────────────
-var table t = table.new(position.bottom_right, 2, 3, border_width = 1)
+var table t = table.new(position.bottom_right, 2, 4, border_width = 1)
+volRank = ta.percentrank(sd / ma * 100, 252)
 if barstate.islast and showTable
     string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN — Rückkehr abwarten (⚡)" :
          z_s > signal_thresh ? "🔴 überdehnt OBEN — Rückkehr abwarten (⚡)" : "· neutral"
@@ -405,6 +522,11 @@ if barstate.islast and showTable
     table.cell(t, 0, 2, "Letztes ⚡", text_color = color.white)
     table.cell(t, 1, 2, lastStage == 0 ? "–" : str.tostring(lastDepth, "#.#") + "σ · Stufe " + str.tostring(lastStage)
          + (lastStage >= 3 ? " (extrem)" : lastStage == 2 ? " (stark)" : ""), text_color = color.white)
+    if showPremium
+        string prämie = na(volRank) ? "–" : volRank >= 80 ? "🟢 HOCH (Top 20% des Jahres)" :
+             volRank <= 20 ? "🔴 niedrig (mager)" : "· normal"
+        table.cell(t, 0, 3, "💰 Prämien-Umfeld", text_color = color.white)
+        table.cell(t, 1, 3, prämie, text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
 alertcondition(reBuy,   "⚡ Mean Reversion UP (Re-Entry)",   "Stillhalter Mean Reversion: UP — Rückkehr zum Mittelwert hat begonnen")
