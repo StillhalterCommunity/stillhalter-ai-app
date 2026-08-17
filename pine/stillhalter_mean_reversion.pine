@@ -2,10 +2,19 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.9
+//  Stillhalter Community® – MEAN REVERSION v1.9.1
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.9 — Stillhalter-Ausbau (alles optional zuschaltbar):
+//  NEU in v1.9.1 — Fest an die RECHTE PREISSKALA gebunden:
+//   • 'scale = scale.right' in der Indikator-Deklaration: Der Indikator
+//     klebt jetzt immer an der Preisskala des Symbols. Vorher konnte er
+//     (z. B. nach erneutem Hinzufügen oder über das Skala-Menü) auf
+//     'Keine Skala' rutschen — dann bewegen sich Bänder & Mittellinie
+//     beim Verschieben/Zoomen des Charts nicht mehr mit und wirken
+//     leicht versetzt zum Kurs. Falls das trotzdem mal passiert:
+//     Indikator-Menü (⋯) → 'An Skala pinnen' → 'An rechte Skala
+//     (mit SYMBOL)' wählen.
+//  v1.9 — Stillhalter-Ausbau (alles optional zuschaltbar):
 //   • 🎩 STILLHALTER-BACKTEST: simuliert nach jedem UP-Signal einen
 //     Short Put mit Strike unter dem Episodentief (einstellbarer Puffer)
 //     und Verfall am ERSTEN FREITAG nach mind. N Kalendertagen (Standard
@@ -86,8 +95,8 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.9", shorttitle = "Stillhalter Mean Reversion",
-     overlay = true, max_bars_back = 500)
+indicator("Stillhalter Mean Reversion v1.9.1", shorttitle = "Stillhalter Mean Reversion",
+     overlay = true, max_bars_back = 500, scale = scale.right)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
 grp_mr = "MEAN REVERT SETTINGS"
