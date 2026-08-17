@@ -1469,7 +1469,7 @@ except Exception:
 if not _APP_URL:
     _APP_URL = _DEFAULT_APP_URL
 
-tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
+tab1, tab2, tab3 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner", "🎩 Trading Desk"])
 
 # ════════════════════════════════════════════════════════════════════════════════
 # TAB 1 — MANUELL EINGEBEN
@@ -2231,3 +2231,208 @@ with tab2:
             combined = "\n\n" + ("─" * 30 + "\n\n").join(all_card_texts)
             combined += "\n\n" + "─" * 30 + "\n\n" + _DISCLAIMER
             st.code(combined, language="text")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# TAB 3 — 🎩 TRADING DESK (Wochenausblick + Verfalls-Freitag-Report)
+# ════════════════════════════════════════════════════════════════════════════════
+def _desk_link_stored() -> str:
+    try:
+        from data import _persistent_cache as _pcx
+        return str(_pcx.load_latest("circle_desk_url") or "")
+    except Exception:
+        return ""
+
+
+def _berlin_ts() -> str:
+    try:
+        import pytz as _p
+        return datetime.now(_p.timezone("Europe/Berlin")).strftime("%d.%m.%Y · %H:%M Uhr")
+    except Exception:
+        return datetime.now().strftime("%d.%m.%Y · %H:%M Uhr")
+
+
+_WD_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def _last_close(ticker: str):
+    try:
+        _h = fetch_price_history(ticker, period="5d")
+        if _h is not None and not _h.empty:
+            return float(_h["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
+
+
+with tab3:
+    st.markdown(
+        "Fertige WhatsApp-Posts für deinen **🎩 Trading Desk** — Datenbasis: "
+        "Trade Monitor und letzter Scanner-Lauf. Der Circle-Link wird aus den "
+        "Trade-Card-Einstellungen übernommen."
+    )
+    _desk3 = st.text_input("🎩 Circle-Link 'Trading Desk'", value=_desk_link_stored(),
+                           key="td_desk_url").strip()
+    if _desk3 and _desk3 != _desk_link_stored():
+        try:
+            from data import _persistent_cache as _pcx2
+            _pcx2.save("circle_desk_url", _desk3, ttl_hours=24 * 3650)
+        except Exception:
+            pass
+
+    sub1, sub2 = st.tabs(["📅 Wochenausblick (sonntags)", "🏁 Verfalls-Freitag-Report"])
+
+    # ── 📅 Wochenausblick ──────────────────────────────────────────────────────
+    with sub1:
+        st.caption("Earnings der kommenden 7 Tage (Basis: letzter Scan + Trade Monitor), "
+                   "manuelle Termine, 'Auf der Lauer' aus dem letzten Scan.")
+        _term_txt = st.text_area(
+            "📢 Termine der Woche (eine Zeile je Termin)", key="td_termine", height=90,
+            placeholder="Mi 20:00 — Fed-Protokoll\nDo 14:30 — US-Inflationsdaten",
+        )
+        if st.button("📅 Wochenausblick erstellen", type="primary", key="td_week_btn"):
+            with st.spinner("⏳ Sammle Earnings & Setups…"):
+                # Ticker-Basis: letzter Scan + laufende Monitor-Trades (max. 40)
+                _basis: list = []
+                _cache = _load_scan_cache()
+                _sdf = _cache.get("results") if _cache else None
+                if _sdf is not None and not _sdf.empty and "Ticker" in _sdf.columns:
+                    _basis += list(dict.fromkeys(_sdf["Ticker"].astype(str)))
+                for _t in _load_manual_trades():
+                    if _t.get("ticker") and _t["ticker"] not in _basis:
+                        _basis.append(_t["ticker"])
+                _basis = _basis[:40]
+
+                # Earnings der nächsten 7 Tage
+                _earn: list = []
+                try:
+                    from data.fetcher import fetch_earnings_date
+                    for _tk in _basis:
+                        try:
+                            _ed = fetch_earnings_date(_tk)
+                            if not _ed:
+                                continue
+                            _edd = pd.to_datetime(_ed).date()
+                            if date.today() <= _edd <= date.today() + timedelta(days=7):
+                                _earn.append((_edd, _tk))
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+                _earn.sort()
+
+                # 👀 Auf der Lauer: Top 3 aus dem letzten Scan
+                _lauer: list = []
+                if _sdf is not None and not _sdf.empty:
+                    _sc = "🛡️ Score" if "🛡️ Score" in _sdf.columns else (
+                        "CRV Score" if "CRV Score" in _sdf.columns else None)
+                    if _sc:
+                        _top = (_sdf.sort_values(_sc, ascending=False)
+                                .drop_duplicates(subset=["Ticker"]).head(3))
+                        for _, _r in _top.iterrows():
+                            _setup = str(_r.get("🎯 Setup", "") or _r.get("🚦 Confluence", "") or "").strip()
+                            _lauer.append(f"• {_r['Ticker']}" + (f" — {_setup}" if _setup and _setup != "–" else ""))
+
+                _kw = date.today().isocalendar()[1]
+                L = [f"*📅 Wochenausblick KW {_kw} · Stillhalter AI | {_berlin_ts()}*", ""]
+                L.append("*🗓️ Earnings diese Woche (Watchlist):*")
+                if _earn:
+                    for _edd, _tk in _earn:
+                        L.append(f"• {_WD_DE[_edd.weekday()]} {_edd.strftime('%d.%m.')} — {_tk}")
+                else:
+                    L.append("• keine in der Watchlist 🎉")
+                L.append("")
+                _terms = [x.strip() for x in (_term_txt or "").splitlines() if x.strip()]
+                if _terms:
+                    L.append("*📢 Termine:*")
+                    for _x in _terms:
+                        L.append(f"• {_x}")
+                    L.append("")
+                if _lauer:
+                    L.append("*👀 Auf der Lauer:*")
+                    L += _lauer
+                    L.append("")
+                if _desk3:
+                    L.append("🎩 Details & Live-Ideen im Trading Desk:")
+                    L.append(_desk3)
+                    L.append("")
+                L.append(_WA_DISCLAIMER)
+                st.session_state["td_week_txt"] = "\n".join(L)
+        if st.session_state.get("td_week_txt"):
+            st.markdown("**📱 WhatsApp-Post — direkt kopieren:**")
+            st.code(st.session_state["td_week_txt"], language="text")
+
+    # ── 🏁 Verfalls-Freitag-Report ─────────────────────────────────────────────
+    with sub2:
+        st.caption("Bilanz der Woche aus dem Trade Monitor: Wer verfällt, wer ist "
+                   "kritisch, Prämien-Summe, laufende Trades.")
+        if st.button("🏁 Freitags-Report erstellen", type="primary", key="td_fri_btn"):
+            with st.spinner("⏳ Prüfe Trades gegen aktuelle Kurse…"):
+                _tr_all = _load_manual_trades()
+                _week_start = date.today() - timedelta(days=date.today().weekday())
+                _week_end   = _week_start + timedelta(days=6)
+                _ok_lines, _warn_lines = [], []
+                _prem_sum = 0.0
+                _open_cnt = 0
+                _next_exp = None
+                for _t in _tr_all:
+                    try:
+                        _exp = pd.to_datetime(_t.get("expiry")).date()
+                    except Exception:
+                        continue
+                    _tk    = _t.get("ticker", "?")
+                    _strat = _t.get("strategy", "")
+                    _stk   = float(_t.get("strike") or 0)
+                    _cstk  = float(_t.get("call_strike") or 0)
+                    _prem  = float(_t.get("premium") or 0)
+                    if _week_start <= _exp <= _week_end:
+                        _px = _last_close(_tk)
+                        _prem_sum += _prem * 100
+                        _lbl = f"{_tk} {_strat} {_stk:g}" + (f"/{_cstk:g}" if _cstk > 0 else "")
+                        if _px is None:
+                            _ok_lines.append(f"• {_lbl} — Kurs nicht abrufbar")
+                            continue
+                        if "Strangle" in _strat and _cstk > 0:
+                            _safe = _stk < _px < _cstk
+                            _d = min((_px - _stk) / _stk, (_cstk - _px) / _cstk) * 100
+                        elif "Call" in _strat:
+                            _safe = _px < _stk
+                            _d = (_stk - _px) / _stk * 100
+                        else:
+                            _safe = _px > _stk
+                            _d = (_px - _stk) / _stk * 100
+                        if _safe:
+                            _ok_lines.append(f"• 🟢 {_lbl} — Kurs {_px:.2f} ({_fmt_num(abs(_d), 1)}% Puffer) ✅")
+                        else:
+                            _warn_lines.append(f"• 🔴 {_lbl} — Kurs {_px:.2f} ({_fmt_num(abs(_d), 1)}% im Geld) ⚠️")
+                    elif _exp > _week_end and str(_t.get("status", "AKTIV")).upper() in ("AKTIV", "OFFEN", ""):
+                        _open_cnt += 1
+                        if _next_exp is None or _exp < _next_exp:
+                            _next_exp = _exp
+
+                L = [f"*🏁 Verfalls-Freitag · Stillhalter AI | {_berlin_ts()}*", ""]
+                if _ok_lines:
+                    L.append(f"*✅ Diese Woche verfallen ({len(_ok_lines)}):*")
+                    L += _ok_lines
+                    L.append("")
+                if _warn_lines:
+                    L.append(f"*⚠️ Kritisch / Einbuchung möglich ({len(_warn_lines)}):*")
+                    L += _warn_lines
+                    L.append("")
+                if not _ok_lines and not _warn_lines:
+                    L.append("• Diese Woche verfällt kein Trade.")
+                    L.append("")
+                if _prem_sum > 0:
+                    L.append(f"*💰 Prämien der Woche:* {_prem_sum:,.0f} USD")
+                L.append(f"*📡 Laufende Trades:* {_open_cnt}"
+                         + (f" (nächster Verfall: {_next_exp.strftime('%d.%m.%Y')})" if _next_exp else ""))
+                L.append("")
+                if _desk3:
+                    L.append("🎩 Alle Details im Trading Desk:")
+                    L.append(_desk3)
+                    L.append("")
+                L.append(_WA_DISCLAIMER)
+                st.session_state["td_fri_txt"] = "\n".join(L)
+        if st.session_state.get("td_fri_txt"):
+            st.markdown("**📱 WhatsApp-Post — direkt kopieren:**")
+            st.code(st.session_state["td_fri_txt"], language="text")
