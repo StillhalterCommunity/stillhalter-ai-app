@@ -2,10 +2,16 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.9.2
+//  Stillhalter Community® – MEAN REVERSION v1.9.3
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.9.2 — Skala-Verhalten korrigiert:
+//  NEU in v1.9.3 — 📍 Strike-Referenz jetzt auch für CALLS:
+//   • Beim ⚡-DOWN-Signal erscheint eine rote Linie am EPISODENHOCH —
+//     'Call-Strike ≥ X' (gleicher Puffer, nur nach OBEN gerechnet).
+//     Logik spiegelbildlich zum Put: Das Hoch wurde gerade getestet
+//     und hat gehalten — ein Call-Strike DARÜBER hat den frisch
+//     bestätigten Deckel als Schutzschild (Covered Call / Short Call).
+//  v1.9.2 — Skala-Verhalten korrigiert:
 //   • Kein festes 'scale = scale.right' mehr (v1.9.1 zurückgenommen):
 //     Der Indikator folgt beim Hinzufügen wieder automatisch der Skala
 //     des Symbols. Der eigentliche Übeltäter ist der CHART, nicht der
@@ -97,7 +103,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.9.2", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v1.9.3", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -154,10 +160,13 @@ trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EM
      tooltip = "UP-Signale nur OBERHALB, DOWN-Signale nur UNTERHALB der gewählten "
           + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
           + "Messer') — empfohlen: EMA 200 für Cash Secured Puts.")
-showStrikeRef = input.bool(false, "📍 Strike-Referenz am Episodentief", group = grp_sig,
-     tooltip = "Zeichnet beim UP-Signal live eine gestrichelte Linie am Tief der "
-          + "Episode mit 'Put-Strike ≤ X' — die natürliche Strike-Referenz für "
-          + "Cash Secured Puts. Es bleibt immer die jüngste Linie sichtbar.")
+showStrikeRef = input.bool(false, "📍 Strike-Referenz (Put am Tief · Call am Hoch)", group = grp_sig,
+     tooltip = "Zeichnet beim ⚡-Signal live eine gestrichelte Linie an der Episoden-"
+          + "Extremmarke: UP-Signal → 'Put-Strike ≤ Episodentief' (grün, für Cash "
+          + "Secured Puts) · DOWN-Signal → 'Call-Strike ≥ Episodenhoch' (rot, für "
+          + "Covered Calls / Short Calls). Der Strike-Puffer aus dem Backtest-Block "
+          + "wird mitgerechnet (unter dem Tief bzw. über dem Hoch). Es bleibt je "
+          + "Seite immer die jüngste Linie sichtbar.")
 markCounter   = input.bool(false, "⚠ Signale gegen den Trend kennzeichnen", group = grp_sig,
      tooltip = "Markiert Signale, die gegen den langfristigen Trend laufen (UP unter "
           + "der langfristigen Durchschnittslinie bzw. DOWN darüber), mit einem "
@@ -205,9 +214,11 @@ btMode     = input.string("Aktie (Long)", "🎩 Backtest-Modus", options = ["Akt
           + "VERFALLSQUOTE, deine wichtigste Kennzahl.")
 strikeBufPct = input.float(0.0, "Strike-Puffer unter Episodentief (%)", minval = 0.0, maxval = 10.0,
      step = 0.5, group = grp_bt,
-     tooltip = "Nur Stillhalter-Modus: Der simulierte Strike liegt so viele Prozent "
-          + "UNTER dem Episodentief. 0 = Strike genau am Tief (streng), "
-          + "2–3 = realistischer Sicherheitsabstand.")
+     tooltip = "Abstand des Strikes von der Episoden-Extremmarke: Put so viele "
+          + "Prozent UNTER dem Episodentief, Call so viele Prozent ÜBER dem "
+          + "Episodenhoch. Gilt für den 🎩-Backtest und die 📍 Strike-Referenz. "
+          + "0 = Strike genau am Extrem (streng), 2–3 = realistischer "
+          + "Sicherheitsabstand.")
 minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5, maxval = 45,
      group = grp_bt,
      tooltip = "Nur Stillhalter-Modus: Der Verfall ist der erste FREITAG, der "
@@ -284,14 +295,18 @@ bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB * (1 -
 
 var bool  armS = false
 var float extS = 0.0
+var float epHiPx = 0.0   // Episodenhoch in PREIS (Call-Strike-Referenz)
 if z_s > signal_thresh
     if armS
         extS := math.max(extS, z_s)
+        epHiPx := math.max(epHiPx, high)
     else if extS == 0.0 or z_s > extS
         armS := true
         extS := extS == 0.0 ? z_s : math.max(extS, z_s)
+        epHiPx := epHiPx == 0.0 ? high : math.max(epHiPx, high)
 else if not armS
     extS := 0.0
+    epHiPx := 0.0
 bool reSellRaw = useReentry and armS and downOK and (trigFrueh ? z_s <= extS * (1 - reboundPct / 100) : ta.crossunder(z_s, signal_thresh))
 
 // ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
@@ -406,7 +421,7 @@ plotshape(markCounter and reBuy  and close < ema200ref, "⚠ UP gegen den Trend"
 plotshape(markCounter and reSell and close > ema200ref, "⚠ DOWN gegen den Trend",
      shape.xcross, location.abovebar, color.new(color.gray, 20), size = size.tiny)
 
-// 📍 Strike-Referenz: Linie am Episodentief beim UP-Signal (live)
+// 📍 Strike-Referenz: Put am Episodentief (UP) · Call am Episodenhoch (DOWN)
 var line  strikeLn = na
 var label strikeLb = na
 if showStrikeRef and reBuy and epLoPx > 0
@@ -417,6 +432,17 @@ if showStrikeRef and reBuy and epLoPx > 0
          color = color.new(band_clr_os, 30), style = line.style_dashed, width = 1)
     strikeLb := label.new(bar_index + 20, skRef, "Put-Strike ≤ " + str.tostring(skRef, format.mintick),
          style = label.style_label_left, color = color.new(band_clr_os, 60),
+         textcolor = color.white, size = size.small)
+var line  strikeLnC = na
+var label strikeLbC = na
+if showStrikeRef and reSell and epHiPx > 0
+    float skRefC = epHiPx * (1 + strikeBufPct / 100)
+    line.delete(strikeLnC)
+    label.delete(strikeLbC)
+    strikeLnC := line.new(bar_index, skRefC, bar_index + 20, skRefC,
+         color = color.new(band_clr_ob, 30), style = line.style_dashed, width = 1)
+    strikeLbC := label.new(bar_index + 20, skRefC, "Call-Strike ≥ " + str.tostring(skRefC, format.mintick),
+         style = label.style_label_left, color = color.new(band_clr_ob, 60),
          textcolor = color.white, size = size.small)
 
 // ─── Backtest (Tabelle statt Order-Pfeile — wie Stillhalter Confluence) ──────
