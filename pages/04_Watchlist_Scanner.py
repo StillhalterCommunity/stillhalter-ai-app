@@ -1892,6 +1892,52 @@ else:
 
     st.caption("💡 Zeile anklicken → TradingView-Chart + 4h/1D-Indikator-Ampel")
 
+    # ── 📤 In Trade Cards übernehmen ──────────────────────────────────────────
+    with st.expander("📤 In Trade Cards übernehmen (WhatsApp/Circle-Posts erstellen)", expanded=False):
+        def _tc_num(v, d=0.0):
+            try:
+                f = float(v)
+                return d if f != f else f   # NaN-Guard
+            except Exception:
+                return d
+        _tc_src = display_df.reset_index(drop=True)
+        _tc_labels, _tc_rows = [], {}
+        for _ti, _tr in _tc_src.iterrows():
+            _tstk = _tr.get("Strike", _tr.get("Strike PUT", ""))
+            _tlbl = f"#{_ti + 1} · {_tr.get('Ticker', '?')} · Strike {_tstk} · {_tr.get('Verfall', '')}"
+            _tc_labels.append(_tlbl)
+            _tc_rows[_tlbl] = _tr
+        _tc_sel = st.multiselect(
+            "Trades auswählen (max. 9)", _tc_labels, key="tc_pick",
+            max_selections=9,
+            placeholder="Zeilen aus der Ergebnis-Tabelle wählen…",
+        )
+        if st.button("📤 Ausgewählte übernehmen", key="tc_send", disabled=not _tc_sel):
+            _tc_payload = []
+            for _tlbl in _tc_sel:
+                _tr = _tc_rows[_tlbl]
+                _strat_raw = str(_tr.get("Strategie", meta.get("strategy", scan_strategy)))
+                if "Strangle" in _strat_raw:
+                    _tc_strat = "Short Strangle"
+                elif "Call" in _strat_raw:
+                    _tc_strat = "Covered Call"
+                else:
+                    _tc_strat = "Short PUT"
+                _tc_payload.append({
+                    "ticker":      str(_tr.get("Ticker", "")),
+                    "strategy":    _tc_strat,
+                    "strike":      _tc_num(_tr.get("Strike", _tr.get("Strike PUT", 0))),
+                    "call_strike": _tc_num(_tr.get("Strike CALL", 0)),
+                    "expiry":      str(_tr.get("Verfall", "")),
+                    "call_expiry": str(_tr.get("Verfall", "")) if _tc_strat == "Short Strangle" else "",
+                    "premium":     _tc_num(_tr.get("Prämie", _tr.get("Prämie gesamt", 0))),
+                    "delta":       _tc_num(_tr.get("Delta", -0.20), -0.20),
+                    "iv":          _tc_num(_tr.get("IV %", 25), 25.0),
+                })
+            st.session_state["tc_prefill"] = _tc_payload
+            st.success(f"✅ {len(_tc_payload)} Trade(s) vorgemerkt — jetzt zu den Trade Cards wechseln:")
+        st.page_link("pages/17_Trade_Cards.py", label="→ Zu den Trade Cards (Seite 17)", icon="📤")
+
     # ── Mini-Chart bei Zeilenauswahl ──────────────────────────────────────
     _scan_sel = (getattr(_scan_event, "selection", None) or {})
     _scan_sel_rows = _scan_sel.get("rows", []) if isinstance(_scan_sel, dict) else getattr(_scan_sel, "rows", [])

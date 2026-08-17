@@ -650,6 +650,7 @@ def _snap_contract(ticker: str, expiry, strike: float, option_type: str):
 def _optionstrat_url_manual(
     ticker: str, strike: float, expiry, is_call: bool,
     is_strangle: bool = False, call_strike: float = 0.0, call_expiry=None,
+    strategy: str = "",
 ) -> str:
     """OptionStrat-URL im echten Format (schlichter Strike, x100 beim CC);
     Verfall + Strike werden auf einen existierenden Kontrakt eingerastet."""
@@ -666,6 +667,24 @@ def _optionstrat_url_manual(
                 f"https://optionstrat.com/build/short-strangle/{t}"
                 f"/-.{t}{pexp}P{_strike_str(ps)},-.{t}{cexp}C{_strike_str(cs)}"
             )
+        _slug = {"Put Credit Spread": "bull-put-spread",
+                 "Call Credit Spread": "bear-call-spread",
+                 "Put Debit Spread": "bear-put-spread",
+                 "Call Debit Spread": "bull-call-spread",
+                 "Synthetic Long": "synthetic-long-stock"}.get(strategy)
+        if _slug and call_strike > 0:
+            _m = _strategy_meta(strategy)
+            _t1, _s1 = _m["l1"]
+            _t2, _s2 = _m["l2"]
+            e1, k1 = _snap_contract(t, expiry, strike, _t1)
+            e2, k2 = _snap_contract(t, call_expiry if call_expiry else expiry, call_strike, _t2)
+            if not e1 or not e2:
+                return ""
+            x1 = pd.to_datetime(e1).strftime("%y%m%d")
+            x2 = pd.to_datetime(e2).strftime("%y%m%d")
+            leg1 = f"{'-' if _s1 == 1 else ''}.{t}{x1}{'P' if _t1 == 'put' else 'C'}{_strike_str(k1)}"
+            leg2 = f"{'-' if _s2 == 1 else ''}.{t}{x2}{'P' if _t2 == 'put' else 'C'}{_strike_str(k2)}"
+            return f"https://optionstrat.com/build/{_slug}/{t}/{leg1},{leg2}"
         if is_call:
             ce, cs = _snap_contract(t, expiry, strike, "call")
             if not ce:
@@ -704,9 +723,49 @@ def _save_manual_trade(trade: dict) -> None:
 
 def _gen_trade_id(ticker: str, strategy: str) -> str:
     date_str = datetime.now().strftime("%Y%m%d")
-    strat_short = "CC" if "Call" in strategy else "STR" if "Strangle" in strategy else "CSP"
+    strat_short = ("STR" if "Strangle" in strategy else
+                   "SYN" if "Synthetic" in strategy else
+                   "PCS" if strategy == "Put Credit Spread" else
+                   "CCS" if strategy == "Call Credit Spread" else
+                   "PDS" if strategy == "Put Debit Spread" else
+                   "CDS" if strategy == "Call Debit Spread" else
+                   "CC" if "Call" in strategy else "CSP")
     uid = re.sub(r"[^A-Z0-9]", "", str(uuid.uuid4()).upper())[:4]
     return f"{ticker}-{date_str}-{strat_short}-{uid}"
+
+
+# ── Strategie-Katalog: 1- und 2-Bein-Strategien ──────────────────────────────
+_STRATEGIES = ["Short PUT", "Covered Call", "Short Strangle",
+               "Put Credit Spread", "Call Credit Spread",
+               "Put Debit Spread", "Call Debit Spread", "Synthetic Long"]
+
+
+def _strategy_meta(strategy: str) -> dict:
+    """Leg-Definitionen je Strategie: (Typ, Seite) je Bein + Feld-Labels.
+    Seite +1 = short (Prämie kassieren), -1 = long (Prämie zahlen)."""
+    S = {
+        "Short PUT":          dict(two=False, l1=("put", 1),  kind="credit"),
+        "Covered Call":       dict(two=False, l1=("call", 1), kind="credit"),
+        "Short Strangle":     dict(two=True,  l1=("put", 1),  l2=("call", 1), kind="credit",
+                                   lbl1="PUT Strike ($)", lbl2="CALL Strike ($)",
+                                   xl1="PUT Verfall", xl2="CALL Verfall"),
+        "Put Credit Spread":  dict(two=True,  l1=("put", 1),  l2=("put", -1), kind="credit",
+                                   lbl1="Short PUT Strike ($)", lbl2="Long PUT Strike ($, tiefer)",
+                                   xl1="Short Verfall", xl2="Long Verfall"),
+        "Call Credit Spread": dict(two=True,  l1=("call", 1), l2=("call", -1), kind="credit",
+                                   lbl1="Short CALL Strike ($)", lbl2="Long CALL Strike ($, höher)",
+                                   xl1="Short Verfall", xl2="Long Verfall"),
+        "Put Debit Spread":   dict(two=True,  l1=("put", -1), l2=("put", 1), kind="debit",
+                                   lbl1="Long PUT Strike ($, höher)", lbl2="Short PUT Strike ($, tiefer)",
+                                   xl1="Long Verfall", xl2="Short Verfall"),
+        "Call Debit Spread":  dict(two=True,  l1=("call", -1), l2=("call", 1), kind="debit",
+                                   lbl1="Long CALL Strike ($, tiefer)", lbl2="Short CALL Strike ($, höher)",
+                                   xl1="Long Verfall", xl2="Short Verfall"),
+        "Synthetic Long":     dict(two=True,  l1=("put", 1),  l2=("call", -1), kind="mixed",
+                                   lbl1="Short PUT Strike ($)", lbl2="Long CALL Strike ($)",
+                                   xl1="PUT Verfall", xl2="CALL Verfall"),
+    }
+    return dict(S.get(strategy, S["Short PUT"]))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -760,25 +819,30 @@ def _fetch_option_quote(ticker: str, expiry, strike: float, strategy: str,
             "expiry":  exp_str,
         }
 
-    is_call     = "Call" in strategy
-    is_strangle = "Strangle" in strategy
+    is_call = "Call" in strategy and "Spread" not in strategy
+    _m = _strategy_meta(strategy)
 
-    if is_strangle:
-        put_leg  = _leg(_nearest_exp(expiry), "put", strike)
-        call_leg = _leg(_nearest_exp(call_expiry or expiry), "call", call_strike) if call_strike > 0 else None
-        if not put_leg and not call_leg:
+    if _m["two"]:
+        _t1, _s1 = _m["l1"]
+        _t2, _s2 = _m["l2"]
+        leg1 = _leg(_nearest_exp(expiry), _t1, strike)
+        leg2 = _leg(_nearest_exp(call_expiry or expiry), _t2, call_strike) if call_strike > 0 else None
+        if not leg1 and not leg2:
             return None
-        total_prem  = (put_leg["premium"] if put_leg else 0) + (call_leg["premium"] if call_leg else 0)
-        total_delta = (put_leg["delta"]   if put_leg else 0) + (call_leg["delta"]   if call_leg else 0)
-        ivs = [l["iv_pct"] for l in (put_leg, call_leg) if l]
+        # Netto: Short-Beine kassieren (+), Long-Beine kosten (−)
+        net_prem  = (leg1["premium"] * _s1 if leg1 else 0) + (leg2["premium"] * _s2 if leg2 else 0)
+        net_delta = (leg1["delta"]   * _s1 if leg1 else 0) + (leg2["delta"]   * _s2 if leg2 else 0)
+        if _m["kind"] == "debit":
+            net_prem = -net_prem   # als positive Netto-Kosten ausweisen
+        ivs = [l["iv_pct"] for l in (leg1, leg2) if l]
         return {
-            "premium": round(total_prem, 2),
-            "delta":   round(total_delta, 2),
+            "premium": round(net_prem, 2),
+            "delta":   round(net_delta, 2),
             "iv_pct":  round(sum(ivs) / len(ivs)) if ivs else 0,
-            "found_expiry":      put_leg["expiry"]  if put_leg  else "",
-            "found_call_expiry": call_leg["expiry"] if call_leg else "",
-            "found_strike":      put_leg["strike"]  if put_leg  else 0.0,
-            "found_call_strike": call_leg["strike"] if call_leg else 0.0,
+            "found_expiry":      leg1["expiry"] if leg1 else "",
+            "found_call_expiry": leg2["expiry"] if leg2 else "",
+            "found_strike":      leg1["strike"] if leg1 else 0.0,
+            "found_call_strike": leg2["strike"] if leg2 else 0.0,
         }
 
     leg = _leg(_nearest_exp(expiry), "call" if is_call else "put", strike)
@@ -965,6 +1029,7 @@ def _build_whatsapp_short_manual(
     company_sentence: str = "", news_line: str = "",
     funda: dict | None = None,
     tf_colors: dict | None = None,
+    leg2_line: str = "", extra_lines: list | None = None, is_debit: bool = False,
 ) -> str:
     is_call = "Call" in strategy
     otm_pct = abs((price_now - strike) / price_now * 100) if price_now > 0 else 0
@@ -995,12 +1060,17 @@ def _build_whatsapp_short_manual(
     L.append(f"💵 Kurs: ${price_now:.2f}")
     L.append(f"🎯 Strike: ${strike:g}")
     L.append(f"📅 Verfall: {german_exp} ({dte} Tage)")
+    if leg2_line:
+        L.append(leg2_line)
     if is_call and price_now > 0:
         L.append(f"🛒 Aktienkauf: 100 × ${price_now:.2f} = ${price_now * 100:,.0f} USD")
     _is_strangle = "Strangle" in strategy
-    _prem_note = " (Put + Call zusammen)" if _is_strangle else ""
-    L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt){_prem_note}")
-    L.append(f"📈 Rendite (Prämie): {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
+    _prem_note = " (Put + Call zusammen)" if _is_strangle else (" (netto)" if leg2_line else "")
+    if is_debit:
+        L.append(f"💸 Netto-Kosten: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt)")
+    else:
+        L.append(f"💰 Prämie: {_fmt_num(premium)} USD ({praemie_usd} USD gesamt){_prem_note}")
+        L.append(f"📈 Rendite (Prämie): {_fmt_num(rend_lz)}% für {dte} Tage (~{_fmt_num(rend_ann, 1)}% p.a.)")
     if is_call and price_now > 0 and strike > price_now:
         # Covered Call: zusätzlich die Kurschance bis zum Strike
         _upside = (strike - price_now) / price_now * 100
@@ -1008,11 +1078,13 @@ def _build_whatsapp_short_manual(
         _max_ann = _max_ret * 365 / max(dte, 1)
         L.append(f"🚀 Upside bis Strike: {_fmt_num(_upside)}%")
         L.append(f"🎯 Max-Rendite bei Ausübung: {_fmt_num(_max_ret)}% (~{_fmt_num(_max_ann, 1)}% p.a.)")
-    elif (not is_call) and (not _is_strangle) and strike > 0 and price_now > 0:
+    elif (not is_call) and (not _is_strangle) and (not leg2_line) and strike > 0 and price_now > 0:
         # Short PUT: Rabatt — effektiver Einbuchungspreis (Strike − Prämie) vs. Kurs
         _eff = strike - premium
         _disc = (price_now - _eff) / price_now * 100
         L.append(f"🏷️ Rabatt bei Einbuchung: {_fmt_num(_disc)}% (effektiv ${_eff:g} statt ${price_now:.2f})")
+    for _xl in (extra_lines or []):
+        L.append(_xl)
     L.append("")
     # ── Absicherung ───────────────────────────────────────────────────────────
     L.append("*Absicherung*")
@@ -1056,19 +1128,29 @@ def _build_whatsapp_short_manual(
     return "\n".join(L)
 
 
+_WA_DISCLAIMER = ("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine "
+                  "eigenen Trades! Handeln auf eigenes Risiko!")
+
+
 def _build_whatsapp_compact(
     class_label: str, ticker: str, strategy: str, expiry_short: str,
-    strike: float, premium: float, post_ts: str, optionstrat_url: str,
+    strike_disp: str, premium: float, post_ts: str, circle_url: str = "",
 ) -> str:
-    """Kurzversion: Kopf mit IV-Farbpunkt (🟢 Low / 🟡 Mid / 🔴 High) + OptionStrat-Link."""
+    """Kurzversion: Kopf mit Datum/Uhrzeit + Stillhalter AI, Trade-Zeile mit
+    IV-Farbpunkt, Trading-Desk-Link (Circle) statt OptionStrat, Disclaimer."""
     dot = {"A": "🟢", "B": "🟡", "C": "🔴"}.get(class_label, "⚪")
-    return (
-        f"*🔔 Trading-Ideen:\n"
+    L = [
+        f"*🔔 Trading-Idee vom {post_ts} · Stillhalter AI*",
         f"{dot} {strategy}  {ticker}  {expiry_short}  "
-        f"{strike:g} USD @ {_fmt_num(premium)} USD* "
-        f"(Stillhalter AI | {post_ts})\n"
-        f"{optionstrat_url}"
-    )
+        f"{strike_disp} USD @ {_fmt_num(premium)} USD",
+        "",
+    ]
+    if circle_url:
+        L.append("🎩 Alle Details im Trading Desk:")
+        L.append(circle_url)
+        L.append("")
+    L.append(_WA_DISCLAIMER)
+    return "\n".join(L)
 
 
 def _sec(key: str, default: str = "") -> str:
@@ -1145,20 +1227,20 @@ def _build_combined_short(gen: dict, circle_url: str, post_ts: str) -> str:
     post_ts = aktueller Zeitstempel (Berlin) im Kopf."""
     dots   = {"A": "🟢", "B": "🟡", "C": "🔴"}
     iv_lbl = {"A": "Low IV", "B": "Mid IV", "C": "High IV"}
-    L = [f"*🔔 Trading-Ideen — Stillhalter AI | {post_ts}*", ""]
+    L = [f"*🔔 Trading-Ideen vom {post_ts} · Stillhalter AI*", ""]
     for cls, d in gen.items():
+        _cl = d.get("class", cls)
+        _sd = d.get("strike_disp") or f"{d['strike']:g}"
         L.append(
-            f"{dots.get(cls, '⚪')} {iv_lbl.get(cls, '')}: {d['strategy']}  {d['ticker']}  "
-            f"{d['expiry_short']}  {d['strike']:g} USD @ {_fmt_num(d['premium'])} USD"
+            f"{dots.get(_cl, '⚪')} {iv_lbl.get(_cl, '')}: {d['strategy']}  {d['ticker']}  "
+            f"{d['expiry_short']}  {_sd} USD @ {_fmt_num(d['premium'])} USD"
         )
-        L.append(f"📊 {d['optionstrat_url']}")
-        L.append("")
+    L.append("")
     if circle_url:
-        L.append("📋 Volle Analyse für alle Trades (nur Masterclass):")
-        L.append(f"🌐 {circle_url}")
+        L.append("🎩 Alle Details im Trading Desk:")
+        L.append(circle_url)
         L.append("")
-    L.append("⚠️ Keine Finanzberatung, nur reine Finanzbildung und meine eigenen Trades! "
-             "Handeln auf eigenes Risiko!")
+    L.append(_WA_DISCLAIMER)
     return "\n".join(L)
 
 
@@ -1273,7 +1355,7 @@ def _parse_trade_segment(seg: str, all_tickers: set) -> dict | None:
 
 
 def _parse_trade_text(text: str) -> list:
-    """Zerlegt diktierten/eingegebenen Text in bis zu 3 Trades (A/B/C)."""
+    """Zerlegt diktierten/eingegebenen Text in bis zu 9 Trades."""
     import re
     try:
         from data.watchlist import ALL_TICKERS
@@ -1287,7 +1369,7 @@ def _parse_trade_text(text: str) -> list:
         parsed = _parse_trade_segment(seg, all_t)
         if parsed:
             out.append(parsed)
-        if len(out) >= 3:
+        if len(out) >= 9:
             break
     return out
 
@@ -1299,16 +1381,19 @@ def _voice_fill_cb():
     if not trades:
         st.session_state["m_voice_msg"] = "⚠️ Konnte keinen Trade erkennen — bitte Ticker + Strike nennen."
         return
-    for i, tr in enumerate(trades):
-        cls = ["A", "B", "C"][i]
+    _vslots = list("ABCDEFGHI")
+    if len(trades) > 3:
+        st.session_state["m_n_slots"] = min(9, len(trades))
+    for i, tr in enumerate(trades[:9]):
+        cls = _vslots[i]
         st.session_state[f"m_{cls}_ticker"]   = tr["ticker"]
         st.session_state[f"m_{cls}_strategy"] = tr["strategy"]
         st.session_state[f"m_{cls}_strike"]   = float(tr["strike"])
         st.session_state[f"m_{cls}_expiry"]   = tr["expiry"]
         if tr["premium"] > 0:
             st.session_state[f"m_{cls}_premium"] = float(tr["premium"])
-    _names = ", ".join(f"{['A','B','C'][i]}: {t['ticker']} {t['strategy']} {t['strike']:g}"
-                       for i, t in enumerate(trades))
+    _names = ", ".join(f"{_vslots[i]}: {t['ticker']} {t['strategy']} {t['strike']:g}"
+                       for i, t in enumerate(trades[:9]))
     st.session_state["m_voice_msg"] = f"✓ {len(trades)} Trade(s) erkannt → {_names}"
 
 
@@ -1326,10 +1411,10 @@ def _autofill_cb(cls, ticker, strike, strat, call_strike, call_expiry, expiry):
     st.session_state[f"m_{cls}_premium"] = float(q["premium"])
     st.session_state[f"m_{cls}_delta"]   = float(q["delta"])
     st.session_state[f"m_{cls}_iv"]      = float(q["iv_pct"])
-    if "Strangle" in strat:
+    if _strategy_meta(strat)["two"]:
         st.session_state[f"m_{cls}_fill_msg"] = (
-            f"✓ PUT ${q['found_strike']:.0f} / CALL ${q.get('found_call_strike', 0):.0f} "
-            f"· Σ-Prämie {q['premium']:.2f}$ · Σ-Delta {q['delta']:.2f}"
+            f"✓ Bein 1 ${q['found_strike']:.0f} / Bein 2 ${q.get('found_call_strike', 0):.0f} "
+            f"· Netto {q['premium']:.2f}$ · Δ {q['delta']:.2f}"
         )
     else:
         st.session_state[f"m_{cls}_fill_msg"] = (
@@ -1390,7 +1475,36 @@ tab1, tab2 = st.tabs(["✏️ Manuell eingeben", "📊 Aus Scanner"])
 # TAB 1 — MANUELL EINGEBEN
 # ════════════════════════════════════════════════════════════════════════════════
 with tab1:
-    st.markdown("Trage **Class A** (Konservativ), **Class B** (Ausgewogen) und/oder **Class C** (Aggressiv) ein — mindestens eine Klasse:")
+    st.markdown("Bis zu **9 Trades** gleichzeitig — nur vollständig ausgefüllte Felder "
+                "(Ticker + Strike + Prämie) werden generiert, der Rest wird ignoriert:")
+
+    # ── 📥 Vorbefüllung aus dem Watchlist-Scanner ─────────────────────────────
+    _pref = st.session_state.pop("tc_prefill", None)
+    if _pref:
+        _slot_ids_pref = list("ABCDEFGHI")
+        st.session_state["m_n_slots"] = min(9, max(3, len(_pref)))
+        for _pi, _tr in enumerate(_pref[:9]):
+            _sl = _slot_ids_pref[_pi]
+            st.session_state[f"m_{_sl}_ticker"]      = str(_tr.get("ticker", ""))
+            st.session_state[f"m_{_sl}_strategy"]    = _tr.get("strategy", "Short PUT")
+            st.session_state[f"m_{_sl}_strike"]      = float(_tr.get("strike") or 0)
+            st.session_state[f"m_{_sl}_call_strike"] = float(_tr.get("call_strike") or 0)
+            try:
+                _pd_exp = pd.to_datetime(_tr.get("expiry")).date()
+                st.session_state[f"m_{_sl}_expiry"] = max(_pd_exp, date.today())
+            except Exception:
+                pass
+            try:
+                if _tr.get("call_expiry"):
+                    _pd_cexp = pd.to_datetime(_tr["call_expiry"]).date()
+                    st.session_state[f"m_{_sl}_call_expiry"] = max(_pd_cexp, date.today())
+            except Exception:
+                pass
+            st.session_state[f"m_{_sl}_premium"] = float(_tr.get("premium") or 0)
+            st.session_state[f"m_{_sl}_delta"]   = float(_tr.get("delta") or -0.20)
+            st.session_state[f"m_{_sl}_iv"]      = float(_tr.get("iv") or 25.0)
+        st.success(f"📥 {len(_pref)} Trade(s) aus dem Watchlist-Scanner übernommen — "
+                   "Felder sind vorbefüllt. Prüfen und unten **🚀 Posts generieren** klicken.")
 
     # ── Sprach-/Text-Eingabe (z.B. via Wispr Flow diktieren) ──────────────────
     with st.expander("🎤 Per Sprache/Text befüllen (diktieren)", expanded=False):
@@ -1407,112 +1521,123 @@ with tab1:
             st.html(f"<div style='font-size:0.78rem;color:{_vc}'>{_vmsg}</div>")
         st.caption("Danach pro Klasse 'Optionsdaten holen' klicken → echte Prämie/Delta/IV.")
 
-    col_a, col_b, col_c = st.columns(3, gap="small")
-    _CLASS_DEFS = [
-        ("A", "🟢 Class A — Konservativ", "#22c55e", col_a),
-        ("B", "🟡 Class B — Ausgewogen",  "#d4a843", col_b),
-        ("C", "🔴 Class C — Aggressiv",   "#ef4444", col_c),
-    ]
+    _SLOT_IDS = list("ABCDEFGHI")
+    st.session_state.setdefault("m_n_slots", 3)
+    n_slots = st.select_slider(
+        "Anzahl Trade-Felder", options=list(range(1, 10)), key="m_n_slots",
+        help="Bis zu 9 Trades gleichzeitig. Es müssen nicht alle ausgefüllt werden — "
+             "nur vollständige Felder (Ticker + Strike + Prämie) werden generiert.")
+    _slots = _SLOT_IDS[:int(n_slots)]
 
     # Defaults für Prämie/Delta/IV (damit Auto-Fill sie via Session State setzen kann)
-    for _c in ["A", "B", "C"]:
+    for _c in _SLOT_IDS:
         st.session_state.setdefault(f"m_{_c}_premium", 0.0)
         st.session_state.setdefault(f"m_{_c}_delta", -0.20)
         st.session_state.setdefault(f"m_{_c}_iv", 25.0)
 
+    _CLASS_COLORS = {"A": "#22c55e", "B": "#d4a843", "C": "#ef4444"}
+    _CLASS_NAMES  = {"A": "Konservativ", "B": "Ausgewogen", "C": "Aggressiv"}
     m_inputs: dict = {}
-    for cls, cls_label, cls_color, col in _CLASS_DEFS:
-        with col:
-            st.html(
-                f"<div style='font-weight:700;color:{cls_color};font-family:RedRose,sans-serif;"
-                f"font-size:0.9rem;margin-bottom:6px'>{cls_label}</div>"
-            )
-            ticker_v  = st.text_input("Ticker", key=f"m_{cls}_ticker", placeholder="AAPL").upper().strip()
-            strat_v   = st.selectbox(
-                "Strategie", ["Short PUT", "Covered Call", "Short Strangle"],
-                key=f"m_{cls}_strategy",
-            )
-            is_strangle_v = "Strangle" in strat_v
-            call_strike_v = 0.0
-            call_expiry_v = None
-            if is_strangle_v:
-                # Short Strangle: PUT + CALL je mit eigenem Strike UND Verfall (4 Felder)
-                _sk1, _sk2 = st.columns(2)
-                with _sk1:
+    for _row_start in range(0, len(_slots), 3):
+        _row_cols = st.columns(3, gap="small")
+        for cls, col in zip(_slots[_row_start:_row_start + 3], _row_cols):
+            with col:
+                _def_cls = ["A", "B", "C"][_SLOT_IDS.index(cls) % 3]
+                st.session_state.setdefault(f"m_{cls}_class", _def_cls)
+                class_v = st.selectbox("Klasse", ["A", "B", "C"], key=f"m_{cls}_class",
+                                       help="A = Konservativ (Low IV) · B = Ausgewogen (Mid IV) · "
+                                            "C = Aggressiv (High IV)")
+                st.html(
+                    f"<div style='font-weight:700;color:{_CLASS_COLORS.get(class_v, '#888')};"
+                    f"font-family:RedRose,sans-serif;font-size:0.85rem;margin-bottom:4px'>"
+                    f"Trade {cls} · Class {class_v} — {_CLASS_NAMES.get(class_v, '')}</div>"
+                )
+                ticker_v  = st.text_input("Ticker", key=f"m_{cls}_ticker", placeholder="AAPL").upper().strip()
+                strat_v   = st.selectbox("Strategie", _STRATEGIES, key=f"m_{cls}_strategy")
+                _meta_v   = _strategy_meta(strat_v)
+                is_two_v  = _meta_v["two"]
+                call_strike_v = 0.0
+                call_expiry_v = None
+                if is_two_v:
+                    # 2-Bein-Strategie: beide Beine mit eigenem Strike UND Verfall
+                    _sk1, _sk2 = st.columns(2)
+                    with _sk1:
+                        strike_v = st.number_input(
+                            _meta_v["lbl1"], min_value=0.0, step=1.0, format="%.2f",
+                            key=f"m_{cls}_strike",
+                        )
+                    with _sk2:
+                        call_strike_v = st.number_input(
+                            _meta_v["lbl2"], min_value=0.0, step=1.0, format="%.2f",
+                            key=f"m_{cls}_call_strike",
+                        )
+                    _ex1, _ex2 = st.columns(2)
+                    with _ex1:
+                        expiry_v = st.date_input(
+                            _meta_v["xl1"], value=_next_friday(),
+                            min_value=date.today(), key=f"m_{cls}_expiry",
+                        )
+                    with _ex2:
+                        call_expiry_v = st.date_input(
+                            _meta_v["xl2"], value=_next_friday(),
+                            min_value=date.today(), key=f"m_{cls}_call_expiry",
+                        )
+                else:
                     strike_v = st.number_input(
-                        "PUT Strike ($)", min_value=0.0, step=1.0, format="%.2f",
-                        key=f"m_{cls}_strike",
+                        "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
                     )
-                with _sk2:
-                    call_strike_v = st.number_input(
-                        "CALL Strike ($)", min_value=0.0, step=1.0, format="%.2f",
-                        key=f"m_{cls}_call_strike",
-                    )
-                _ex1, _ex2 = st.columns(2)
-                with _ex1:
                     expiry_v = st.date_input(
-                        "PUT Verfall", value=_next_friday(),
+                        "Verfall", value=_next_friday(),
                         min_value=date.today(), key=f"m_{cls}_expiry",
                     )
-                with _ex2:
-                    call_expiry_v = st.date_input(
-                        "CALL Verfall", value=_next_friday(),
-                        min_value=date.today(), key=f"m_{cls}_call_expiry",
+
+                # ── Auto-Fill aus dem Live-Optionsdaten-Feed (on_click) ──
+                st.button(
+                    "🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
+                    use_container_width=True,
+                    help="Holt Prämie, Delta & IV automatisch aus dem Live-Optionsdaten-Feed",
+                    on_click=_autofill_cb,
+                    args=(cls, ticker_v, strike_v, strat_v, call_strike_v, call_expiry_v, expiry_v),
+                )
+                _fill_msg = st.session_state.get(f"m_{cls}_fill_msg", "")
+                if _fill_msg:
+                    _msg_color = "#22c55e" if _fill_msg.startswith("✓") else "#f59e0b"
+                    st.html(f"<div style='font-size:0.7rem;color:{_msg_color};margin:-4px 0 4px'>{_fill_msg}</div>")
+
+                _prem_label = ("Netto-Kosten (Debit, USD)" if _meta_v["kind"] == "debit"
+                               else "Netto-Prämie (USD)" if is_two_v else "Prämie (USD)")
+                _delta_label = "Netto-Delta" if is_two_v else "Delta"
+                premium_v = st.number_input(
+                    _prem_label, min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
+                )
+                dc, dv = st.columns(2)
+                with dc:
+                    delta_v = st.number_input(
+                        _delta_label, min_value=-2.0, max_value=2.0,
+                        step=0.01, format="%.2f", key=f"m_{cls}_delta",
                     )
-            else:
-                strike_v = st.number_input(
-                    "Strike ($)", min_value=0.0, step=1.0, format="%.2f", key=f"m_{cls}_strike",
-                )
-                expiry_v = st.date_input(
-                    "Verfall", value=_next_friday(),
-                    min_value=date.today(), key=f"m_{cls}_expiry",
-                )
-
-            # ── Auto-Fill aus Massive/Polygon (on_click → kein Daten­verlust) ──
-            st.button(
-                "🔍 Optionsdaten holen", key=f"m_{cls}_autofill",
-                use_container_width=True,
-                help="Holt Prämie, Delta & IV automatisch aus dem Live-Optionsdaten-Feed",
-                on_click=_autofill_cb,
-                args=(cls, ticker_v, strike_v, strat_v, call_strike_v, call_expiry_v, expiry_v),
-            )
-            _fill_msg = st.session_state.get(f"m_{cls}_fill_msg", "")
-            if _fill_msg:
-                _msg_color = "#22c55e" if _fill_msg.startswith("✓") else "#f59e0b"
-                st.html(f"<div style='font-size:0.7rem;color:{_msg_color};margin:-4px 0 4px'>{_fill_msg}</div>")
-
-            _prem_label  = "Gesamtprämie (USD)" if is_strangle_v else "Prämie (USD)"
-            _delta_label = "Gesamt-Delta" if is_strangle_v else "Delta"
-            premium_v = st.number_input(
-                _prem_label, min_value=0.0, step=0.05, format="%.2f", key=f"m_{cls}_premium",
-            )
-            dc, dv = st.columns(2)
-            with dc:
-                delta_v = st.number_input(
-                    _delta_label, min_value=-2.0, max_value=2.0,
-                    step=0.01, format="%.2f", key=f"m_{cls}_delta",
-                )
-            with dv:
-                iv_v = st.number_input(
-                    "IV %", min_value=0.0, step=1.0, format="%.0f",
-                    key=f"m_{cls}_iv",
-                )
-            # ── Live-Rendite auf Laufzeit (Vorschau) ──────────────────────────
-            if strike_v > 0 and premium_v > 0:
-                _dte_p = max(1, (expiry_v - date.today()).days)
-                _rl_p  = premium_v / strike_v * 100
-                _ra_p  = _rl_p * 365 / _dte_p
-                st.html(
-                    f"<div style='font-size:0.74rem;color:#22c55e;font-weight:600;margin:-2px 0 4px'>"
-                    f"📈 Rendite: {_fmt_num(_rl_p)}% auf {_dte_p}T "
-                    f"<span style='color:#888;font-weight:400'>(~{_fmt_num(_ra_p, 0)}% p.a.)</span></div>"
-                )
-            m_inputs[cls] = {
-                "ticker": ticker_v, "strategy": strat_v, "strike": strike_v,
-                "expiry": expiry_v, "call_strike": call_strike_v,
-                "call_expiry": call_expiry_v,
-                "premium": premium_v, "delta": delta_v, "iv_pct": iv_v,
-            }
+                with dv:
+                    iv_v = st.number_input(
+                        "IV %", min_value=0.0, step=1.0, format="%.0f",
+                        key=f"m_{cls}_iv",
+                    )
+                # ── Live-Rendite auf Laufzeit (Vorschau, nur Credit) ──────────
+                if strike_v > 0 and premium_v > 0 and _meta_v["kind"] != "debit":
+                    _dte_p = max(1, (expiry_v - date.today()).days)
+                    _rl_p  = premium_v / strike_v * 100
+                    _ra_p  = _rl_p * 365 / _dte_p
+                    st.html(
+                        f"<div style='font-size:0.74rem;color:#22c55e;font-weight:600;margin:-2px 0 4px'>"
+                        f"📈 Rendite: {_fmt_num(_rl_p)}% auf {_dte_p}T "
+                        f"<span style='color:#888;font-weight:400'>(~{_fmt_num(_ra_p, 0)}% p.a.)</span></div>"
+                    )
+                m_inputs[cls] = {
+                    "class": class_v,
+                    "ticker": ticker_v, "strategy": strat_v, "strike": strike_v,
+                    "expiry": expiry_v, "call_strike": call_strike_v,
+                    "call_expiry": call_expiry_v,
+                    "premium": premium_v, "delta": delta_v, "iv_pct": iv_v,
+                }
 
     st.markdown("---")
     _eff_app_url = st.text_input(
@@ -1536,12 +1661,12 @@ with tab1:
     if st.button("🚀 Posts generieren", type="primary",
                  use_container_width=True, key="btn_gen_manual"):
         _active_classes = [
-            cls for cls in ["A", "B", "C"]
+            cls for cls in _slots
             if m_inputs[cls]["ticker"] and m_inputs[cls]["strike"] > 0 and m_inputs[cls]["premium"] > 0
         ]
-        # Angefangene, aber unvollständige Klassen sammeln (für klaren Hinweis)
+        # Angefangene, aber unvollständige Felder sammeln (für klaren Hinweis)
         _skipped = []
-        for _c in ["A", "B", "C"]:
+        for _c in _slots:
             if _c in _active_classes:
                 continue
             _inp = m_inputs[_c]
@@ -1551,9 +1676,9 @@ with tab1:
                     ("Strike", _inp["strike"] > 0),
                     ("Prämie", _inp["premium"] > 0),
                 ] if not ok]
-                _skipped.append(f"Class {_c} (fehlt: {', '.join(_miss)})")
+                _skipped.append(f"Trade {_c} (fehlt: {', '.join(_miss)})")
         if not _active_classes:
-            st.error("⚠️ Mindestens eine Klasse (Ticker + Strike + Prämie) muss ausgefüllt sein.")
+            st.error("⚠️ Mindestens ein Feld (Ticker + Strike + Prämie) muss ausgefüllt sein.")
         else:
             _generated: dict = {}
             for cls in _active_classes:
@@ -1561,14 +1686,17 @@ with tab1:
                 with st.spinner(f"⏳ Marktdaten für {inp['ticker']} (Class {cls})…"):
                     tdata = _fetch_manual_ticker_data(inp["ticker"])
 
-                ticker   = inp["ticker"]
-                strategy = inp["strategy"]
+                ticker    = inp["ticker"]
+                strategy  = inp["strategy"]
+                cls_label = inp.get("class", cls)
                 strike   = inp["strike"]
                 expiry   = inp["expiry"]
                 premium  = inp["premium"]
                 delta    = inp["delta"]
                 iv_pct   = inp["iv_pct"]
-                is_call     = "Call" in strategy
+                _meta_g     = _strategy_meta(strategy)
+                is_two      = _meta_g["two"]
+                is_call     = strategy == "Covered Call"
                 is_strangle = "Strangle" in strategy
                 call_strike = inp.get("call_strike", 0.0)
                 call_expiry = inp.get("call_expiry") or expiry
@@ -1580,11 +1708,11 @@ with tab1:
                 # gewählte Verfall/Strike nicht, wird der nächste genommen.
                 try:
                     from data.massive_fetcher import nearest_contract
-                    _ne, _ns = nearest_contract(ticker, expiry, strike, "call" if is_call else "put")
+                    _ne, _ns = nearest_contract(ticker, expiry, strike, _meta_g["l1"][0])
                     if _ne and _ns:
                         expiry, strike = _ne, _ns
-                    if is_strangle and call_strike > 0:
-                        _nce, _ncs = nearest_contract(ticker, call_expiry, call_strike, "call")
+                    if is_two and call_strike > 0:
+                        _nce, _ncs = nearest_contract(ticker, call_expiry, call_strike, _meta_g["l2"][0])
                         if _nce and _ncs:
                             call_expiry, call_strike = _nce, _ncs
                 except Exception:
@@ -1601,8 +1729,35 @@ with tab1:
                     dte            = 0
 
                 optionstrat_url = _optionstrat_url_manual(
-                    ticker, strike, expiry, is_call, is_strangle, call_strike, call_expiry
+                    ticker, strike, expiry, is_call, is_strangle, call_strike, call_expiry,
+                    strategy=strategy,
                 )
+                # 2. Bein + Zusatzzeilen für die Posts (Spreads / Synthetic)
+                _leg2_line   = ""
+                _extra_lines = []
+                _is_debit    = _meta_g["kind"] == "debit"
+                strike_disp  = f"{strike:g}"
+                if is_two and call_strike > 0:
+                    strike_disp = f"{strike:g}/{call_strike:g}"
+                    _l2t, _l2s = _meta_g["l2"]
+                    try:
+                        _l2exp = pd.to_datetime(call_expiry).strftime("%d.%m.%Y")
+                    except Exception:
+                        _l2exp = str(call_expiry)
+                    _leg2_line = (f"🦵 2. Bein: {'Short' if _l2s == 1 else 'Long'} "
+                                  f"{_l2t.upper()} ${call_strike:g} · Verfall {_l2exp}")
+                    _width = abs(strike - call_strike)
+                    if "Credit Spread" in strategy:
+                        _extra_lines.append(
+                            f"🛡️ Max. Risiko: ${max(_width - premium, 0) * 100:,.0f} "
+                            f"(Breite ${_width:g} − Prämie)")
+                    elif _is_debit:
+                        _extra_lines.append(
+                            f"🎯 Max. Gewinn: ${max(_width - premium, 0) * 100:,.0f} "
+                            f"(Breite ${_width:g} − Kosten)")
+                    if strategy == "Synthetic Long":
+                        _extra_lines.append("ℹ️ Verhält sich wie 100 Aktien long — "
+                                            "Prämien-Saldo siehe oben")
                 trade_id     = _gen_trade_id(ticker, strategy)
                 tracking_url = _build_tracking_url(_eff_app_url, trade_id)
                 # Zeitstempel in Berliner Zeit
@@ -1616,7 +1771,7 @@ with tab1:
                 # Nur in den Trade Monitor übernehmen, wenn der Nutzer es wünscht.
                 if st.session_state.get("m_into_monitor", True):
                     _save_manual_trade({
-                        "trade_id": trade_id, "class": cls, "ticker": ticker,
+                        "trade_id": trade_id, "class": cls_label, "ticker": ticker,
                         "company": company, "strategy": strategy,
                         "strike": strike, "call_strike": call_strike,
                         "expiry": str(expiry), "call_expiry": str(call_expiry),
@@ -1684,7 +1839,7 @@ with tab1:
 
                 # Langversion
                 wa_long = _build_whatsapp_short_manual(
-                    class_label=cls, ticker=ticker, company=company,
+                    class_label=cls_label, ticker=ticker, company=company,
                     strategy=strategy, strike=strike, german_exp=german_exp,
                     expiry_short=expiry_display, dte=dte,
                     premium=premium, delta=delta, iv_pct=iv_pct,
@@ -1701,11 +1856,9 @@ with tab1:
                     news_line=_news_line,
                     funda=_funda,
                     tf_colors=_tf_colors,
-                )
-                # Kurzversion
-                wa_compact = _build_whatsapp_compact(
-                    cls, ticker, strategy, expiry_display, strike, premium,
-                    post_ts, optionstrat_url,
+                    leg2_line=_leg2_line,
+                    extra_lines=_extra_lines,
+                    is_debit=_is_debit,
                 )
 
                 # Circle Detailpost
@@ -1740,15 +1893,17 @@ with tab1:
                     price_now=price_now, fund=tdata.get("fund", {}), covered_call="",
                 )
                 circle_post = circle_base + _build_circle_suffix(
-                    optionstrat_url, tracking_url, post_ts, cls
+                    optionstrat_url, tracking_url, post_ts, cls_label
                 )
 
                 _generated[cls] = {
-                    "ticker": ticker, "wa_compact": wa_compact, "wa_long": wa_long,
+                    "ticker": ticker, "wa_long": wa_long,
                     "circle": circle_post, "trade_id": trade_id,
-                    # Felder für den Sammel-Kurzpost
+                    # Felder für Kurz-/Sammelposts (werden live gebaut)
+                    "class": cls_label,
                     "strategy": strategy, "expiry_short": expiry_display,
-                    "strike": strike, "premium": premium,
+                    "strike": strike, "strike_disp": strike_disp,
+                    "premium": premium,
                     "optionstrat_url": optionstrat_url,
                 }
 
@@ -1764,17 +1919,44 @@ with tab1:
     if "m_generated" in st.session_state and st.session_state["m_generated"]:
         gen = st.session_state["m_generated"]
 
-        _tab_labels = [f"Class {cls} · {d['ticker']}" for cls, d in gen.items()]
+        _tab_labels = [f"Class {d.get('class', cls)} · {d['ticker']}" for cls, d in gen.items()]
         _all_label  = f"Alle {len(gen)} zusammen"
 
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
         st.markdown("## 📱 Kurzversion (für schnelles Teilen)")
+        # 🎩 Trading-Desk-Link (Circle) — wird persistent gespeichert
+        from data import _persistent_cache as _pc17
+        if "m_desk_url_saved" not in st.session_state:
+            try:
+                st.session_state["m_desk_url_saved"] = _pc17.load_latest("circle_desk_url") or ""
+            except Exception:
+                st.session_state["m_desk_url_saved"] = ""
+        st.session_state.setdefault("m_desk_url", st.session_state["m_desk_url_saved"])
+        _desk_url = st.text_input(
+            "🎩 Circle-Link 'Trading Desk' (kommt in jede Kurzversion)",
+            key="m_desk_url",
+            help="Link zu deinem Circle-Space 'Trading Desk' — dort liegen die Details. "
+                 "Den Space legst du einmalig in Circle an (Spaces → neuer Space "
+                 "'Trading Desk', nur für Member). Der Link wird hier gespeichert. "
+                 "Alternativ kannst du nach dem Circle-Auto-Post unten dessen "
+                 "Post-Link verwenden.",
+        ).strip()
+        if _desk_url != st.session_state["m_desk_url_saved"]:
+            try:
+                _pc17.save("circle_desk_url", _desk_url, ttl_hours=24 * 3650)
+                st.session_state["m_desk_url_saved"] = _desk_url
+            except Exception:
+                pass
+        _post_ts_disp = st.session_state.get("m_post_ts", "")
         sc_tabs = st.tabs(_tab_labels + [_all_label])
         for (cls, d), stab in zip(gen.items(), sc_tabs[:-1]):
             with stab:
-                st.code(d["wa_compact"], language="text")
+                st.code(_build_whatsapp_compact(
+                    d.get("class", cls), d["ticker"], d["strategy"], d["expiry_short"],
+                    d.get("strike_disp") or f"{d['strike']:g}", d["premium"],
+                    _post_ts_disp, _desk_url), language="text")
         with sc_tabs[-1]:
-            st.code("\n\n".join(d["wa_compact"] for d in gen.values()), language="text")
+            st.code(_build_combined_short(gen, _desk_url, _post_ts_disp), language="text")
 
         st.markdown('<div class="gold-line"></div>', unsafe_allow_html=True)
         st.markdown("## 📋 Langversion (Detail-Post)")
@@ -1797,7 +1979,7 @@ with tab1:
             "Textfeld darunter würde Circle aus jeder Zeile einen eigenen Absatz "
             "machen (Extra-Leerzeilen)."
         )
-        ci_tabs = st.tabs([f"Class {cls} · {d['ticker']}" for cls, d in gen.items()]
+        ci_tabs = st.tabs([f"Class {d.get('class', cls)} · {d['ticker']}" for cls, d in gen.items()]
                           + [f"Alle {len(gen)} zusammen"])
         for (cls, d), ctab in zip(gen.items(), ci_tabs[:-1]):
             with ctab:
