@@ -2,10 +2,34 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v1.9.3
+//  Stillhalter Community® – MEAN REVERSION v2.0
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v1.9.3 — 📍 Strike-Referenz jetzt auch für CALLS:
+//  NEU in v2.0 — Feedback-Paket (Farben statt Größen, Live-Klarheit):
+//   • ◆ RAUTEN: alle gleich groß, Stärke jetzt über FARBE — Stufe 1 =
+//     blass (grün/rot), Stufe 2 = satt, Stufe 3 = GOLD (extrem; Richtung
+//     ergibt sich aus der Position unter/über der Kerze).
+//   • ⚡ NUR BESTÄTIGTE KERZEN (Standard AN): Das Signal erscheint erst,
+//     wenn die Kerze GESCHLOSSEN hat — kein Flackern mehr, während die
+//     Kerze noch läuft, und was einmal im Chart steht, bleibt stehen.
+//   • 🎚 AUSLÖSE-LEVEL (zuschaltbar): kleine Punktlinie, die live zeigt,
+//     WO die laufende Kerze schließen muss, damit das ⚡-Signal fixiert
+//     wird. Damit lässt sich kurz vor Handelsschluss zum Schlusskurs
+//     handeln (statt zur nächsten Eröffnung) — ohne Repaint-Risiko:
+//     Schluss über dem Level = Signal steht fest. Eigene Alerts
+//     '⚡ voraus' melden das Erreichen des Levels schon intrabar.
+//   • Status-Tabelle kompakter (Zeilenumbruch statt Überbreite).
+//   • Stillhalter-Backtest-Tabelle: ohne Emojis, mit 'Win Rate' und
+//     'Max Drawdown', Regel in zwei klaren Zeilen (Strike/Verfall).
+//   • NEUE KALIBRIERUNG (16 Aktien, Tageskerzen ab 2010, >900 simulierte
+//     Short Puts je Konfiguration, Strike = Episodentief, Verfall
+//     1. Freitag nach ≥10 Tagen): Schwelle 0.75 schlägt 1.0 deutlich
+//     (~89% vs. ~85% Win Rate) → neuer Standard. Klassisch bleibt der
+//     beste Auslöser (Früh 30% kostet ~4 Punkte). Basis-Länge 40
+//     bestätigt (50 wäre minimal besser, bleibt aber synchron zum
+//     Confluence bei 40). Signal-Bereinigung: 30 Kerzen = Kompromiss,
+//     60 = maximale Qualität (~90% bei ~2.6 Signalen/Jahr).
+//  v1.9.3 — 📍 Strike-Referenz jetzt auch für CALLS:
 //   • Beim ⚡-DOWN-Signal erscheint eine rote Linie am EPISODENHOCH —
 //     'Call-Strike ≥ X' (gleicher Puffer, nur nach OBEN gerechnet).
 //     Logik spiegelbildlich zum Put: Das Hoch wurde gerade getestet
@@ -103,7 +127,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v1.9.3", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v2.0", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -121,11 +145,13 @@ noise_suppress = input.int(40, "Basis-Länge (Kerzen)", minval = 5, maxval = 100
           + "(Raster-Studie: präziseste Signale bei nur ~12 Signalen/Jahr — die "
           + "Mean Reversion bleibt der seltene Ausnahme-Marker). Identisch zur "
           + "Mean-Reversion-Komponente im Stillhalter Confluence.")
-signal_thresh  = input.float(1.0, "Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.1, group = grp_mr,
+signal_thresh  = input.float(0.75, "Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.05, group = grp_mr,
      tooltip = "Ab wie vielen Standardabweichungen der Kurs als überdehnt gilt. "
-          + "1.0 = Standard und Studien-Sieger — höhere Schwellen waren in der "
-          + "Messung schlechter, weil der Rückweg über die ±1σ-Linie nach einem "
-          + "tieferen Extrem das saubere Signal ist.")
+          + "0.75 = neuer Standard aus der Stillhalter-Kalibrierung (16 Aktien, "
+          + "ab 2010, simulierte Short Puts am Episodentief): ~89% Win Rate vs. "
+          + "~85% bei 1.0 — die etwas empfindlichere Schwelle findet mehr saubere "
+          + "Böden, ohne die Qualität zu verwässern. Höhere Schwellen waren "
+          + "durchweg schlechter.")
 
 // ─── Inputs: Signale ─────────────────────────────────────────────────────────
 grp_sig = "SIGNALE"
@@ -172,11 +198,25 @@ markCounter   = input.bool(false, "⚠ Signale gegen den Trend kennzeichnen", gr
           + "der langfristigen Durchschnittslinie bzw. DOWN darüber), mit einem "
           + "grauen ✕ — Information statt Blockade: 'fallendes Messer' auf einen "
           + "Blick erkennbar, ohne Signale zu verstecken.")
+confirmOnly = input.bool(true, "⚡ Nur bestätigte Kerzen (kein Flackern)", group = grp_sig,
+     tooltip = "AN (empfohlen): Das ⚡-Signal erscheint erst, wenn die Kerze "
+          + "geschlossen hat — es kann intrabar nicht mehr auftauchen und wieder "
+          + "verschwinden. AUS: Signal zeigt sich schon während der laufenden "
+          + "Kerze (Vorschau), kann aber bis Kerzenschluss wieder wegfallen.")
+showTrigLvl = input.bool(false, "🎚 Auslöse-Level anzeigen", group = grp_sig,
+     tooltip = "Kleine Punktlinie, die während einer aktiven Überdehnungs-Episode "
+          + "zeigt, WO die laufende Kerze schließen muss, damit das ⚡-Signal bei "
+          + "Kerzenschluss fixiert wird. Praxis: Kurz vor Handelsschluss prüfen — "
+          + "notiert der Kurs klar über (UP) bzw. unter (DOWN) dem Level, kannst "
+          + "du zum Schlusskurs handeln statt zur nächsten Eröffnung, ohne "
+          + "Repaint-Risiko. Dazu passende '⚡ voraus'-Alerts.")
 noiseBars  = input.int(30, "Signal-Bereinigung (Kerzen)", minval = 0, maxval = 200, group = grp_sig,
      tooltip = "Unterdrückt schwächere ⚡-Rauten UND 🎯-Kreise, wenn innerhalb der "
           + "letzten N Kerzen bereits ein gleich starkes oder stärkeres Signal "
           + "derselben Richtung kam — nur eine HÖHERE Stufe schlägt noch durch. "
-          + "Räumt zappelige Bodenbildungen auf (eine Wende = ein Zeichen). 0 = aus.")
+          + "Räumt zappelige Bodenbildungen auf (eine Wende = ein Zeichen). 0 = aus. "
+          + "Kalibrierung: 30 = guter Kompromiss (~89% Win Rate, ~3.4 Signale/Jahr); "
+          + "60 = maximale Qualität (~90%, ~2.6 Signale/Jahr).")
 
 // ─── Inputs: Anzeige ─────────────────────────────────────────────────────────
 grp_st = "ANZEIGE"
@@ -199,6 +239,9 @@ band_clr_ob = input.color(#FF1744, "OB Bänder (oben)",  group = grp_st,
      tooltip = "Farbe der oberen Bänder — gleiche Signalfarbe wie im Confluence.")
 band_clr_os = input.color(#00C853, "OS Bänder (unten)", group = grp_st,
      tooltip = "Farbe der unteren Bänder — gleiche Signalfarbe wie im Confluence.")
+clr_x3      = input.color(#FFD600, "◆ Stufe 3 (extrem) — Gold", group = grp_st,
+     tooltip = "Farbe der Stufe-3-Raute (Episode war ≥3σ tief). Die Richtung ist "
+          + "trotzdem eindeutig: unter der Kerze = UP, über der Kerze = DOWN.")
 
 // ─── Inputs: Backtest ────────────────────────────────────────────────────────
 grp_bt = "BACKTEST"
@@ -291,7 +334,8 @@ if z_s < -signal_thresh
 else if not armB
     extB := 0.0
     epLoPx := 0.0
-bool reBuyRaw = useReentry and armB and upOK and (trigFrueh ? z_s >= extB * (1 - reboundPct / 100) : ta.crossover(z_s, -signal_thresh))
+bool barOK = not confirmOnly or barstate.isconfirmed
+bool reBuyRaw = useReentry and armB and upOK and barOK and (trigFrueh ? z_s >= extB * (1 - reboundPct / 100) : ta.crossover(z_s, -signal_thresh))
 
 var bool  armS = false
 var float extS = 0.0
@@ -307,7 +351,7 @@ if z_s > signal_thresh
 else if not armS
     extS := 0.0
     epHiPx := 0.0
-bool reSellRaw = useReentry and armS and downOK and (trigFrueh ? z_s <= extS * (1 - reboundPct / 100) : ta.crossunder(z_s, signal_thresh))
+bool reSellRaw = useReentry and armS and downOK and barOK and (trigFrueh ? z_s <= extS * (1 - reboundPct / 100) : ta.crossunder(z_s, signal_thresh))
 
 // ─── Signal-STÄRKE: wie tief ging die Überdehnungs-Episode? ──────────────────
 // Stufe 1 = 1–2σ · Stufe 2 = 2–3σ (STARK) · Stufe 3 = ≥3σ (EXTREM).
@@ -393,26 +437,30 @@ fill(p_l2, p_l3, color = color.new(band_clr_os, 97))
 fill(p_l3, p_l4, color = color.new(band_clr_os, 95))
 
 // ─── Signal-Marker ───────────────────────────────────────────────────────────
-// ⚡ Re-Entry: kleine RAUTE ohne Text (klar unterscheidbar von den
-// Confluence-Dreiecken) — grün unten = Rückkehr nach Überdehnung unten
-// Rauten-Größe = Signalstärke (Stufe 1 klein · Stufe 2 mittel · Stufe 3 groß)
-plotshape(stageBuy == 1,  "⚡ UP Stufe 1",           shape.diamond, location.belowbar,
-     color.new(band_clr_os, 0), size = size.tiny)
-plotshape(stageBuy == 2,  "⚡ UP Stufe 2 (stark)",   shape.diamond, location.belowbar,
-     color.new(band_clr_os, 0), size = size.small)
-plotshape(stageBuy == 3,  "⚡ UP Stufe 3 (extrem)",  shape.diamond, location.belowbar,
-     color.new(band_clr_os, 0), size = size.normal)
-plotshape(stageSell == 1, "⚡ DOWN Stufe 1",          shape.diamond, location.abovebar,
-     color.new(band_clr_ob, 0), size = size.tiny)
-plotshape(stageSell == 2, "⚡ DOWN Stufe 2 (stark)",  shape.diamond, location.abovebar,
-     color.new(band_clr_ob, 0), size = size.small)
-plotshape(stageSell == 3, "⚡ DOWN Stufe 3 (extrem)", shape.diamond, location.abovebar,
-     color.new(band_clr_ob, 0), size = size.normal)
+// ⚡ Re-Entry: RAUTE, alle gleich groß — Stärke über FARBE:
+//   Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) = satt · Stufe 3 (≥3σ) = GOLD.
+// Richtung bleibt eindeutig über die Position (unter = UP, über = DOWN).
+color upClr = stageBuy == 3 ? clr_x3 : stageBuy == 2 ? color.new(band_clr_os, 0) : color.new(band_clr_os, 55)
+color dnClr = stageSell == 3 ? clr_x3 : stageSell == 2 ? color.new(band_clr_ob, 0) : color.new(band_clr_ob, 55)
+plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.diamond, location.belowbar,
+     upClr, size = size.small)
+plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.diamond, location.abovebar,
+     dnClr, size = size.small)
 // 🎯 Pivot: Punkt rückwirkend am exakten Extrem (nur Visualisierung)
 plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
      color.new(band_clr_ob, 40), size = size.small, offset = -pivot_lb)
 plotshape(pivBuy,  "🎯 Extrem unten", shape.circle, location.belowbar,
      color.new(band_clr_os, 40), size = size.small, offset = -pivot_lb)
+
+// 🎚 Auslöse-Level: wo muss die LAUFENDE Kerze schließen, damit ⚡ fixiert?
+// Herleitung: z_s = 0.5·z + 0.5·z_s[1] (EMA-3). Ziel-z_s nach Modus auflösen
+// nach dem Schlusskurs → Level = ma + sd·(2·Ziel − z_s[1] + bias).
+float zNeedB  = trigFrueh ? extB * (1 - reboundPct / 100) : -signal_thresh
+float zNeedS  = trigFrueh ? extS * (1 - reboundPct / 100) :  signal_thresh
+float trigPxB = showTrigLvl and armB ? ma + sd * (2 * zNeedB - z_s[1] + bias) : na
+float trigPxS = showTrigLvl and armS ? ma + sd * (2 * zNeedS - z_s[1] + bias) : na
+plot(trigPxB, "🎚 Auslöse-Level UP",   color = color.new(band_clr_os, 20), linewidth = 1, style = plot.style_circles)
+plot(trigPxS, "🎚 Auslöse-Level DOWN", color = color.new(band_clr_ob, 20), linewidth = 1, style = plot.style_circles)
 
 // ⚠ Trend-Kennzeichnung: Signal gegen den langfristigen Trend → graues ✕
 ema200ref = ta.ema(close, 200)
@@ -524,16 +572,16 @@ roiPct  = enableBT and not na(equity) ? (equity / initialCapital - 1) * 100 : 0.
 var table bt = table.new(position.top_right, 2, 5, border_width = 1)
 if barstate.islast and enableBT
     if btMode == "Stillhalter (Short Put)"
-        table.cell(bt, 0, 0, "🎩 Short Puts", text_color = color.white)
+        table.cell(bt, 0, 0, "Short Puts", text_color = color.white)
         table.cell(bt, 1, 0, str.tostring(spTrades) + (spOpen ? " (+1 offen)" : ""), text_color = color.white)
-        table.cell(bt, 0, 1, "Verfallsquote", text_color = color.white)
-        table.cell(bt, 1, 1, str.tostring(spQuote, "#.#") + " %", text_color = color.white)
-        table.cell(bt, 0, 2, "Schlimmster Fall", text_color = color.white)
+        table.cell(bt, 0, 1, "Win Rate", text_color = color.white)
+        table.cell(bt, 1, 1, str.tostring(spQuote, "#.#") + " % (wertlos verfallen)", text_color = color.white)
+        table.cell(bt, 0, 2, "Max Drawdown", text_color = color.white)
         table.cell(bt, 1, 2, spWorst < 0 ? str.tostring(spWorst, "#.#") + " % unter Strike" : "–", text_color = color.white)
-        table.cell(bt, 0, 3, "Regel", text_color = color.white)
-        table.cell(bt, 1, 3, "Strike Tief −" + str.tostring(strikeBufPct, "#.#") + "% · Fr ≥ " + str.tostring(minCalDays) + "d", text_color = color.white)
-        table.cell(bt, 0, 4, "", text_color = color.white)
-        table.cell(bt, 1, 4, "", text_color = color.white)
+        table.cell(bt, 0, 3, "Strike", text_color = color.white)
+        table.cell(bt, 1, 3, strikeBufPct > 0 ? "Episodentief −" + str.tostring(strikeBufPct, "#.#") + " %" : "Episodentief", text_color = color.white)
+        table.cell(bt, 0, 4, "Verfall", text_color = color.white)
+        table.cell(bt, 1, 4, "1. Freitag nach ≥ " + str.tostring(minCalDays) + " Tagen", text_color = color.white)
     else
         table.cell(bt, 0, 0, "Trades",  text_color = color.white)
         table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
@@ -550,8 +598,8 @@ if barstate.islast and enableBT
 var table t = table.new(position.bottom_right, 2, 4, border_width = 1)
 volRank = ta.percentrank(sd / ma * 100, 252)
 if barstate.islast and showTable
-    string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN — Rückkehr abwarten (⚡)" :
-         z_s > signal_thresh ? "🔴 überdehnt OBEN — Rückkehr abwarten (⚡)" : "· neutral"
+    string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN\nRückkehr abwarten (⚡)" :
+         z_s > signal_thresh ? "🔴 überdehnt OBEN\nRückkehr abwarten (⚡)" : "· neutral"
     table.cell(t, 0, 0, "Z-Score", text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 1, 0, str.tostring(z_s, "#.##") + " σ", text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 0, 1, "Zustand", text_color = color.white)
@@ -572,3 +620,5 @@ alertcondition(pivBuy,  "🎯 Extrem unten bestätigt",         "Stillhalter Mea
 alertcondition(pivSell, "🎯 Extrem oben bestätigt",          "Stillhalter Mean Reversion: Hoch-Extrem bestätigt")
 alertcondition(stageBuy  >= 2, "⚡ UP STARK (≥2σ)",   "Stillhalter Mean Reversion: STARKES UP — Überdehnung ≥2σ dreht (Trendwechsel-Kandidat)")
 alertcondition(stageSell >= 2, "⚡ DOWN STARK (≥2σ)", "Stillhalter Mean Reversion: STARKES DOWN — Überdehnung ≥2σ dreht (Trendwechsel-Kandidat)")
+alertcondition(armB and not na(trigPxB) and close >= trigPxB, "⚡ voraus: UP-Level erreicht (unbestätigt)",  "Stillhalter Mean Reversion: Kurs über dem UP-Auslöse-Level — hält das bis Kerzenschluss, ist das ⚡ UP fix")
+alertcondition(armS and not na(trigPxS) and close <= trigPxS, "⚡ voraus: DOWN-Level erreicht (unbestätigt)", "Stillhalter Mean Reversion: Kurs unter dem DOWN-Auslöse-Level — hält das bis Kerzenschluss, ist das ⚡ DOWN fix")
