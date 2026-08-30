@@ -2,10 +2,16 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v2.1.1
+//  Stillhalter Community® – MEAN REVERSION v2.2
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v2.1.1 — SMA-vs-EMA-Aussage korrigiert (Nachmessung):
+//  NEU in v2.2 — GEHEIMHALTUNG in den Tooltips (Standing-Regel):
+//   • Alle i-Hilfen entschärft: Sie erklären weiterhin, WAS eine
+//     Einstellung bewirkt und wie man sie nutzt — aber keine
+//     Kalibrierwerte, Studienzahlen, Formeln oder Modell-Querbezüge
+//     mehr, mit denen jemand den Indikator per KI nachbauen könnte.
+//     Das Rezept steht nur noch hier im Quellcode (Changelog unten).
+//  v2.1.1 — SMA-vs-EMA-Aussage korrigiert (Nachmessung):
 //   • Mit der aktuellen Stillhalter-Metrik (Short-Put-Winrate, Strike
 //     Episodentief −2%, 10-Tage-Verfall, 16 Aktien ab 2010) ist der
 //     Abstand KLEIN: SMA im Mittel 91.1% vs. EMA 90.3%, SMA gewinnt
@@ -156,7 +162,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v2.1.1", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v2.2", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -165,46 +171,36 @@ trading_style  = input.string("neutral", "Trading Style", options = ["neutral", 
      tooltip = "Verschiebt die Bänder leicht: bullish = Kauf-Seite kommt früher dran "
           + "(Bänder etwas tiefer), bearish umgekehrt. Neutral = Standard.")
 ma_basis       = input.string("SMA", "Basis (Mittellinie)", options = ["SMA", "EMA"], group = grp_mr,
-     tooltip = "SMA = Standard: In der Stillhalter-Kalibrierung (Short-Put-Winrate, "
-          + "16 Aktien ab 2010) liegt der SMA im Mittel ~1 Punkt vor dem EMA "
-          + "(91.1% vs. 90.3%) und gewinnt 9 von 12 getesteten Konfigurationen — "
-          + "ein kleiner, aber konsistenter Vorsprung. Beide Basen sind brauchbar; "
-          + "der SMA ist der ruhigere Anker, der EMA reagiert etwas schneller.")
+     tooltip = "SMA = Standard (datenbasiert bestätigt): der ruhigere Anker für "
+          + "die Überdehnungs-Messung. Der EMA reagiert etwas schneller, ist aber "
+          + "auch nervöser. Beide sind brauchbar.")
 noise_suppress = input.int(40, "Basis-Länge (Kerzen)", minval = 5, maxval = 100, group = grp_mr,
-     tooltip = "Anzahl Kerzen für Durchschnitt und Standardabweichung. 40 = Standard "
-          + "(Raster-Studie: präziseste Signale bei nur ~12 Signalen/Jahr — die "
-          + "Mean Reversion bleibt der seltene Ausnahme-Marker). Identisch zur "
-          + "Mean-Reversion-Komponente im Stillhalter Confluence.")
+     tooltip = "Anzahl Kerzen für Durchschnitt und Schwankungsmaß. Kürzer = "
+          + "empfindlicher und mehr Signale, länger = ruhiger und seltener. "
+          + "Der Standardwert ist datenbasiert kalibriert.")
 signal_thresh  = input.float(0.75, "Signal-Schwelle (×SD)", minval = 0.5, maxval = 4.0, step = 0.05, group = grp_mr,
-     tooltip = "Ab wie vielen Standardabweichungen der Kurs als überdehnt gilt. "
-          + "0.75 = neuer Standard aus der Stillhalter-Kalibrierung (16 Aktien, "
-          + "ab 2010, simulierte Short Puts am Episodentief): ~89% Win Rate vs. "
-          + "~85% bei 1.0 — die etwas empfindlichere Schwelle findet mehr saubere "
-          + "Böden, ohne die Qualität zu verwässern. Höhere Schwellen waren "
-          + "durchweg schlechter.")
+     tooltip = "Ab wann der Kurs als überdehnt gilt. Kleinere Werte reagieren "
+          + "empfindlicher (mehr Signale), größere sind strenger (seltener). "
+          + "Der Standardwert ist datenbasiert kalibriert.")
 
 // ─── Inputs: Signale ─────────────────────────────────────────────────────────
 grp_sig = "SIGNALE"
 useReentry = input.bool(true, "⚡ Wende-Signale (Rauten) anzeigen", group = grp_sig,
-     tooltip = "◆-Raute, sobald die Rückkehr zum Mittelwert beginnt — live mit "
+     tooltip = "Pfeil, sobald die Rückkehr zum Mittelwert beginnt — mit "
           + "Kerzenschluss, Auslöser wählbar (siehe '⚡ Signal-Auslöser').")
 trigMode   = input.string("Früh (Abprall vom Extrem)", "⚡ Signal-Auslöser",
      options = ["Klassisch (Rückkehr über Schwelle)", "Früh (Abprall vom Extrem)"], group = grp_sig,
-     tooltip = "Klassisch = der Z-Score erobert die ±1σ-Linie zurück. Studie: 88% "
-          + "Präzision, aber ~4 Kerzen nach dem Tief — die Rückeroberung ist ein "
-          + "eingebauter Qualitätsfilter. "
-          + "Früh = Signal schon beim Abprall vom Episoden-Extrem (siehe "
-          + "'Wende-Bestätigung') — ~2 Kerzen früher und nahe am Maximum, dafür "
-          + "~76% Präzision. Empfehlung Früh-Modus: nur mit Confluence-Bestätigung "
-          + "und ab Stufe 2 handeln.")
+     tooltip = "Klassisch = Signal erst, wenn die Erholung die Überdehnungszone "
+          + "wieder verlassen hat — der strengere Qualitätsfilter, dafür später. "
+          + "Früh = Signal schon beim Abprall vom Extrem — früher dran, dafür "
+          + "etwas mehr Fehlsignale. Empfehlung: Früh-Signale mit den anderen "
+          + "Stillhalter-Indikatoren bestätigen.")
 reboundPct = input.float(30, "Wende-Bestätigung im Früh-Modus (% der Episodentiefe)", minval = 10,
      maxval = 70, step = 5, group = grp_sig,
-     tooltip = "Nur im Früh-Modus: Wie viel Prozent des Rückwegs vom Episoden-Extrem "
-          + "zum Mittelwert geschafft sein müssen, damit die Wende als begonnen "
-          + "gilt. PROZENTUAL, damit der Auslöser über alle Stufen fair ist: Eine "
-          + "tiefe Episode feuert entsprechend tiefer, eine flache später. "
-          + "30% = gemessener Kompromiss (kleiner = früher aber fehleranfälliger, "
-          + "größer = näher am Klassisch-Verhalten).")
+     tooltip = "Nur im Früh-Modus: Wie viel der Erholung vom Extrem geschafft sein "
+          + "muss, damit die Wende als begonnen gilt. Kleiner = früher, aber "
+          + "fehleranfälliger; größer = näher am Klassisch-Verhalten. Der "
+          + "Standardwert ist datenbasiert kalibriert.")
 usePivot   = input.bool(true, "🎯 Pivot-Signale (exaktes Extrem, bestätigt)", group = grp_sig,
      tooltip = "Punkt am exakten Hoch/Tief der Überdehnung — wird aber erst "
           + "N Kerzen später bestätigt (der Punkt erscheint rückwirkend am Extrem). "
@@ -244,9 +240,8 @@ noiseBars  = input.int(30, "Signal-Bereinigung (Kerzen)", minval = 0, maxval = 2
      tooltip = "Unterdrückt schwächere ⚡-Rauten UND 🎯-Kreise, wenn innerhalb der "
           + "letzten N Kerzen bereits ein gleich starkes oder stärkeres Signal "
           + "derselben Richtung kam — nur eine HÖHERE Stufe schlägt noch durch. "
-          + "Räumt zappelige Bodenbildungen auf (eine Wende = ein Zeichen). 0 = aus. "
-          + "Kalibrierung: 30 = guter Kompromiss (~89% Win Rate, ~3.4 Signale/Jahr); "
-          + "60 = maximale Qualität (~90%, ~2.6 Signale/Jahr).")
+          + "Räumt zappelige Bodenbildungen auf (eine Wende = ein Zeichen). "
+          + "0 = aus. Höhere Werte = weniger, dafür hochwertigere Signale.")
 
 // ─── Inputs: Anzeige ─────────────────────────────────────────────────────────
 grp_st = "ANZEIGE"
@@ -290,19 +285,15 @@ strikeBufPct = input.float(2.0, "Strike-Puffer unter Episodentief (%)", minval =
      tooltip = "Abstand des Strikes von der Episoden-Extremmarke: Put so viele "
           + "Prozent UNTER dem Episodentief, Call so viele Prozent ÜBER dem "
           + "Episodenhoch. Gilt für den 🎩-Backtest und die 📍 Strike-Referenz. "
-          + "Studie: Jeder Prozent Puffer hebt die Win Rate, ohne die Verlust-"
-          + "tiefe zu erhöhen — 0% = 85% · 2% = 90% · 3% = 92% · 5% = 95% "
-          + "(Früh-Auslöser, 10-Tage-Verfall). 2% = Standard (bestes Chance-"
-          + "Risiko-Verhältnis), 5% = Maximum-Sicherheit bei magerer Prämie.")
+          + "Mehr Puffer = höhere Trefferquote bei weniger Prämie; der "
+          + "Standardwert ist datenbasiert kalibriert.")
 minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5, maxval = 45,
      group = grp_bt,
      tooltip = "Nur Stillhalter-Modus: Der Verfall ist der erste FREITAG, der "
           + "mindestens so viele Kalendertage nach dem Einstieg liegt. Standard 10 "
-          + "= in der Regel der Freitag der übernächsten Woche — garantiert mit "
-          + "mindestens einem Wochenende Laufzeit. Studie: Kurz gewinnt doppelt — "
-          + "5 Tage = 93% · 10 = 90% · 17 = 88% · 31 = 84% Win Rate, und die "
-          + "Verlusttiefe steigt mit der Laufzeit. Über ~2 Wochen hinaus ist "
-          + "Zeit der Feind des Stillhalters.")
+          + "= in der Regel der Freitag der übernächsten Woche — immer mit "
+          + "mindestens einem Wochenende Laufzeit. Kürzere Laufzeiten sind für "
+          + "diesen Ansatz tendenziell vorteilhaft.")
 btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-Entry", "Pivot"], group = grp_bt,
      tooltip = "Welche Signale der Backtest handelt. Hinweis: Pivot-Signale werden "
           + "erst N Kerzen nach dem Extrem bestätigt — gehandelt wird ehrlich "
