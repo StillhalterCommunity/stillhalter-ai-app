@@ -2,10 +2,22 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v2.2
+//  Stillhalter Community® – MEAN REVERSION v2.3
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v2.2 — GEHEIMHALTUNG in den Tooltips (Standing-Regel):
+//  NEU in v2.3 — Sichtbare Marker + Pivot-Lookback-Studie:
+//   • ⚡ Signale jetzt als MARKER-PIN (labelup/labeldown) statt der zu
+//     kleinen Pfeile — deutlich sichtbar auch ohne Zoom, zeigt in die
+//     Signalrichtung, Farbstufung unverändert (blass/satt/GOLD).
+//   • PIVOT-LOOKBACK-STUDIE (16 Aktien ab 2010, ~1600-2400 Pivots):
+//     Qualität steigt stetig mit dem Lookback — lb3: 87.0% Winrate /
+//     53.1% 'Tief hielt danach' · lb4: 87.7% / 57.2% · lb5: 88.1% /
+//     58.3% · lb6: 88.9% / 60.6%. Der Schritt 5→4 kostet nur ~0.4
+//     Punkte und bringt EINEN TAG frühere Bestätigung → 4 = neuer
+//     Standard. 3 kostet spürbar (−1.1 Punkte Winrate, −5 Punkte
+//     Tief-Qualität) — nicht empfohlen. Die Pivot-Vorschau (v2.1)
+//     zeigt das Entstehen ohnehin schon live.
+//  v2.2 — GEHEIMHALTUNG in den Tooltips (Standing-Regel):
 //   • Alle i-Hilfen entschärft: Sie erklären weiterhin, WAS eine
 //     Einstellung bewirkt und wie man sie nutzt — aber keine
 //     Kalibrierwerte, Studienzahlen, Formeln oder Modell-Querbezüge
@@ -162,7 +174,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v2.2", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v2.3", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -205,9 +217,11 @@ usePivot   = input.bool(true, "🎯 Pivot-Signale (exaktes Extrem, bestätigt)",
      tooltip = "Punkt am exakten Hoch/Tief der Überdehnung — wird aber erst "
           + "N Kerzen später bestätigt (der Punkt erscheint rückwirkend am Extrem). "
           + "Gut zum Lernen/Analysieren, für Live-Entscheidungen ⚡ nutzen.")
-pivot_lb   = input.int(5, "Pivot Lookback", minval = 2, maxval = 20, group = grp_sig,
+pivot_lb   = input.int(4, "Pivot Lookback", minval = 2, maxval = 20, group = grp_sig,
      tooltip = "Ein Extrem gilt erst als Pivot, wenn links UND rechts so viele Kerzen "
-          + "weniger extrem sind. Größer = markantere Extreme, spätere Bestätigung.")
+          + "weniger extrem sind. Kleiner = frühere Bestätigung, aber mehr Fehl-"
+          + "Extreme; größer = markantere Extreme, spätere Bestätigung. Der "
+          + "Standardwert ist datenbasiert kalibriert.")
 trendFilt  = input.string("Aus", "Trend-Filter", options = ["Aus", "EMA 50", "EMA 200"], group = grp_sig,
      tooltip = "UP-Signale nur OBERHALB, DOWN-Signale nur UNTERHALB der gewählten "
           + "EMA. Verhindert Kauf-Signale im intakten Abwärtstrend ('fallendes "
@@ -471,16 +485,17 @@ fill(p_l2, p_l3, color = color.new(band_clr_os, 97))
 fill(p_l3, p_l4, color = color.new(band_clr_os, 95))
 
 // ─── Signal-Marker ───────────────────────────────────────────────────────────
-// ⚡ Re-Entry: dezenter PFEIL (↑ unter der Kerze = UP · ↓ über der Kerze =
-// DOWN) — Stärke über FARBE: Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) =
-// satt · Stufe 3 (≥3σ) = GOLD. Unauffälliger als Rauten und klar
-// unterscheidbar von den Confluence-Dreiecken und den 🎯-Punkten.
+// ⚡ Re-Entry: MARKER-PIN (labelup zeigt nach oben unter der Kerze = UP ·
+// labeldown zeigt nach unten über der Kerze = DOWN) — gut sichtbar ohne
+// Zoom. Stärke über FARBE: Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) =
+// satt · Stufe 3 (≥3σ) = GOLD. Klar unterscheidbar von den Confluence-
+// Dreiecken und den 🎯-Punkten.
 color upClr = stageBuy == 3 ? clr_x3 : stageBuy == 2 ? color.new(band_clr_os, 0) : color.new(band_clr_os, 55)
 color dnClr = stageSell == 3 ? clr_x3 : stageSell == 2 ? color.new(band_clr_ob, 0) : color.new(band_clr_ob, 55)
-plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.arrowup, location.belowbar,
-     upClr, size = size.small)
-plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.arrowdown, location.abovebar,
-     dnClr, size = size.small)
+plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.labelup, location.belowbar,
+     upClr, size = size.tiny)
+plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.labeldown, location.abovebar,
+     dnClr, size = size.tiny)
 // 🎯 Pivot: Punkt rückwirkend am exakten Extrem (nur Visualisierung)
 plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
      color.new(band_clr_ob, 40), size = size.small, offset = -pivot_lb)
