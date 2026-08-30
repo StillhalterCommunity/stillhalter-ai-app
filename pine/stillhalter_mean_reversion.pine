@@ -2,10 +2,18 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v2.3
+//  Stillhalter Community® – MEAN REVERSION v2.4
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v2.3 — Sichtbare Marker + Pivot-Lookback-Studie:
+//  NEU in v2.4 — WEISSE DREIECKE für Re-Entry (Feedback):
+//   • ⚡ Signale jetzt als kleine DREIECKE in einer EIGENEN Farbe
+//     (Standard WEISS) — bewusst anders als das Rot/Grün, das im Chart
+//     schon überall vertreten ist. Richtung: ▲ unter der Kerze = UP,
+//     ▼ über der Kerze = DOWN. Stärke über TRANSPARENZ: Stufe 1 =
+//     stark abgeschwächt · Stufe 2 = halbtransparent · Stufe 3 = voll.
+//     Farbe frei wählbar (z. B. Silber/Gold statt Weiß).
+//   • Optionale Beschriftung 'Re-Entry' an den Dreiecken (Standard aus).
+//  v2.3 — Sichtbare Marker + Pivot-Lookback-Studie:
 //   • ⚡ Signale jetzt als MARKER-PIN (labelup/labeldown) statt der zu
 //     kleinen Pfeile — deutlich sichtbar auch ohne Zoom, zeigt in die
 //     Signalrichtung, Farbstufung unverändert (blass/satt/GOLD).
@@ -174,7 +182,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v2.3", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v2.4", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -278,9 +286,14 @@ band_clr_ob = input.color(#FF1744, "OB Bänder (oben)",  group = grp_st,
      tooltip = "Farbe der oberen Bänder — gleiche Signalfarbe wie im Confluence.")
 band_clr_os = input.color(#00C853, "OS Bänder (unten)", group = grp_st,
      tooltip = "Farbe der unteren Bänder — gleiche Signalfarbe wie im Confluence.")
-clr_x3      = input.color(#FFD600, "◆ Stufe 3 (extrem) — Gold", group = grp_st,
-     tooltip = "Farbe der Stufe-3-Raute (Episode war ≥3σ tief). Die Richtung ist "
-          + "trotzdem eindeutig: unter der Kerze = UP, über der Kerze = DOWN.")
+clr_sig     = input.color(color.white, "⚡ Signalfarbe (Dreiecke)", group = grp_st,
+     tooltip = "Farbe der ⚡-Dreiecke — bewusst eine EIGENE Farbe (Standard Weiß), "
+          + "damit sie sich von den grün/roten Bändern und anderen Indikatoren "
+          + "abhebt. Die Signalstärke steuert die Transparenz: Stufe 1 = stark "
+          + "abgeschwächt · Stufe 2 = halbtransparent · Stufe 3 = voll deckend.")
+showSigText = input.bool(false, "'Re-Entry' Beschriftung an den Signalen", group = grp_st,
+     tooltip = "Schreibt 'Re-Entry' klein an jedes ⚡-Dreieck. Standard aus — "
+          + "für Charts, auf denen die Bedeutung nicht sofort klar ist.")
 
 // ─── Inputs: Backtest ────────────────────────────────────────────────────────
 grp_bt = "BACKTEST"
@@ -485,17 +498,21 @@ fill(p_l2, p_l3, color = color.new(band_clr_os, 97))
 fill(p_l3, p_l4, color = color.new(band_clr_os, 95))
 
 // ─── Signal-Marker ───────────────────────────────────────────────────────────
-// ⚡ Re-Entry: MARKER-PIN (labelup zeigt nach oben unter der Kerze = UP ·
-// labeldown zeigt nach unten über der Kerze = DOWN) — gut sichtbar ohne
-// Zoom. Stärke über FARBE: Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) =
-// satt · Stufe 3 (≥3σ) = GOLD. Klar unterscheidbar von den Confluence-
-// Dreiecken und den 🎯-Punkten.
-color upClr = stageBuy == 3 ? clr_x3 : stageBuy == 2 ? color.new(band_clr_os, 0) : color.new(band_clr_os, 55)
-color dnClr = stageSell == 3 ? clr_x3 : stageSell == 2 ? color.new(band_clr_ob, 0) : color.new(band_clr_ob, 55)
-plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.labelup, location.belowbar,
+// ⚡ Re-Entry: kleines DREIECK in eigener Farbe (Standard WEISS — hebt
+// sich vom Rot/Grün der Bänder und der anderen Indikatoren ab).
+// ▲ unter der Kerze = UP · ▼ über der Kerze = DOWN.
+// Stärke über TRANSPARENZ: Stufe 1 = stark abgeschwächt · Stufe 2 =
+// halbtransparent · Stufe 3 = voll deckend.
+color upClr = color.new(clr_sig, stageBuy == 3 ? 0 : stageBuy == 2 ? 35 : 65)
+color dnClr = color.new(clr_sig, stageSell == 3 ? 0 : stageSell == 2 ? 35 : 65)
+plotshape(stageBuy > 0 and not showSigText,  "⚡ UP",          shape.triangleup,   location.belowbar,
      upClr, size = size.tiny)
-plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.labeldown, location.abovebar,
+plotshape(stageSell > 0 and not showSigText, "⚡ DOWN",        shape.triangledown, location.abovebar,
      dnClr, size = size.tiny)
+plotshape(stageBuy > 0 and showSigText,  "⚡ UP (Text)",   shape.triangleup,   location.belowbar,
+     upClr, size = size.tiny, text = "Re-Entry", textcolor = upClr)
+plotshape(stageSell > 0 and showSigText, "⚡ DOWN (Text)", shape.triangledown, location.abovebar,
+     dnClr, size = size.tiny, text = "Re-Entry", textcolor = dnClr)
 // 🎯 Pivot: Punkt rückwirkend am exakten Extrem (nur Visualisierung)
 plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
      color.new(band_clr_ob, 40), size = size.small, offset = -pivot_lb)
