@@ -2,10 +2,32 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – MEAN REVERSION v2.0
+//  Stillhalter Community® – MEAN REVERSION v2.1
 //  Als ERGÄNZUNG zu Trend Model · MACD Pro · Dual Stochastik · Confluence.
 //
-//  NEU in v2.0 — Feedback-Paket (Farben statt Größen, Live-Klarheit):
+//  NEU in v2.1 — Feinschliff nach Feedback + Strike-/Laufzeit-Studie:
+//   • ⚡ Signale jetzt als dezente PFEILE statt Rauten (↑ unter der Kerze
+//     = UP, ↓ über der Kerze = DOWN) — Farbstufung bleibt (blass/satt/
+//     GOLD), unauffälliger und klar getrennt von Confluence-Dreiecken.
+//   • 🎯 PIVOT-VORSCHAU: durchsichtiger Punkt am bisherigen Episoden-
+//     Extrem, solange die Episode läuft — man sieht das Entstehen,
+//     bevor der satte Punkt es nach 'Pivot Lookback' Kerzen bestätigt.
+//   • Früh-Auslöser jetzt Standard (harmoniert besser mit Trend Model,
+//     Dual Stochastik & MACD Pro, die ebenfalls früh drehen).
+//   • Status-Tabelle einzeilig und ohne Emojis (nur Prämien-Zeile
+//     behält ihre Ampel).
+//   • STRIKE-/LAUFZEIT-STUDIE (16 Aktien ab 2010, ~950 Short Puts je
+//     Zelle, Früh-Auslöser): Jeder Prozent Strike-Puffer unterm
+//     Episodentief hebt die Win Rate spürbar, OHNE die Verlusttiefe zu
+//     erhöhen (bleibt ~4–5%): 0% Puffer = 85% · 2% = 90% · 3% = 92% ·
+//     5% = 95% (bei 10-Tage-Verfall). 2% = neuer Standard (bestes
+//     Chance-Risiko: +5 Punkte Win Rate für ~1 Punkt weniger Prämien-
+//     abstand). LAUFZEIT: kurz gewinnt doppelt — 5 Tage: 93% · 10: 90% ·
+//     17: 88% · 31: 84%, und die Verlusttiefe steigt mit der Laufzeit
+//     (3% → 6%). Über ~2 Wochen hinaus ist Zeit der Feind: weniger
+//     Trefferquote UND tiefere Verletzungen. Empfehlung: Verfall
+//     5–10 Tage, Strike 2–3% unterm Episodentief.
+//  v2.0 — Feedback-Paket (Farben statt Größen, Live-Klarheit):
 //   • ◆ RAUTEN: alle gleich groß, Stärke jetzt über FARBE — Stufe 1 =
 //     blass (grün/rot), Stufe 2 = satt, Stufe 3 = GOLD (extrem; Richtung
 //     ergibt sich aus der Position unter/über der Kerze).
@@ -127,7 +149,7 @@
 //   • Parameter identisch zur MR-Komponente im Confluence (Länge 30,
 //     EMA-3-Glättung, ±1σ) — was hier ⚡ zeigt, zählt dort als Punkt.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Mean Reversion v2.0", shorttitle = "Stillhalter Mean Reversion",
+indicator("Stillhalter Mean Reversion v2.1", shorttitle = "Stillhalter Mean Reversion",
      overlay = true, max_bars_back = 500)
 
 // ─── Inputs: Mean Revert Settings ────────────────────────────────────────────
@@ -158,7 +180,7 @@ grp_sig = "SIGNALE"
 useReentry = input.bool(true, "⚡ Wende-Signale (Rauten) anzeigen", group = grp_sig,
      tooltip = "◆-Raute, sobald die Rückkehr zum Mittelwert beginnt — live mit "
           + "Kerzenschluss, Auslöser wählbar (siehe '⚡ Signal-Auslöser').")
-trigMode   = input.string("Klassisch (Rückkehr über Schwelle)", "⚡ Signal-Auslöser",
+trigMode   = input.string("Früh (Abprall vom Extrem)", "⚡ Signal-Auslöser",
      options = ["Klassisch (Rückkehr über Schwelle)", "Früh (Abprall vom Extrem)"], group = grp_sig,
      tooltip = "Klassisch = der Z-Score erobert die ±1σ-Linie zurück. Studie: 88% "
           + "Präzision, aber ~4 Kerzen nach dem Tief — die Rückeroberung ist ein "
@@ -255,19 +277,24 @@ btMode     = input.string("Aktie (Long)", "🎩 Backtest-Modus", options = ["Akt
           + "Strike unter dem Episodentief (siehe Puffer), Verfall am ersten "
           + "Freitag nach der Mindest-Laufzeit — die Tabelle zeigt die "
           + "VERFALLSQUOTE, deine wichtigste Kennzahl.")
-strikeBufPct = input.float(0.0, "Strike-Puffer unter Episodentief (%)", minval = 0.0, maxval = 10.0,
+strikeBufPct = input.float(2.0, "Strike-Puffer unter Episodentief (%)", minval = 0.0, maxval = 10.0,
      step = 0.5, group = grp_bt,
      tooltip = "Abstand des Strikes von der Episoden-Extremmarke: Put so viele "
           + "Prozent UNTER dem Episodentief, Call so viele Prozent ÜBER dem "
           + "Episodenhoch. Gilt für den 🎩-Backtest und die 📍 Strike-Referenz. "
-          + "0 = Strike genau am Extrem (streng), 2–3 = realistischer "
-          + "Sicherheitsabstand.")
+          + "Studie: Jeder Prozent Puffer hebt die Win Rate, ohne die Verlust-"
+          + "tiefe zu erhöhen — 0% = 85% · 2% = 90% · 3% = 92% · 5% = 95% "
+          + "(Früh-Auslöser, 10-Tage-Verfall). 2% = Standard (bestes Chance-"
+          + "Risiko-Verhältnis), 5% = Maximum-Sicherheit bei magerer Prämie.")
 minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5, maxval = 45,
      group = grp_bt,
      tooltip = "Nur Stillhalter-Modus: Der Verfall ist der erste FREITAG, der "
           + "mindestens so viele Kalendertage nach dem Einstieg liegt. Standard 10 "
           + "= in der Regel der Freitag der übernächsten Woche — garantiert mit "
-          + "mindestens einem Wochenende Laufzeit.")
+          + "mindestens einem Wochenende Laufzeit. Studie: Kurz gewinnt doppelt — "
+          + "5 Tage = 93% · 10 = 90% · 17 = 88% · 31 = 84% Win Rate, und die "
+          + "Verlusttiefe steigt mit der Laufzeit. Über ~2 Wochen hinaus ist "
+          + "Zeit der Feind des Stillhalters.")
 btSource   = input.string("Re-Entry", "Backtest-Signalquelle", options = ["Re-Entry", "Pivot"], group = grp_bt,
      tooltip = "Welche Signale der Backtest handelt. Hinweis: Pivot-Signale werden "
           + "erst N Kerzen nach dem Extrem bestätigt — gehandelt wird ehrlich "
@@ -323,13 +350,17 @@ trigFrueh = trigMode == "Früh (Abprall vom Extrem)"
 var bool  armB = false
 var float extB = 0.0
 var float epLoPx = 0.0   // Episodentief in PREIS (Strike-Referenz)
+var int   extBarB = 0    // Kerze des Z-Extrems (Pivot-Vorschau)
 if z_s < -signal_thresh
     if armB
-        extB := math.min(extB, z_s)
+        if z_s < extB
+            extB := z_s
+            extBarB := bar_index
         epLoPx := math.min(epLoPx, low)
     else if extB == 0.0 or z_s < extB
         armB := true
         extB := extB == 0.0 ? z_s : math.min(extB, z_s)
+        extBarB := bar_index
         epLoPx := epLoPx == 0.0 ? low : math.min(epLoPx, low)
 else if not armB
     extB := 0.0
@@ -340,13 +371,17 @@ bool reBuyRaw = useReentry and armB and upOK and barOK and (trigFrueh ? z_s >= e
 var bool  armS = false
 var float extS = 0.0
 var float epHiPx = 0.0   // Episodenhoch in PREIS (Call-Strike-Referenz)
+var int   extBarS = 0    // Kerze des Z-Extrems (Pivot-Vorschau)
 if z_s > signal_thresh
     if armS
-        extS := math.max(extS, z_s)
+        if z_s > extS
+            extS := z_s
+            extBarS := bar_index
         epHiPx := math.max(epHiPx, high)
     else if extS == 0.0 or z_s > extS
         armS := true
         extS := extS == 0.0 ? z_s : math.max(extS, z_s)
+        extBarS := bar_index
         epHiPx := epHiPx == 0.0 ? high : math.max(epHiPx, high)
 else if not armS
     extS := 0.0
@@ -437,20 +472,37 @@ fill(p_l2, p_l3, color = color.new(band_clr_os, 97))
 fill(p_l3, p_l4, color = color.new(band_clr_os, 95))
 
 // ─── Signal-Marker ───────────────────────────────────────────────────────────
-// ⚡ Re-Entry: RAUTE, alle gleich groß — Stärke über FARBE:
-//   Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) = satt · Stufe 3 (≥3σ) = GOLD.
-// Richtung bleibt eindeutig über die Position (unter = UP, über = DOWN).
+// ⚡ Re-Entry: dezenter PFEIL (↑ unter der Kerze = UP · ↓ über der Kerze =
+// DOWN) — Stärke über FARBE: Stufe 1 (1–2σ) = blass · Stufe 2 (2–3σ) =
+// satt · Stufe 3 (≥3σ) = GOLD. Unauffälliger als Rauten und klar
+// unterscheidbar von den Confluence-Dreiecken und den 🎯-Punkten.
 color upClr = stageBuy == 3 ? clr_x3 : stageBuy == 2 ? color.new(band_clr_os, 0) : color.new(band_clr_os, 55)
 color dnClr = stageSell == 3 ? clr_x3 : stageSell == 2 ? color.new(band_clr_ob, 0) : color.new(band_clr_ob, 55)
-plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.diamond, location.belowbar,
+plotshape(stageBuy > 0,  "⚡ UP (Farbe = Stärke)",   shape.arrowup, location.belowbar,
      upClr, size = size.small)
-plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.diamond, location.abovebar,
+plotshape(stageSell > 0, "⚡ DOWN (Farbe = Stärke)", shape.arrowdown, location.abovebar,
      dnClr, size = size.small)
 // 🎯 Pivot: Punkt rückwirkend am exakten Extrem (nur Visualisierung)
 plotshape(pivSell, "🎯 Extrem oben",  shape.circle, location.abovebar,
      color.new(band_clr_ob, 40), size = size.small, offset = -pivot_lb)
 plotshape(pivBuy,  "🎯 Extrem unten", shape.circle, location.belowbar,
      color.new(band_clr_os, 40), size = size.small, offset = -pivot_lb)
+
+// 🎯 Pivot-VORSCHAU: durchsichtiger Punkt am bisherigen Episoden-Extrem,
+// solange die Episode läuft. Bleibt das Extrem 'Pivot Lookback' Kerzen
+// lang unangetastet, bestätigt ihn der satte 🎯-Punkt an derselben Stelle —
+// so sieht man das Entstehen, bevor die Bestätigung da ist.
+var label pvB = na
+var label pvS = na
+if barstate.islast
+    label.delete(pvB)
+    label.delete(pvS)
+    if usePivot and armB
+        pvB := label.new(extBarB, na, "", xloc = xloc.bar_index, yloc = yloc.belowbar,
+             style = label.style_circle, color = color.new(band_clr_os, 78), size = size.tiny)
+    if usePivot and armS
+        pvS := label.new(extBarS, na, "", xloc = xloc.bar_index, yloc = yloc.abovebar,
+             style = label.style_circle, color = color.new(band_clr_ob, 78), size = size.tiny)
 
 // 🎚 Auslöse-Level: wo muss die LAUFENDE Kerze schließen, damit ⚡ fixiert?
 // Herleitung: z_s = 0.5·z + 0.5·z_s[1] (EMA-3). Ziel-z_s nach Modus auflösen
@@ -598,13 +650,13 @@ if barstate.islast and enableBT
 var table t = table.new(position.bottom_right, 2, 4, border_width = 1)
 volRank = ta.percentrank(sd / ma * 100, 252)
 if barstate.islast and showTable
-    string zust = z_s < -signal_thresh ? "🟢 überdehnt UNTEN\nRückkehr abwarten (⚡)" :
-         z_s > signal_thresh ? "🔴 überdehnt OBEN\nRückkehr abwarten (⚡)" : "· neutral"
+    string zust = z_s < -signal_thresh ? "überdehnt UNTEN · abwarten" :
+         z_s > signal_thresh ? "überdehnt OBEN · abwarten" : "neutral"
     table.cell(t, 0, 0, "Z-Score", text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 1, 0, str.tostring(z_s, "#.##") + " σ", text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 0, 1, "Zustand", text_color = color.white)
     table.cell(t, 1, 1, zust, text_color = color.white)
-    table.cell(t, 0, 2, "Letztes ⚡", text_color = color.white)
+    table.cell(t, 0, 2, "Letztes Signal", text_color = color.white)
     table.cell(t, 1, 2, lastStage == 0 ? "–" : str.tostring(lastDepth, "#.#") + "σ · Stufe " + str.tostring(lastStage)
          + (lastStage >= 3 ? " (extrem)" : lastStage == 2 ? " (stark)" : ""), text_color = color.white)
     if showPremium
