@@ -2,11 +2,22 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.4
+//  Stillhalter Community® – RETRACEMENTS v2.5
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.4 — EIN Band-Mechanismus + Original-Modus + R-Codes:
+//  NEU in v2.5 — SIGNAL-FILTER (Analyse der Original-Optionen):
+//   • 'Noise Suppression' des Originals = Anzahl Bestaetigungskerzen
+//     nach dem Kanten-Kreuz. Jetzt als eigener Regler: Aus (sofort) ·
+//     Niedrig (Standard, 1 Kerze) · Mittel (2) · Hoch (3). Messung
+//     (Normal-Modus): Aus PF 2.58 · Niedrig 2.65 · Mittel 2.78 ·
+//     Hoch 2.81 — mehr Filter = weniger, aber bessere Signale,
+//     bezahlt mit spaeterem Einstieg.
+//   • 'Signal Logic: Abweichung' des Originals = Umkehr-Signale bei
+//     Uebertreibung (Kurs zu weit vom Band entfernt) — bewusst NICHT
+//     eingebaut: Genau diese Aufgabe erledigt der Stillhalter Mean
+//     Reversion dediziert und besser kalibriert. Hier bleibt 'Trend'.
+//  v2.4 — EIN Band-Mechanismus + Original-Modus + R-Codes:
 //   • UMBAU: Band, Farbe und Signale kommen jetzt aus EINER Mechanik —
 //     dem Kreuz der beiden Bandkanten (schnelle x langsame Kante auf
 //     hl2). Keine versteckte Stopp-Linie mehr: Was man sieht, ist was
@@ -95,7 +106,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.4", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.5", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -135,6 +146,12 @@ bandMode = input.string("Normal (Standard)", "Band-Modus",
           + "bekannte Band-Optik ab · Normal = datenbasiert kalibrierter "
           + "Standard · Traege = ruhigster Modus mit den hochwertigsten, aber "
           + "seltensten Signalen.")
+sigFilter = input.string("Niedrig (Standard)", "Signal-Filter",
+     options = ["Aus", "Niedrig (Standard)", "Mittel", "Hoch"], group = grp_tb,
+     tooltip = "Wie viele geschlossene Kerzen ein Wechsel halten muss, bevor "
+          + "Farbe und Signal umspringen. Aus = sofortige Reaktion (mehr "
+          + "Fehlsignale) · Hoch = maximale Ruhe (weniger, dafuer bessere "
+          + "Signale, spaeterer Einstieg). Datenbasiert kalibriert.")
 showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
      tooltip = "Nachlaufender Stopp im Abstand der aktuellen Schwankungsbreite: "
           + "Kurs darueber = Band laeuft als Unterstuetzung mit (Aufwaertsmodus), "
@@ -268,7 +285,7 @@ plot(lv6854, "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 // Schnell 5/13 K1 · Original 8/21 K1 · Normal 13/34 K1 · Traege 21/55 K2
 int lenF  = bandMode == "Schnell" ? 5 : bandMode == "Original" ? 8 : bandMode == "Traege" ? 21 : 13
 int lenS  = bandMode == "Schnell" ? 13 : bandMode == "Original" ? 21 : bandMode == "Traege" ? 55 : 34
-int bandK = bandMode == "Traege" ? 2 : 1
+int bandK = sigFilter == "Aus" ? 0 : sigFilter == "Mittel" ? 2 : sigFilter == "Hoch" ? 3 : 1
 
 float edgeF = ta.ema(hl2, lenF)
 float edgeS = ta.ema(hl2, lenS)
