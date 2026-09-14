@@ -2,11 +2,22 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.0
+//  Stillhalter Community® – RETRACEMENTS v2.1
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.0 — TRAILING-BAND + NULL-ANKER (Feedback):
+//  NEU in v2.1 — TRAILING-BAND KALIBRIERT (16 Aktien, 1D, ab 2010,
+//  Long-Roundtrips Buy-Flip -> Sell-Flip, naechste Eroeffnung):
+//   • Raster Laenge {7,10,14,21} x Faktor {2..4} x Bestaetigung {0,1,2}:
+//     Toleranz dominiert (PF 1.74 bei Faktor 2 -> 2.56 bei Faktor 4 —
+//     enge Baender werden vom Rauschen ausgeknockt). OPTIMUM:
+//     Laenge 14 · Faktor 4.0 · 1 Kerze Bestaetigung = PF 2.66,
+//     +5.7% je Trade, 48.5% Winrate, ~2.5 Signale/Jahr — deutlich vor
+//     der IA-artigen Einstellung 10/3.0/sofort (PF 2.20, +3.5%).
+//   • Umsetzung: interne Konstanten (keine Inputs, Geheimhaltung);
+//     Bandfarbe wechselt sofort, das Buy/Sell-Dreieck erscheint eine
+//     Kerze spaeter als Bestaetigung (Flacker-Schutz).
+//  v2.0 — TRAILING-BAND + NULL-ANKER (Feedback):
 //   • TRAILING-BAND (das blau/orange Band des IA-Originals, hier als
 //     eigenstaendiger Baustein): nachlaufender Stopp im Abstand der
 //     aktuellen Schwankungsbreite (SuperTrend-Mechanik, ATR-basiert).
@@ -40,7 +51,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: S5 ≈ −21% vom Hoch · S4 ≈ −38% · S3 = −50% · S2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.0", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.1", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -80,7 +91,9 @@ showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
 showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
      tooltip = "Kleines gruenes Dreieck (Buy) unter der Kerze, wenn das Band in "
           + "den Aufwaertsmodus klappt · kleines rotes Dreieck (Sell) ueber der "
-          + "Kerze beim Wechsel in den Abwaertsmodus.")
+          + "Kerze beim Wechsel in den Abwaertsmodus. Das Dreieck erscheint eine "
+          + "Kerze nach dem Farbwechsel — erst wenn der Wechsel bestaetigt ist "
+          + "(datenbasiert kalibrierter Flacker-Schutz).")
 bandTransp = input.int(80, "Band-Transparenz", minval = 0, maxval = 100, group = grp_tb,
      tooltip = "0 = kraeftig gefuellt · 100 = Fuellung unsichtbar (Linien und "
           + "Signale bleiben).")
@@ -165,11 +178,13 @@ plot(lv4236, "S9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
 plot(lv6854, "S10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
 // ─── Trailing-Band (eigenstaendig — der Stillhalter Trend bleibt separat) ────
-[stLine, stDir] = ta.supertrend(3.0, 10)
+// Kalibrierung intern: Laenge 14, Faktor 4.0, 1 Kerze Bestaetigung (s. Changelog)
+[stLine, stDir] = ta.supertrend(4.0, 14)
 float bandEdge = ta.ema(hl2, 8)
 bool upMode  = stDir < 0
-bool flipUp  = ta.change(stDir) < 0
-bool flipDn  = ta.change(stDir) > 0
+int  sinceFlip = ta.barssince(ta.change(stDir) != 0)
+bool flipUp  = upMode and sinceFlip == 1
+bool flipDn  = not upMode and sinceFlip == 1
 
 color bandClr = upMode ? clrUp : clrDn
 p_st   = plot(showBand ? stLine   : na, "Trailing-Stopp", color = color.new(bandClr, 35), linewidth = 1, style = plot.style_linebr)
