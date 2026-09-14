@@ -2,11 +2,26 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.1
+//  Stillhalter Community® – RETRACEMENTS v2.2
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.1 — TRAILING-BAND KALIBRIERT (16 Aktien, 1D, ab 2010,
+//  NEU in v2.2 — BAND-MODI + STILLHALTER-BACKTEST:
+//   • Band-Modus waehlbar: Schnell · Normal (Standard) · Traege — ohne
+//     sichtbare Parameter. Interne Zuordnung (NUR hier im Quellcode):
+//     Schnell = SuperTrend 10 / Faktor 3.0 / sofort (entspricht dem
+//     IA-Original-Verhalten) · Normal = 14 / 4.0 / 1 Kerze Bestaetigung
+//     (Kalibrierungs-Optimum) · Traege = 21 / 4.0 / 2 Kerzen.
+//     Kennzahlen (16 Aktien, 1D, ab 2010): Aktie-Roundtrip PF/Ø-Ret:
+//     Schnell 2.20 / +3.5% (3.8 Sig/J) · Normal 2.66 / +5.7% (2.5) ·
+//     Traege 2.61 / +5.5% (2.6). Short Put (Strike Band-Support -2%,
+//     Verfall 1. Freitag >= 10 Tage): Schnell 96.6% · Normal 97.3% ·
+//     Traege 96.3% Verfallsquote.
+//   • BACKTEST-TABELLE im Chart (wie beim Mean Reversion): Modus
+//     'Stillhalter (Short Put)' = Standard — simuliert nach jedem
+//     Band-Buy einen Short Put mit Strike unter der Band-Unterstuetzung;
+//     Modus 'Aktie (Long)' = klassischer Roundtrip Buy->Sell.
+//  v2.1 — TRAILING-BAND KALIBRIERT (16 Aktien, 1D, ab 2010,
 //  Long-Roundtrips Buy-Flip -> Sell-Flip, naechste Eroeffnung):
 //   • Raster Laenge {7,10,14,21} x Faktor {2..4} x Bestaetigung {0,1,2}:
 //     Toleranz dominiert (PF 1.74 bei Faktor 2 -> 2.56 bei Faktor 4 —
@@ -51,7 +66,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: S5 ≈ −21% vom Hoch · S4 ≈ −38% · S3 = −50% · S2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.1", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.2", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -84,6 +99,12 @@ showTable  = input.bool(true, "Status-Tabelle anzeigen", group = grp_lv,
 
 // ─── Inputs: Trailing-Band ───────────────────────────────────────────────────
 grp_tb = "TRAILING-BAND"
+bandMode = input.string("Normal (Standard)", "Band-Modus",
+     options = ["Schnell", "Normal (Standard)", "Traege"], group = grp_tb,
+     tooltip = "Schnell = reagiert frueher und liefert mehr Signale (dafuer mehr "
+          + "Fehlwechsel) · Normal = datenbasiert kalibrierter Standard mit dem "
+          + "besten Verhaeltnis aus Reaktion und Qualitaet · Traege = ruhigster "
+          + "Modus, seltene, dafuer hochwertige Signale.")
 showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
      tooltip = "Nachlaufender Stopp im Abstand der aktuellen Schwankungsbreite: "
           + "Kurs darueber = Band laeuft als Unterstuetzung mit (Aufwaertsmodus), "
@@ -99,6 +120,33 @@ bandTransp = input.int(80, "Band-Transparenz", minval = 0, maxval = 100, group =
           + "Signale bleiben).")
 clrUp = input.color(#00897B, "Band aufwaerts", group = grp_tb)
 clrDn = input.color(#D81B60, "Band abwaerts",  group = grp_tb)
+
+// ─── Inputs: Backtest ────────────────────────────────────────────────────────
+grp_bt = "BACKTEST"
+enableBT   = input.bool(true, "Backtest aktivieren (Tabelle oben rechts)", group = grp_bt,
+     tooltip = "Simuliert die Band-Signale: Stillhalter-Modus = nach jedem Buy "
+          + "ein Short Put mit Strike unter der Band-Unterstuetzung · Aktien-"
+          + "Modus = Kauf am Buy, Verkauf am Sell (jeweils naechste Eroeffnung, "
+          + "kein Blick in die Zukunft). Nur Kennzahlen-Tabelle, keine Pfeile.")
+btMode     = input.string("Stillhalter (Short Put)", "🎩 Backtest-Modus",
+     options = ["Stillhalter (Short Put)", "Aktie (Long)"], group = grp_bt,
+     tooltip = "Stillhalter = Verfallsquote simulierten Short Puts (deine "
+          + "Kennzahl) · Aktie = klassischer Long-Roundtrip als Referenz.")
+strikeBufPct = input.float(2.0, "Strike-Puffer unter Band-Unterstuetzung (%)", minval = 0.0,
+     maxval = 10.0, step = 0.5, group = grp_bt,
+     tooltip = "Der simulierte Strike liegt so viele Prozent UNTER der Band-"
+          + "Unterstuetzung zum Signalzeitpunkt. Mehr Puffer = hoehere "
+          + "Trefferquote bei weniger Praemie.")
+minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5,
+     maxval = 45, group = grp_bt,
+     tooltip = "Der Verfall ist der erste FREITAG, der mindestens so viele "
+          + "Kalendertage nach dem Einstieg liegt. Standard 10 = i. d. R. der "
+          + "Freitag der uebernaechsten Woche.")
+btFrom     = input.time(timestamp("2019-01-01T00:00:00"), "Backtest Start", group = grp_bt)
+btTo       = input.time(timestamp("2099-01-01T00:00:00"), "Backtest Ende",  group = grp_bt)
+feePct     = input.float(0.0, "Gebuehr je Order (%)", minval = 0.0, maxval = 1.0, step = 0.01, group = grp_bt,
+     tooltip = "Nur Aktien-Modus: prozentuale Gebuehr pro Kauf und Verkauf.")
+initialCapital = input.float(10000, "Startkapital", minval = 1, group = grp_bt)
 
 // ─── Inputs: Farben Level ────────────────────────────────────────────────────
 grp_st = "FARBEN LEVEL"
@@ -178,13 +226,16 @@ plot(lv4236, "S9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
 plot(lv6854, "S10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
 // ─── Trailing-Band (eigenstaendig — der Stillhalter Trend bleibt separat) ────
-// Kalibrierung intern: Laenge 14, Faktor 4.0, 1 Kerze Bestaetigung (s. Changelog)
-[stLine, stDir] = ta.supertrend(4.0, 14)
+// Modus-Kalibrierung intern (s. Changelog): Schnell 10/3.0/0 · Normal 14/4.0/1 · Traege 21/4.0/2
+float stMult = bandMode == "Schnell" ? 3.0 : 4.0
+int   stLen  = bandMode == "Schnell" ? 10 : bandMode == "Traege" ? 21 : 14
+int   stK    = bandMode == "Schnell" ? 0 : bandMode == "Traege" ? 2 : 1
+[stLine, stDir] = ta.supertrend(stMult, stLen)
 float bandEdge = ta.ema(hl2, 8)
 bool upMode  = stDir < 0
 int  sinceFlip = ta.barssince(ta.change(stDir) != 0)
-bool flipUp  = upMode and sinceFlip == 1
-bool flipDn  = not upMode and sinceFlip == 1
+bool flipUp  = upMode and sinceFlip == stK
+bool flipDn  = not upMode and sinceFlip == stK
 
 color bandClr = upMode ? clrUp : clrDn
 p_st   = plot(showBand ? stLine   : na, "Trailing-Stopp", color = color.new(bandClr, 35), linewidth = 1, style = plot.style_linebr)
@@ -244,6 +295,99 @@ if barstate.islast and showTable
     table.cell(t, 1, 0, zoneTxt, text_color = color.white, bgcolor = color.new(color.black, 20))
     table.cell(t, 0, 1, "Naechster Boden", text_color = color.white)
     table.cell(t, 1, 1, floorTxt, text_color = color.white)
+
+// ─── Backtest (Tabelle statt Order-Pfeile — wie Stillhalter Mean Reversion) ──
+bool inWindow  = time >= btFrom and time <= btTo
+bool stratBuy  = inWindow and flipUp
+bool stratSell = inWindow and flipDn
+
+var float equity     = na
+var float entryPrice = na
+var bool  inPos      = false
+var int   trades     = 0
+var int   wins       = 0
+var bool  pendingBuy  = false
+var bool  pendingSell = false
+var float peakEq = 0.0
+var float maxDD  = 0.0
+
+if enableBT and btMode == "Aktie (Long)"
+    if na(equity)
+        equity := initialCapital
+    if stratBuy and not inPos and not pendingBuy
+        pendingBuy := true
+    if stratSell and inPos and not pendingSell
+        pendingSell := true
+    if pendingBuy[1] and not inPos
+        inPos      := true
+        entryPrice := open
+        pendingBuy := false
+    if pendingSell[1] and inPos
+        pnlPct  = (open - entryPrice) / entryPrice - 2 * feePct / 100
+        equity  := equity * (1 + pnlPct)
+        peakEq  := math.max(peakEq, equity)
+        maxDD   := math.max(maxDD, peakEq > 0 ? (peakEq - equity) / peakEq * 100 : 0.0)
+        trades  += 1
+        if pnlPct > 0
+            wins += 1
+        inPos       := false
+        pendingSell := false
+
+// Stillhalter-Modus: Short Put mit Strike unter der Band-Unterstuetzung
+f_fridayAfter(int t0) =>
+    int tt = t0
+    while dayofweek(tt) != dayofweek.friday
+        tt += 86400000
+    tt
+
+var bool  spOpen   = false
+var float spStrike = na
+var int   spExpiry = na
+var int   spTrades  = 0
+var int   spExpired = 0
+var float spWorst   = 0.0
+
+if enableBT and btMode == "Stillhalter (Short Put)"
+    if stratBuy and not spOpen and stLine > 0
+        spOpen   := true
+        spStrike := stLine * (1 - strikeBufPct / 100)
+        spExpiry := f_fridayAfter(time + minCalDays * 86400000)
+    if spOpen and time >= spExpiry
+        spTrades += 1
+        if close >= spStrike
+            spExpired += 1
+        else
+            spWorst := math.min(spWorst, (close / spStrike - 1) * 100)
+        spOpen := false
+
+float spQuote = spTrades > 0 ? spExpired * 100.0 / spTrades : 0.0
+float winrate = trades > 0 ? wins * 100.0 / trades : 0.0
+float roiPct  = enableBT and not na(equity) ? (equity / initialCapital - 1) * 100 : 0.0
+
+var table bt = table.new(position.top_right, 2, 5, border_width = 1)
+if barstate.islast and enableBT
+    if btMode == "Stillhalter (Short Put)"
+        table.cell(bt, 0, 0, "Short Puts", text_color = color.white)
+        table.cell(bt, 1, 0, str.tostring(spTrades) + (spOpen ? " (+1 offen)" : ""), text_color = color.white)
+        table.cell(bt, 0, 1, "Win Rate", text_color = color.white)
+        table.cell(bt, 1, 1, str.tostring(spQuote, "#.#") + " % (wertlos verfallen)", text_color = color.white)
+        table.cell(bt, 0, 2, "Max Drawdown", text_color = color.white)
+        table.cell(bt, 1, 2, spWorst < 0 ? str.tostring(spWorst, "#.#") + " % unter Strike" : "–", text_color = color.white)
+        table.cell(bt, 0, 3, "Strike", text_color = color.white)
+        table.cell(bt, 1, 3, strikeBufPct > 0 ? "Band-Support −" + str.tostring(strikeBufPct, "#.#") + " %" : "Band-Support", text_color = color.white)
+        table.cell(bt, 0, 4, "Verfall", text_color = color.white)
+        table.cell(bt, 1, 4, "1. Freitag nach ≥ " + str.tostring(minCalDays) + " Tagen", text_color = color.white)
+    else
+        table.cell(bt, 0, 0, "Trades",  text_color = color.white)
+        table.cell(bt, 1, 0, str.tostring(trades) + (inPos ? " (+1 offen)" : ""), text_color = color.white)
+        table.cell(bt, 0, 1, "Winrate", text_color = color.white)
+        table.cell(bt, 1, 1, str.tostring(winrate, "#.#") + " %", text_color = color.white)
+        table.cell(bt, 0, 2, "ROI",     text_color = color.white)
+        table.cell(bt, 1, 2, str.tostring(roiPct, "#.#") + " %", text_color = color.white)
+        table.cell(bt, 0, 3, "Equity",  text_color = color.white)
+        table.cell(bt, 1, 3, str.tostring(equity, format.mintick), text_color = color.white)
+        table.cell(bt, 0, 4, "Max DD",  text_color = color.white)
+        table.cell(bt, 1, 4, str.tostring(maxDD, "#.#") + " %", text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
 alertcondition(flipUp, "Band-Buy",  "Stillhalter Retracements: Trailing-Band klappt aufwaerts (Buy)")
