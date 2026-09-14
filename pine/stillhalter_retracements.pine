@@ -2,11 +2,21 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v1.2
+//  Stillhalter Community® – RETRACEMENTS v1.3
 //  Nachgeführte Retracement-Level vom Allzeittief zum Allzeithoch —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v1.2 — TARNKAPPE (Geheimhaltungs-Regel):
+//  NEU in v1.3 — ANKER-FIX für Intraday-Charts:
+//   • Problem: Auf Intraday-Zeiteinheiten laedt TradingView nur ein
+//     begrenztes Datenfenster. Das 'Allzeittief' war dadurch nur das
+//     Fenster-Tief — wurde es unterboten, rutschten alle Level parallel
+//     nach unten. Level duerfen aber nur STEIGEN (neues Hoch).
+//   • Fix: Allzeithoch/-tief kommen jetzt zusaetzlich aus der
+//     MONATS-Historie des Symbols (reicht auch auf 4h-Charts bis zum
+//     Listing zurueck; nur bestaetigte Monate, kein Repaint) und werden
+//     mit dem lokalen Chart-Fenster kombiniert. Ergebnis: identische
+//     Level auf allen Zeiteinheiten, Treppen nur nach oben.
+//  v1.2 — TARNKAPPE (Geheimhaltungs-Regel):
 //   • Alle sichtbaren Texte zeigen nur noch neutrale Level-Codes S0–S10
 //     (Labels, Tabelle, Stil-Reiter, Einstellungen, Alerts) — keine
 //     Ratios mehr, an denen man die Methode ablesen koennte.
@@ -42,7 +52,7 @@
 //  Symbols — auf Tages-/Wochenchart ist das i. d. R. die volle
 //  Kurshistorie seit Listing.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v1.2", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v1.3", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
@@ -83,10 +93,26 @@ clr000 = input.color(color.gray,    "S0 — Ausgangstief", group = grp_st)
 clrExt = input.color(#AB47BC,       "S7 bis S10 (ueber dem Hoch)", group = grp_st)
 
 // ─── Anker: nachgeführtes Allzeithoch + Ausgangstief ─────────────────────────
-var float ath = na
-var float atl = na
-ath := na(ath) ? high : math.max(ath, high)
-atl := na(atl) ? low  : math.min(atl, low)
+// Tiefe Historie ueber Monatsdaten (reicht auch auf Intraday-Charts bis zum
+// Listing zurueck); nur BESTAETIGTE Monate ([1] + lookahead) → kein Repaint.
+// Das lokale Chart-Fenster deckt den aktuellen Monat ab.
+f_anchors() =>
+    var float hh = na
+    var float ll = na
+    hh := na(hh) ? high : math.max(hh, high)
+    ll := na(ll) ? low  : math.min(ll, low)
+    [hh[1], ll[1]]
+
+[athHist, atlHist] = request.security(syminfo.tickerid, "M", f_anchors(),
+     lookahead = barmerge.lookahead_on)
+
+var float athLoc = na
+var float atlLoc = na
+athLoc := na(athLoc) ? high : math.max(athLoc, high)
+atlLoc := na(atlLoc) ? low  : math.min(atlLoc, low)
+
+float ath = math.max(nz(athHist, athLoc), athLoc)
+float atl = math.min(nz(atlHist, atlLoc), atlLoc)
 
 float base = anchorMode == "Null" ? 0.0 : atl
 float rng  = ath - base
@@ -175,4 +201,4 @@ alertcondition(ta.crossunder(close, lv500), "Kurs faellt unter S3", "Stillhalter
 alertcondition(ta.crossunder(close, lv382), "Kurs faellt unter S2", "Stillhalter Retracements: Kurs unter S2 gefallen")
 alertcondition(ta.crossover(close, lv786),  "Kurs erobert S5 zurueck", "Stillhalter Retracements: Kurs zurueck ueber S5")
 alertcondition(ta.crossover(close, lv618),  "Kurs erobert S4 zurueck", "Stillhalter Retracements: Kurs zurueck ueber S4")
-alertcondition(high >= ath and high > ath[1], "Neues Allzeithoch", "Stillhalter Retracements: neues Allzeithoch — alle Level werden nachgezogen")
+alertcondition(ath > ath[1], "Neues Allzeithoch", "Stillhalter Retracements: neues Allzeithoch — alle Level werden nachgezogen")
