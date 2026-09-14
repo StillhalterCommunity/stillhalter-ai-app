@@ -2,11 +2,32 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.3
+//  Stillhalter Community® – RETRACEMENTS v2.4
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.3 — BAND-OPTIK entkoppelt (Feedback):
+//  NEU in v2.4 — EIN Band-Mechanismus + Original-Modus + R-Codes:
+//   • UMBAU: Band, Farbe und Signale kommen jetzt aus EINER Mechanik —
+//     dem Kreuz der beiden Bandkanten (schnelle x langsame Kante auf
+//     hl2). Keine versteckte Stopp-Linie mehr: Was man sieht, ist was
+//     signalisiert. Das Dreieck sitzt dadurch KONSTRUKTIONSBEDINGT
+//     immer exakt an der Kerze des Farbwechsels (Farbe wechselt erst
+//     mit der Bestaetigung, gemeinsam mit dem Signal).
+//   • VIER MODI (interne Zuordnung NUR hier im Quellcode — EMA-Paare
+//     auf hl2, K = Bestaetigungskerzen):
+//     Schnell = 5/13, K1 · Original = 8/21, K1 (bildet das IA-Plot-
+//     Modell ab) · Normal (Standard) = 13/34, K1 · Traege = 21/55, K2.
+//     Kennzahlen (16 Aktien, 1D, ab 2010) — Aktie PF / Ø-Ret / Sig-J
+//     und Short Put (Strike langsame Kante -2%, 1. Freitag >= 10 T):
+//     Schnell 1.84 / +1.8% / 7.5 · 81.7% — Original 2.16 / +2.9% /
+//     5.0 · 83.2% — Normal 2.65 / +4.7% / 3.2 · 86.7% — Traege 3.61 /
+//     +8.4% / 2.1 · 87.5%.
+//   • KEIN FLACKERN (wie Mean Reversion): 'Nur bestaetigte Kerzen'
+//     (Standard AN) — Farbwechsel und Signal erst mit Kerzenschluss.
+//   • Signal-Abstand: Dreiecke mit einstellbarem Abstand zur Kerze
+//     (Standard 1%), damit die Band-Zone sie nicht ueberdeckt.
+//   • Level-Codes heissen jetzt R0 bis R10 (R wie Retracement).
+//  v2.3 — BAND-OPTIK entkoppelt (Feedback):
 //   • Die SIGNALE rechnet weiterhin der kalibrierte Trailing-Stopp —
 //     GEZEICHNET wird aber eine schlanke Zone, die am Kurs anliegt
 //     (intern: EMA(hl2,8) x EMA(hl2,21)), statt der weit entfernten
@@ -61,9 +82,9 @@
 //   Monate, kein Repaint) kombiniert mit dem lokalen Chart-Fenster —
 //   Level identisch auf allen Zeiteinheiten, Treppen nur nach oben.
 //  v1.2 — TARNKAPPE: sichtbare Texte zeigen nur Level-Codes S0–S10.
-//   Interne Zuordnung (NUR hier im Quellcode): S0=0.000 · S1=0.236 ·
-//   S2=0.382 · S3=0.500 · S4=0.618 · S5=0.786 bzw. 0.764 (Variante B) ·
-//   S6=1.000 (Allzeithoch) · S7=1.618 · S8=2.618 · S9=4.236 · S10=6.854.
+//   Interne Zuordnung (NUR hier im Quellcode): R0=0.000 · R1=0.236 ·
+//   R2=0.382 · R3=0.500 · R4=0.618 · R5=0.786 bzw. 0.764 (Variante B) ·
+//   R6=1.000 (Allzeithoch) · R7=1.618 · R8=2.618 · R9=4.236 · R10=6.854.
 //   Trailing-Band intern: SuperTrend ATR-Laenge 10, Faktor 3,
 //   Bandkante EMA(hl2, 8).
 //  v1.1 — Umschalter oberstes Retracement: 0.786 (klassisch) oder
@@ -72,31 +93,31 @@
 //  MECHANIK (dekodiert aus dem IA-ATR-Model): Level 6 = nachgefuehrtes
 //  ALLZEITHOCH inkl. Docht; darunter die Standard-Ratios (s. o.);
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
-//  Anker 0: S5 ≈ −21% vom Hoch · S4 ≈ −38% · S3 = −50% · S2 ≈ −62%.
+//  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.3", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.4", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
 grp_lv = "LEVEL"
-anchorMode = input.string("Null (Standard)", "Ausgangspunkt (Level 0 / S0)",
+anchorMode = input.string("Null (Standard)", "Ausgangspunkt (Level 0 / R0)",
      options = ["Null (Standard)", "Allzeittief", "Jahrestief", "2-Jahres-Tief", "5-Jahres-Tief", "10-Jahres-Tief"], group = grp_lv,
      tooltip = "Wo S0 verankert wird. 'Null' = Standard: Die Level haengen nur "
           + "am Allzeithoch und sind ueberall exakt reproduzierbar. Alternativ "
           + "ein Tief als Anker: Allzeittief oder das rollierende Tief der "
           + "letzten 1/2/5/10 Jahre — dann spannen sich die Level zwischen "
           + "diesem Tief und dem Allzeithoch auf.")
-fibVariant = input.string("Variante A (Standard)", "S5-Berechnung",
+fibVariant = input.string("Variante A (Standard)", "R5-Berechnung",
      options = ["Variante A (Standard)", "Variante B (Spiegel)"], group = grp_lv,
-     tooltip = "Fuer die Marke S5 existieren zwei gebraeuchliche Varianten. "
+     tooltip = "Fuer die Marke R5 existieren zwei gebraeuchliche Varianten. "
           + "Alle anderen Level sind identisch. Zum Abgleich mit einer Vorlage "
-          + "einfach den S5-Wert vergleichen und passend umschalten.")
-showExt    = input.bool(true, "Ziel-Level über dem Hoch (S7 bis S10)", group = grp_lv,
+          + "einfach den R5-Wert vergleichen und passend umschalten.")
+showExt    = input.bool(true, "Ziel-Level über dem Hoch (R7 bis R10)", group = grp_lv,
      tooltip = "Zeigt die Erweiterungs-Level oberhalb des Allzeithochs — dort "
           + "liegen nach einem Ausbruch die nächsten natürlichen Ziele. Bewusst "
           + "transparenter gezeichnet: Die Hauptlevel sind und bleiben 0 bis 6.")
 showLabels = input.bool(true, "Level-Beschriftung am rechten Rand", group = grp_lv,
-     tooltip = "Level-Code (S0 bis S10), Preis und Abstand zum aktuellen Kurs in % je Level.")
+     tooltip = "Level-Code (R0 bis R10), Preis und Abstand zum aktuellen Kurs in % je Level.")
 showDist   = input.bool(true, "Abstand zum Kurs in % anzeigen", group = grp_lv,
      tooltip = "Ergänzt jede Beschriftung um den prozentualen Abstand des "
           + "Levels vom aktuellen Kurs — negativ = Level liegt unter dem Kurs "
@@ -108,24 +129,30 @@ showTable  = input.bool(true, "Status-Tabelle anzeigen", group = grp_lv,
 // ─── Inputs: Trailing-Band ───────────────────────────────────────────────────
 grp_tb = "TRAILING-BAND"
 bandMode = input.string("Normal (Standard)", "Band-Modus",
-     options = ["Schnell", "Normal (Standard)", "Traege"], group = grp_tb,
-     tooltip = "Schnell = reagiert frueher und liefert mehr Signale (dafuer mehr "
-          + "Fehlwechsel) · Normal = datenbasiert kalibrierter Standard mit dem "
-          + "besten Verhaeltnis aus Reaktion und Qualitaet · Traege = ruhigster "
-          + "Modus, seltene, dafuer hochwertige Signale.")
+     options = ["Schnell", "Original", "Normal (Standard)", "Traege"], group = grp_tb,
+     tooltip = "Steuert Band UND Signale gemeinsam (eine Mechanik). Schnell = "
+          + "reagiert am fruehesten, meiste Signale · Original = bildet die "
+          + "bekannte Band-Optik ab · Normal = datenbasiert kalibrierter "
+          + "Standard · Traege = ruhigster Modus mit den hochwertigsten, aber "
+          + "seltensten Signalen.")
 showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
      tooltip = "Nachlaufender Stopp im Abstand der aktuellen Schwankungsbreite: "
           + "Kurs darueber = Band laeuft als Unterstuetzung mit (Aufwaertsmodus), "
           + "Bruch nach unten = Band klappt auf die Oberseite (Abwaertsmodus).")
 showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
-     tooltip = "Kleines gruenes Dreieck (Buy) unter der Kerze, wenn das Band in "
-          + "den Aufwaertsmodus klappt · kleines rotes Dreieck (Sell) ueber der "
-          + "Kerze beim Wechsel in den Abwaertsmodus. Das Dreieck erscheint eine "
-          + "Kerze nach dem Farbwechsel — erst wenn der Wechsel bestaetigt ist "
-          + "(datenbasiert kalibrierter Flacker-Schutz).")
-showStop = input.bool(false, "Stopp-Linie anzeigen", group = grp_tb,
-     tooltip = "Blendet zusaetzlich die nachlaufende Stopp-Linie ein, an der die "
-          + "Signale entstehen — Standard aus, damit der Chart ruhig bleibt.")
+     tooltip = "Gruenes Dreieck (Buy) unter der Kerze des Farbwechsels in den "
+          + "Aufwaertsmodus · rotes Dreieck (Sell) darueber beim Wechsel in den "
+          + "Abwaertsmodus. Farbe und Dreieck wechseln gemeinsam — erst wenn der "
+          + "Wechsel bestaetigt ist (datenbasiert kalibrierter Flacker-Schutz).")
+confirmOnly = input.bool(true, "Nur bestaetigte Kerzen (kein Flackern)", group = grp_tb,
+     tooltip = "AN (empfohlen): Farbwechsel und Signal erscheinen erst, wenn die "
+          + "Kerze geschlossen hat — nichts taucht intrabar auf und verschwindet "
+          + "wieder. AUS: Reaktion schon waehrend der laufenden Kerze (Vorschau).")
+sigOffPct = input.float(1.0, "Signal-Abstand zur Kerze (%)", minval = 0.0, maxval = 5.0,
+     step = 0.25, group = grp_tb,
+     tooltip = "Zeichnet die Buy/Sell-Dreiecke so viele Prozent unter dem Tief "
+          + "bzw. ueber dem Hoch der Signalkerze — mit Abstand, damit die "
+          + "Band-Zone sie nicht ueberdeckt.")
 bandTransp = input.int(80, "Band-Transparenz", minval = 0, maxval = 100, group = grp_tb,
      tooltip = "0 = kraeftig gefuellt · 100 = Fuellung unsichtbar (Linien und "
           + "Signale bleiben).")
@@ -161,14 +188,14 @@ initialCapital = input.float(10000, "Startkapital", minval = 1, group = grp_bt)
 
 // ─── Inputs: Farben Level ────────────────────────────────────────────────────
 grp_st = "FARBEN LEVEL"
-clr100 = input.color(color.white,   "S6 — Allzeithoch", group = grp_st)
-clr786 = input.color(#26C6DA,       "S5", group = grp_st)
-clr618 = input.color(#00C853,       "S4", group = grp_st)
-clr500 = input.color(#FFD600,       "S3", group = grp_st)
-clr382 = input.color(#FF9100,       "S2", group = grp_st)
-clr236 = input.color(#FF1744,       "S1", group = grp_st)
-clr000 = input.color(color.gray,    "S0 — Ausgangspunkt", group = grp_st)
-clrExt = input.color(#AB47BC,       "S7 bis S10 (ueber dem Hoch)", group = grp_st)
+clr100 = input.color(color.white,   "R6 — Allzeithoch", group = grp_st)
+clr786 = input.color(#26C6DA,       "R5", group = grp_st)
+clr618 = input.color(#00C853,       "R4", group = grp_st)
+clr500 = input.color(#FFD600,       "R3", group = grp_st)
+clr382 = input.color(#FF9100,       "R2", group = grp_st)
+clr236 = input.color(#FF1744,       "R1", group = grp_st)
+clr000 = input.color(color.gray,    "R0 — Ausgangspunkt", group = grp_st)
+clrExt = input.color(#AB47BC,       "R7 bis R10 (ueber dem Hoch)", group = grp_st)
 
 // ─── Anker: Allzeithoch + Tiefs aus der Monats-Historie ─────────────────────
 // Tiefe Historie ueber Monatsdaten (reicht auch auf Intraday-Charts bis zum
@@ -224,42 +251,53 @@ float lv4236 = showExt ? f_lv(4.236) : na
 float lv6854 = showExt ? f_lv(6.854) : na
 
 // ─── Level-Linien (Treppen-Verlauf, da sie nur bei neuem Hoch springen) ──────
-plot(lv100,  "S6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 1)
-plot(lv786,  "S5",                color = color.new(clr786, 20), linewidth = 1)
-plot(lv618,  "S4",                color = color.new(clr618, 20), linewidth = 1)
-plot(lv500,  "S3",                color = color.new(clr500, 30), linewidth = 1)
-plot(lv382,  "S2",                color = color.new(clr382, 30), linewidth = 1)
-plot(lv236,  "S1",                color = color.new(clr236, 30), linewidth = 1)
-plot(lv000,  "S0 (Ausgangspunkt)",color = color.new(clr000, 50), linewidth = 1)
-plot(lv1618, "S7 (Ziel)",         color = color.new(clrExt, 40), linewidth = 1)
-plot(lv2618, "S8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
-plot(lv4236, "S9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
-plot(lv6854, "S10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
+plot(lv100,  "R6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 1)
+plot(lv786,  "R5",                color = color.new(clr786, 20), linewidth = 1)
+plot(lv618,  "R4",                color = color.new(clr618, 20), linewidth = 1)
+plot(lv500,  "R3",                color = color.new(clr500, 30), linewidth = 1)
+plot(lv382,  "R2",                color = color.new(clr382, 30), linewidth = 1)
+plot(lv236,  "R1",                color = color.new(clr236, 30), linewidth = 1)
+plot(lv000,  "R0 (Ausgangspunkt)",color = color.new(clr000, 50), linewidth = 1)
+plot(lv1618, "R7 (Ziel)",         color = color.new(clrExt, 40), linewidth = 1)
+plot(lv2618, "R8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
+plot(lv4236, "R9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
+plot(lv6854, "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
-// ─── Trailing-Band (eigenstaendig — der Stillhalter Trend bleibt separat) ────
-// Modus-Kalibrierung intern (s. Changelog): Schnell 10/3.0/0 · Normal 14/4.0/1 · Traege 21/4.0/2
-float stMult = bandMode == "Schnell" ? 3.0 : 4.0
-int   stLen  = bandMode == "Schnell" ? 10 : bandMode == "Traege" ? 21 : 14
-int   stK    = bandMode == "Schnell" ? 0 : bandMode == "Traege" ? 2 : 1
-[stLine, stDir] = ta.supertrend(stMult, stLen)
-float bandEdge = ta.ema(hl2, 8)
-bool upMode  = stDir < 0
-int  sinceFlip = ta.barssince(ta.change(stDir) != 0)
-bool flipUp  = upMode and sinceFlip == stK
-bool flipDn  = not upMode and sinceFlip == stK
+// ─── Trailing-Band: EINE Mechanik fuer Zone, Farbe und Signale ───────────────
+// Modus-Kalibrierung intern (s. Changelog): Kantenpaare auf hl2 —
+// Schnell 5/13 K1 · Original 8/21 K1 · Normal 13/34 K1 · Traege 21/55 K2
+int lenF  = bandMode == "Schnell" ? 5 : bandMode == "Original" ? 8 : bandMode == "Traege" ? 21 : 13
+int lenS  = bandMode == "Schnell" ? 13 : bandMode == "Original" ? 21 : bandMode == "Traege" ? 55 : 34
+int bandK = bandMode == "Traege" ? 2 : 1
 
-color bandClr = upMode ? clrUp : clrDn
-// Schlanke Zone am Kurs (Optik) — die Signale kommen vom Trailing-Stopp
-float edgeSlow = ta.ema(hl2, 21)
-p_f = plot(showBand ? bandEdge : na, "Band-Kante schnell", color = color.new(bandClr, 60), linewidth = 1)
-p_s = plot(showBand ? edgeSlow : na, "Band-Kante langsam", color = color.new(bandClr, 60), linewidth = 1)
+float edgeF = ta.ema(hl2, lenF)
+float edgeS = ta.ema(hl2, lenS)
+bool  rawUp = edgeF > edgeS
+int   sinceRaw = nz(ta.barssince(ta.change(rawUp ? 1 : 0) != 0), 9999)
+
+// Bestaetigter Zustand: Farbe UND Signal wechseln gemeinsam — exakt am Uebergang
+var bool upC    = false
+var bool inited = false
+bool confirmOK = not confirmOnly or barstate.isconfirmed
+bool sigUp = false
+bool sigDn = false
+if not inited and not na(edgeS)
+    upC    := rawUp
+    inited := true
+else if inited and confirmOK and rawUp != upC and sinceRaw >= bandK - 1
+    upC   := rawUp
+    sigUp := rawUp
+    sigDn := not rawUp
+
+color bandClr = upC ? clrUp : clrDn
+p_f = plot(showBand ? edgeF : na, "Band-Kante schnell",  color = color.new(bandClr, 60), linewidth = 1)
+p_s = plot(showBand ? edgeS : na, "Band-Kante langsam",  color = color.new(bandClr, 60), linewidth = 1)
 fill(p_f, p_s, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
-plot(showStop ? stLine : na, "Trailing-Stopp", color = color.new(bandClr, 45), linewidth = 1, style = plot.style_linebr)
 
-plotshape(showSigs and flipUp, "Buy (Band klappt aufwaerts)", shape.triangleup, location.belowbar,
-     color.new(color.green, 0), size = size.small)
-plotshape(showSigs and flipDn, "Sell (Band klappt abwaerts)", shape.triangledown, location.abovebar,
-     color.new(color.red, 0), size = size.small)
+plotshape(showSigs and sigUp ? low * (1 - sigOffPct / 100) : na, "Buy (Band klappt aufwaerts)",
+     shape.triangleup, location.absolute, color.new(color.green, 0), size = size.small)
+plotshape(showSigs and sigDn ? high * (1 + sigOffPct / 100) : na, "Sell (Band klappt abwaerts)",
+     shape.triangledown, location.absolute, color.new(color.red, 0), size = size.small)
 
 // ─── Beschriftung am rechten Rand ────────────────────────────────────────────
 f_pctTxt(float lv) =>
@@ -273,13 +311,13 @@ if barstate.islast and showLabels
     while array.size(lbls) > 0
         label.delete(array.pop(lbls))
     float[]  lvs  = array.from(lv100, lv786, lv618, lv500, lv382, lv236, lv000)
-    string[] nms  = array.from("S6", "S5", "S4", "S3", "S2", "S1", "S0")
+    string[] nms  = array.from("R6", "R5", "R4", "R3", "R2", "R1", "R0")
     color[]  cls  = array.from(clr100, clr786, clr618, clr500, clr382, clr236, clr000)
     if showExt
-        array.unshift(lvs, lv1618), array.unshift(nms, "S7"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv2618), array.unshift(nms, "S8"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv4236), array.unshift(nms, "S9"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv6854), array.unshift(nms, "S10"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv1618), array.unshift(nms, "R7"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv2618), array.unshift(nms, "R8"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv4236), array.unshift(nms, "R9"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv6854), array.unshift(nms, "R10"), array.unshift(cls, clrExt)
     for i = 0 to array.size(lvs) - 1
         float lv = array.get(lvs, i)
         if not na(lv)
@@ -291,13 +329,13 @@ if barstate.islast and showLabels
 var table t = table.new(position.bottom_right, 2, 2, border_width = 1)
 if barstate.islast and showTable
     float[]  zlvs = array.from(lv000, lv236, lv382, lv500, lv618, lv786, lv100)
-    string[] znms = array.from("S0", "S1", "S2", "S3", "S4", "S5", "S6")
+    string[] znms = array.from("R0", "R1", "R2", "R3", "R4", "R5", "R6")
     if showExt
-        array.push(zlvs, lv1618), array.push(znms, "S7")
-        array.push(zlvs, lv2618), array.push(znms, "S8")
-        array.push(zlvs, lv4236), array.push(znms, "S9")
-        array.push(zlvs, lv6854), array.push(znms, "S10")
-    string zoneTxt  = "unter S0"
+        array.push(zlvs, lv1618), array.push(znms, "R7")
+        array.push(zlvs, lv2618), array.push(znms, "R8")
+        array.push(zlvs, lv4236), array.push(znms, "R9")
+        array.push(zlvs, lv6854), array.push(znms, "R10")
+    string zoneTxt  = "unter R0"
     string floorTxt = "–"
     for i = 0 to array.size(zlvs) - 1
         if close >= array.get(zlvs, i)
@@ -312,8 +350,8 @@ if barstate.islast and showTable
 
 // ─── Backtest (Tabelle statt Order-Pfeile — wie Stillhalter Mean Reversion) ──
 bool inWindow  = time >= btFrom and time <= btTo
-bool stratBuy  = inWindow and flipUp
-bool stratSell = inWindow and flipDn
+bool stratBuy  = inWindow and sigUp
+bool stratSell = inWindow and sigDn
 
 var float equity     = na
 var float entryPrice = na
@@ -362,9 +400,9 @@ var int   spExpired = 0
 var float spWorst   = 0.0
 
 if enableBT and btMode == "Stillhalter (Short Put)"
-    if stratBuy and not spOpen and stLine > 0
+    if stratBuy and not spOpen and edgeS > 0
         spOpen   := true
-        spStrike := stLine * (1 - strikeBufPct / 100)
+        spStrike := edgeS * (1 - strikeBufPct / 100)
         spExpiry := f_fridayAfter(time + minCalDays * 86400000)
     if spOpen and time >= spExpiry
         spTrades += 1
@@ -404,12 +442,12 @@ if barstate.islast and enableBT
         table.cell(bt, 1, 4, str.tostring(maxDD, "#.#") + " %", text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
-alertcondition(flipUp, "Band-Buy",  "Stillhalter Retracements: Trailing-Band klappt aufwaerts (Buy)")
-alertcondition(flipDn, "Band-Sell", "Stillhalter Retracements: Trailing-Band klappt abwaerts (Sell)")
-alertcondition(ta.crossunder(close, lv786), "Kurs faellt unter S5", "Stillhalter Retracements: Kurs unter S5 gefallen")
-alertcondition(ta.crossunder(close, lv618), "Kurs faellt unter S4", "Stillhalter Retracements: Kurs unter S4 gefallen")
-alertcondition(ta.crossunder(close, lv500), "Kurs faellt unter S3", "Stillhalter Retracements: Kurs unter S3 gefallen")
-alertcondition(ta.crossunder(close, lv382), "Kurs faellt unter S2", "Stillhalter Retracements: Kurs unter S2 gefallen")
-alertcondition(ta.crossover(close, lv786),  "Kurs erobert S5 zurueck", "Stillhalter Retracements: Kurs zurueck ueber S5")
-alertcondition(ta.crossover(close, lv618),  "Kurs erobert S4 zurueck", "Stillhalter Retracements: Kurs zurueck ueber S4")
+alertcondition(sigUp, "Band-Buy",  "Stillhalter Retracements: Trailing-Band klappt aufwaerts (Buy)")
+alertcondition(sigDn, "Band-Sell", "Stillhalter Retracements: Trailing-Band klappt abwaerts (Sell)")
+alertcondition(ta.crossunder(close, lv786), "Kurs faellt unter R5", "Stillhalter Retracements: Kurs unter R5 gefallen")
+alertcondition(ta.crossunder(close, lv618), "Kurs faellt unter R4", "Stillhalter Retracements: Kurs unter R4 gefallen")
+alertcondition(ta.crossunder(close, lv500), "Kurs faellt unter R3", "Stillhalter Retracements: Kurs unter R3 gefallen")
+alertcondition(ta.crossunder(close, lv382), "Kurs faellt unter R2", "Stillhalter Retracements: Kurs unter R2 gefallen")
+alertcondition(ta.crossover(close, lv786),  "Kurs erobert R5 zurueck", "Stillhalter Retracements: Kurs zurueck ueber R5")
+alertcondition(ta.crossover(close, lv618),  "Kurs erobert R4 zurueck", "Stillhalter Retracements: Kurs zurueck ueber R4")
 alertcondition(ath > ath[1], "Neues Allzeithoch", "Stillhalter Retracements: neues Allzeithoch — alle Level werden nachgezogen")
