@@ -2,11 +2,28 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.5
+//  Stillhalter Community® – RETRACEMENTS v2.6
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.5 — SIGNAL-FILTER (Analyse der Original-Optionen):
+//  NEU in v2.6 — KLOBIGE STOPP-ZONE statt Ribbon (Original-Optik):
+//   • Analyse: Das Original-Band ist KEIN geglaettetes MA-Ribbon (das
+//     war v2.4/2.5 — und sah dadurch aus wie das Stillhalter Trend
+//     Model), sondern eine GERATCHTE STOPP-ZONE: zwei nachlaufende
+//     Stopps (innere + aeussere Kante), die im Aufwaertsmodus nur
+//     steigen duerfen (flach in Pullbacks -> Klotz-Optik) und beim
+//     Wechsel SENKRECHT auf die andere Kursseite springen. Zone liegt
+//     im Aufwaertsmodus UNTER dem Kurs (Unterstuetzung), im Abwaerts-
+//     modus DARUEBER (Widerstand).
+//   • Interne Kalibrierung (NUR hier im Quellcode; ATR-Laenge/Faktor
+//     aussen, innere Kante = halber Faktor): Schnell 7/2.5 (haeufigste
+//     Signale, PF ~1.9) · Original 10/3.0 (IA-Timing, PF 2.20) ·
+//     Normal 14/4.0 (Kalibrierungs-Optimum, PF 2.66) · Traege 21/4.0
+//     (PF ~2.6). Zustand/Signale/Filter unveraendert: Farbe, Zone und
+//     Dreieck wechseln gemeinsam an der bestaetigten Signalkerze.
+//   • Backtest-Strike jetzt an der AEUSSEREN Kante (tiefere, defensivere
+//     Referenz als vorher).
+//  v2.5 — SIGNAL-FILTER (Analyse der Original-Optionen):
 //   • 'Noise Suppression' des Originals = Anzahl Bestaetigungskerzen
 //     nach dem Kanten-Kreuz. Jetzt als eigener Regler: Aus (sofort) ·
 //     Niedrig (Standard, 1 Kerze) · Mittel (2) · Hoch (3). Messung
@@ -106,7 +123,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.5", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.6", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -153,9 +170,11 @@ sigFilter = input.string("Niedrig (Standard)", "Signal-Filter",
           + "Fehlsignale) · Hoch = maximale Ruhe (weniger, dafuer bessere "
           + "Signale, spaeterer Einstieg). Datenbasiert kalibriert.")
 showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
-     tooltip = "Nachlaufender Stopp im Abstand der aktuellen Schwankungsbreite: "
-          + "Kurs darueber = Band laeuft als Unterstuetzung mit (Aufwaertsmodus), "
-          + "Bruch nach unten = Band klappt auf die Oberseite (Abwaertsmodus).")
+     tooltip = "Nachlaufende Stopp-Zone im Abstand der aktuellen Schwankungs-"
+          + "breite: Im Aufwaertsmodus laeuft sie als Unterstuetzung UNTER dem "
+          + "Kurs mit (steigt nur, bleibt in Pullbacks flach stehen), beim "
+          + "Wechsel springt sie auf die Oberseite und laeuft als Widerstand "
+          + "mit. Die Sprung-Momente sind die Signale.")
 showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
      tooltip = "Gruenes Dreieck (Buy) unter der Kerze des Farbwechsels in den "
           + "Aufwaertsmodus · rotes Dreieck (Sell) darueber beim Wechsel in den "
@@ -280,25 +299,28 @@ plot(lv2618, "R8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
 plot(lv4236, "R9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
 plot(lv6854, "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
-// ─── Trailing-Band: EINE Mechanik fuer Zone, Farbe und Signale ───────────────
-// Modus-Kalibrierung intern (s. Changelog): Kantenpaare auf hl2 —
-// Schnell 5/13 K1 · Original 8/21 K1 · Normal 13/34 K1 · Traege 21/55 K2
-int lenF  = bandMode == "Schnell" ? 5 : bandMode == "Original" ? 8 : bandMode == "Traege" ? 21 : 13
-int lenS  = bandMode == "Schnell" ? 13 : bandMode == "Original" ? 21 : bandMode == "Traege" ? 55 : 34
-int bandK = sigFilter == "Aus" ? 0 : sigFilter == "Mittel" ? 2 : sigFilter == "Hoch" ? 3 : 1
+// ─── Trailing-Band: geratchte Stopp-Zone (klobige Original-Optik) ────────────
+// Modus-Kalibrierung intern (s. Changelog): ATR-Laenge / Faktor aussen —
+// Schnell 7/2.5 · Original 10/3.0 · Normal 14/4.0 · Traege 21/4.0;
+// innere Kante = halber Faktor. Flach in Pullbacks (Ratsche),
+// senkrechter Sprung auf die andere Kursseite am Signal.
+int   stLen = bandMode == "Schnell" ? 7 : bandMode == "Original" ? 10 : bandMode == "Traege" ? 21 : 14
+float mFar  = bandMode == "Schnell" ? 2.5 : bandMode == "Original" ? 3.0 : 4.0
+float mNear = mFar / 2
+int   bandK = sigFilter == "Aus" ? 0 : sigFilter == "Mittel" ? 2 : sigFilter == "Hoch" ? 3 : 1
 
-float edgeF = ta.ema(hl2, lenF)
-float edgeS = ta.ema(hl2, lenS)
-bool  rawUp = edgeF > edgeS
-int   sinceRaw = nz(ta.barssince(ta.change(rawUp ? 1 : 0) != 0), 9999)
+[stRaw, stDir] = ta.supertrend(mFar, stLen)
+bool  rawUp = stDir < 0
+int   sinceRaw = nz(ta.barssince(ta.change(stDir) != 0), 9999)
+float atrV = ta.atr(stLen)
 
-// Bestaetigter Zustand: Farbe UND Signal wechseln gemeinsam — exakt am Uebergang
+// Bestaetigter Zustand: Farbe, Zone und Signal wechseln gemeinsam
 var bool upC    = false
 var bool inited = false
 bool confirmOK = not confirmOnly or barstate.isconfirmed
 bool sigUp = false
 bool sigDn = false
-if not inited and not na(edgeS)
+if not inited and not na(stRaw)
     upC    := rawUp
     inited := true
 else if inited and confirmOK and rawUp != upC and sinceRaw >= bandK - 1
@@ -306,9 +328,21 @@ else if inited and confirmOK and rawUp != upC and sinceRaw >= bandK - 1
     sigUp := rawUp
     sigDn := not rawUp
 
+// Geratchte Kanten aus dem bestaetigten Zustand
+var float farLn  = na
+var float nearLn = na
+bool stateFlip = sigUp or sigDn or (inited and na(farLn))
+if inited
+    if upC
+        farLn  := stateFlip ? hl2 - mFar  * atrV : math.max(nz(farLn,  hl2 - mFar  * atrV), hl2 - mFar  * atrV)
+        nearLn := stateFlip ? hl2 - mNear * atrV : math.max(nz(nearLn, hl2 - mNear * atrV), hl2 - mNear * atrV)
+    else
+        farLn  := stateFlip ? hl2 + mFar  * atrV : math.min(nz(farLn,  hl2 + mFar  * atrV), hl2 + mFar  * atrV)
+        nearLn := stateFlip ? hl2 + mNear * atrV : math.min(nz(nearLn, hl2 + mNear * atrV), hl2 + mNear * atrV)
+
 color bandClr = upC ? clrUp : clrDn
-p_f = plot(showBand ? edgeF : na, "Band-Kante schnell",  color = color.new(bandClr, 60), linewidth = 1)
-p_s = plot(showBand ? edgeS : na, "Band-Kante langsam",  color = color.new(bandClr, 60), linewidth = 1)
+p_f = plot(showBand ? nearLn : na, "Band-Kante innen",  color = color.new(bandClr, 60), linewidth = 1)
+p_s = plot(showBand ? farLn  : na, "Band-Kante aussen", color = color.new(bandClr, 60), linewidth = 1)
 fill(p_f, p_s, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
 
 plotshape(showSigs and sigUp ? low * (1 - sigOffPct / 100) : na, "Buy (Band klappt aufwaerts)",
@@ -417,9 +451,9 @@ var int   spExpired = 0
 var float spWorst   = 0.0
 
 if enableBT and btMode == "Stillhalter (Short Put)"
-    if stratBuy and not spOpen and edgeS > 0
+    if stratBuy and not spOpen and farLn > 0
         spOpen   := true
-        spStrike := edgeS * (1 - strikeBufPct / 100)
+        spStrike := farLn * (1 - strikeBufPct / 100)
         spExpiry := f_fridayAfter(time + minCalDays * 86400000)
     if spOpen and time >= spExpiry
         spTrades += 1
