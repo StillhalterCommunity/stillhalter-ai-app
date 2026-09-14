@@ -2,11 +2,19 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.2
+//  Stillhalter Community® – RETRACEMENTS v2.3
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.2 — BAND-MODI + STILLHALTER-BACKTEST:
+//  NEU in v2.3 — BAND-OPTIK entkoppelt (Feedback):
+//   • Die SIGNALE rechnet weiterhin der kalibrierte Trailing-Stopp —
+//     GEZEICHNET wird aber eine schlanke Zone, die am Kurs anliegt
+//     (intern: EMA(hl2,8) x EMA(hl2,21)), statt der weit entfernten
+//     Stopp-Linie. Kein hoch/tief ausuferndes Band mehr.
+//   • Stopp-Linie optional einblendbar (Standard aus).
+//   • Buy/Sell-Dreiecke groesser (small) und durch die schlanke Zone
+//     nicht mehr verdeckt.
+//  v2.2 — BAND-MODI + STILLHALTER-BACKTEST:
 //   • Band-Modus waehlbar: Schnell · Normal (Standard) · Traege — ohne
 //     sichtbare Parameter. Interne Zuordnung (NUR hier im Quellcode):
 //     Schnell = SuperTrend 10 / Faktor 3.0 / sofort (entspricht dem
@@ -66,7 +74,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: S5 ≈ −21% vom Hoch · S4 ≈ −38% · S3 = −50% · S2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.2", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.3", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -115,6 +123,9 @@ showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
           + "Kerze beim Wechsel in den Abwaertsmodus. Das Dreieck erscheint eine "
           + "Kerze nach dem Farbwechsel — erst wenn der Wechsel bestaetigt ist "
           + "(datenbasiert kalibrierter Flacker-Schutz).")
+showStop = input.bool(false, "Stopp-Linie anzeigen", group = grp_tb,
+     tooltip = "Blendet zusaetzlich die nachlaufende Stopp-Linie ein, an der die "
+          + "Signale entstehen — Standard aus, damit der Chart ruhig bleibt.")
 bandTransp = input.int(80, "Band-Transparenz", minval = 0, maxval = 100, group = grp_tb,
      tooltip = "0 = kraeftig gefuellt · 100 = Fuellung unsichtbar (Linien und "
           + "Signale bleiben).")
@@ -238,14 +249,17 @@ bool flipUp  = upMode and sinceFlip == stK
 bool flipDn  = not upMode and sinceFlip == stK
 
 color bandClr = upMode ? clrUp : clrDn
-p_st   = plot(showBand ? stLine   : na, "Trailing-Stopp", color = color.new(bandClr, 35), linewidth = 1, style = plot.style_linebr)
-p_edge = plot(showBand ? bandEdge : na, "Band-Kante",     color = color.new(bandClr, 75), linewidth = 1)
-fill(p_st, p_edge, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
+// Schlanke Zone am Kurs (Optik) — die Signale kommen vom Trailing-Stopp
+float edgeSlow = ta.ema(hl2, 21)
+p_f = plot(showBand ? bandEdge : na, "Band-Kante schnell", color = color.new(bandClr, 60), linewidth = 1)
+p_s = plot(showBand ? edgeSlow : na, "Band-Kante langsam", color = color.new(bandClr, 60), linewidth = 1)
+fill(p_f, p_s, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
+plot(showStop ? stLine : na, "Trailing-Stopp", color = color.new(bandClr, 45), linewidth = 1, style = plot.style_linebr)
 
 plotshape(showSigs and flipUp, "Buy (Band klappt aufwaerts)", shape.triangleup, location.belowbar,
-     color.new(color.green, 0), size = size.tiny)
+     color.new(color.green, 0), size = size.small)
 plotshape(showSigs and flipDn, "Sell (Band klappt abwaerts)", shape.triangledown, location.abovebar,
-     color.new(color.red, 0), size = size.tiny)
+     color.new(color.red, 0), size = size.small)
 
 // ─── Beschriftung am rechten Rand ────────────────────────────────────────────
 f_pctTxt(float lv) =>
