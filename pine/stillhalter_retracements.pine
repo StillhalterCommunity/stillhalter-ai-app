@@ -2,11 +2,22 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.6
+//  Stillhalter Community® – RETRACEMENTS v2.7
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.6 — KLOBIGE STOPP-ZONE statt Ribbon (Original-Optik):
+//  NEU in v2.7 — VIELE UEBERGAENGE wie das Original (dekodiert):
+//   • Erkenntnis aus dem 1:1-Vergleich: Im IA-Original wechselt die
+//     BANDFARBE bei JEDEM Umschwung sofort — die 'Noise Suppression'
+//     filtert nur die Buy/Sell-MARKER. Bei uns filterte sie bisher
+//     beides, daher zu wenige Uebergaenge.
+//   • Jetzt genauso: Farbe + Zone kippen sofort (bei 'Nur bestaetigte
+//     Kerzen' mit Kerzenschluss), der Signal-Filter duennt nur die
+//     Dreiecke/Alerts aus. Ueberlebt ein Wechsel den Filter, wird das
+//     Dreieck RUECKWIRKEND an der Wechselkerze gezeichnet — es sitzt
+//     also weiterhin exakt am Uebergang (erscheint entsprechend
+//     Filterstufe 0-3 Kerzen spaeter; Alert kommt zur Bestaetigung).
+//  v2.6 — KLOBIGE STOPP-ZONE statt Ribbon (Original-Optik):
 //   • Analyse: Das Original-Band ist KEIN geglaettetes MA-Ribbon (das
 //     war v2.4/2.5 — und sah dadurch aus wie das Stillhalter Trend
 //     Model), sondern eine GERATCHTE STOPP-ZONE: zwei nachlaufende
@@ -123,7 +134,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.6", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.7", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -165,10 +176,11 @@ bandMode = input.string("Normal (Standard)", "Band-Modus",
           + "seltensten Signalen.")
 sigFilter = input.string("Niedrig (Standard)", "Signal-Filter",
      options = ["Aus", "Niedrig (Standard)", "Mittel", "Hoch"], group = grp_tb,
-     tooltip = "Wie viele geschlossene Kerzen ein Wechsel halten muss, bevor "
-          + "Farbe und Signal umspringen. Aus = sofortige Reaktion (mehr "
-          + "Fehlsignale) · Hoch = maximale Ruhe (weniger, dafuer bessere "
-          + "Signale, spaeterer Einstieg). Datenbasiert kalibriert.")
+     tooltip = "Filtert NUR die Buy/Sell-Dreiecke und Alerts — die Bandfarbe "
+          + "wechselt immer sofort. Ein Wechsel muss so viele geschlossene "
+          + "Kerzen halten, bevor sein Dreieck (rueckwirkend an der Wechsel-"
+          + "kerze) erscheint. Aus = jedes Umklappen wird markiert · Hoch = "
+          + "nur die stabilsten Wechsel. Datenbasiert kalibriert.")
 showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
      tooltip = "Nachlaufende Stopp-Zone im Abstand der aktuellen Schwankungs-"
           + "breite: Im Aufwaertsmodus laeuft sie als Unterstuetzung UNTER dem "
@@ -178,8 +190,9 @@ showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
 showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
      tooltip = "Gruenes Dreieck (Buy) unter der Kerze des Farbwechsels in den "
           + "Aufwaertsmodus · rotes Dreieck (Sell) darueber beim Wechsel in den "
-          + "Abwaertsmodus. Farbe und Dreieck wechseln gemeinsam — erst wenn der "
-          + "Wechsel bestaetigt ist (datenbasiert kalibrierter Flacker-Schutz).")
+          + "Abwaertsmodus. Das Dreieck sitzt an der Wechselkerze, erscheint "
+          + "aber erst, wenn der Wechsel den Signal-Filter ueberlebt hat (je "
+          + "nach Filterstufe wenige Kerzen spaeter; der Alert kommt dann).")
 confirmOnly = input.bool(true, "Nur bestaetigte Kerzen (kein Flackern)", group = grp_tb,
      tooltip = "AN (empfohlen): Farbwechsel und Signal erscheinen erst, wenn die "
           + "Kerze geschlossen hat — nichts taucht intrabar auf und verschwindet "
@@ -314,24 +327,27 @@ bool  rawUp = stDir < 0
 int   sinceRaw = nz(ta.barssince(ta.change(stDir) != 0), 9999)
 float atrV = ta.atr(stLen)
 
-// Bestaetigter Zustand: Farbe, Zone und Signal wechseln gemeinsam
+// Farbe/Zone: kippen bei JEDEM Umschwung (nur ans Kerzenschluss-Gate
+// gebunden) — der Signal-Filter betrifft ausschliesslich Dreiecke/Alerts
 var bool upC    = false
 var bool inited = false
 bool confirmOK = not confirmOnly or barstate.isconfirmed
-bool sigUp = false
-bool sigDn = false
 if not inited and not na(stRaw)
     upC    := rawUp
     inited := true
-else if inited and confirmOK and rawUp != upC and sinceRaw >= bandK - 1
-    upC   := rawUp
-    sigUp := rawUp
-    sigDn := not rawUp
+else if inited and confirmOK and rawUp != upC
+    upC := rawUp
 
-// Geratchte Kanten aus dem bestaetigten Zustand
+// Signale: Wechsel muss den Filter (bandK Kerzen) ueberleben — das
+// Dreieck wird dann rueckwirkend an der Wechselkerze gezeichnet
+int  sinceC = nz(ta.barssince(ta.change(upC ? 1 : 0) != 0), 9999)
+bool sigUp = inited and upC and sinceC == bandK
+bool sigDn = inited and not upC and sinceC == bandK
+
+// Geratchte Kanten folgen dem Farb-Zustand
 var float farLn  = na
 var float nearLn = na
-bool stateFlip = sigUp or sigDn or (inited and na(farLn))
+bool stateFlip = ta.change(upC ? 1 : 0) != 0 or (inited and na(farLn))
 if inited
     if upC
         farLn  := stateFlip ? hl2 - mFar  * atrV : math.max(nz(farLn,  hl2 - mFar  * atrV), hl2 - mFar  * atrV)
@@ -345,10 +361,10 @@ p_f = plot(showBand ? nearLn : na, "Band-Kante innen",  color = color.new(bandCl
 p_s = plot(showBand ? farLn  : na, "Band-Kante aussen", color = color.new(bandClr, 60), linewidth = 1)
 fill(p_f, p_s, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
 
-plotshape(showSigs and sigUp ? low * (1 - sigOffPct / 100) : na, "Buy (Band klappt aufwaerts)",
-     shape.triangleup, location.absolute, color.new(color.green, 0), size = size.small)
-plotshape(showSigs and sigDn ? high * (1 + sigOffPct / 100) : na, "Sell (Band klappt abwaerts)",
-     shape.triangledown, location.absolute, color.new(color.red, 0), size = size.small)
+plotshape(showSigs and sigUp ? low[bandK] * (1 - sigOffPct / 100) : na, "Buy (Band klappt aufwaerts)",
+     shape.triangleup, location.absolute, color.new(color.green, 0), size = size.small, offset = -bandK)
+plotshape(showSigs and sigDn ? high[bandK] * (1 + sigOffPct / 100) : na, "Sell (Band klappt abwaerts)",
+     shape.triangledown, location.absolute, color.new(color.red, 0), size = size.small, offset = -bandK)
 
 // ─── Beschriftung am rechten Rand ────────────────────────────────────────────
 f_pctTxt(float lv) =>
