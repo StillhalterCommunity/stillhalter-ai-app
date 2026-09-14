@@ -2,67 +2,56 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v1.3
-//  Nachgeführte Retracement-Level vom Allzeittief zum Allzeithoch —
+//  Stillhalter Community® – RETRACEMENTS v2.0
+//  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v1.3 — ANKER-FIX für Intraday-Charts:
-//   • Problem: Auf Intraday-Zeiteinheiten laedt TradingView nur ein
-//     begrenztes Datenfenster. Das 'Allzeittief' war dadurch nur das
-//     Fenster-Tief — wurde es unterboten, rutschten alle Level parallel
-//     nach unten. Level duerfen aber nur STEIGEN (neues Hoch).
-//   • Fix: Allzeithoch/-tief kommen jetzt zusaetzlich aus der
-//     MONATS-Historie des Symbols (reicht auch auf 4h-Charts bis zum
-//     Listing zurueck; nur bestaetigte Monate, kein Repaint) und werden
-//     mit dem lokalen Chart-Fenster kombiniert. Ergebnis: identische
-//     Level auf allen Zeiteinheiten, Treppen nur nach oben.
-//  v1.2 — TARNKAPPE (Geheimhaltungs-Regel):
-//   • Alle sichtbaren Texte zeigen nur noch neutrale Level-Codes S0–S10
-//     (Labels, Tabelle, Stil-Reiter, Einstellungen, Alerts) — keine
-//     Ratios mehr, an denen man die Methode ablesen koennte.
-//   • Interne Zuordnung (NUR hier im Quellcode): S0=0.000 · S1=0.236 ·
-//     S2=0.382 · S3=0.500 · S4=0.618 · S5=0.786 bzw. 0.764 (Variante B)
-//     · S6=1.000 (Allzeithoch) · S7=1.618 · S8=2.618 · S9=4.236 ·
-//     S10=6.854.
-//  v1.1: Umschalter fürs oberste Retracement — 0.786 (klassisch)
-//  oder 0.764 (Spiegel-Variante 1−0.236; die NVDA-Statuszeile des
-//  IA-Originals zeigt 0.764: 162.09/212.16). Standard: 0.786.
+//  NEU in v2.0 — TRAILING-BAND + NULL-ANKER (Feedback):
+//   • TRAILING-BAND (das blau/orange Band des IA-Originals, hier als
+//     eigenstaendiger Baustein): nachlaufender Stopp im Abstand der
+//     aktuellen Schwankungsbreite (SuperTrend-Mechanik, ATR-basiert).
+//     Kurs darueber = Band laeuft als Unterstuetzung mit (petrol),
+//     Bruch nach unten = Band klappt auf die Oberseite (magenta) —
+//     bewusst ANDERE Farben als das Original.
+//     Die Umklapp-Momente sind die Signale: kleines gruenes Dreieck
+//     (Buy) unter der Kerze · kleines rotes Dreieck (Sell) darueber —
+//     bewusst anders als die Confluence-Optik. Band + Signale einzeln
+//     abschaltbar; der Stillhalter Trend bleibt separat und unberuehrt.
+//   • Alle Level-Linien standardmaessig in duennster Linienstaerke.
+//   • LEVEL-0-ANKER: Standard jetzt NULL (Level = Ratio x Allzeithoch,
+//     ueberall exakt reproduzierbar). Waehlbar: Allzeittief · Jahres- ·
+//     2-Jahres- · 5-Jahres- · 10-Jahres-Tief (rollierend aus der
+//     Monats-Historie, auch auf Intraday-Charts).
+//  v1.3 — ANKER-FIX: Allzeithoch/-tief aus der MONATS-Historie
+//   (reicht auch auf 4h-Charts bis zum Listing zurueck; nur bestaetigte
+//   Monate, kein Repaint) kombiniert mit dem lokalen Chart-Fenster —
+//   Level identisch auf allen Zeiteinheiten, Treppen nur nach oben.
+//  v1.2 — TARNKAPPE: sichtbare Texte zeigen nur Level-Codes S0–S10.
+//   Interne Zuordnung (NUR hier im Quellcode): S0=0.000 · S1=0.236 ·
+//   S2=0.382 · S3=0.500 · S4=0.618 · S5=0.786 bzw. 0.764 (Variante B) ·
+//   S6=1.000 (Allzeithoch) · S7=1.618 · S8=2.618 · S9=4.236 · S10=6.854.
+//   Trailing-Band intern: SuperTrend ATR-Laenge 10, Faktor 3,
+//   Bandkante EMA(hl2, 8).
+//  v1.1 — Umschalter oberstes Retracement: 0.786 (klassisch) oder
+//   0.764 (Spiegel-Variante; das IA-Original nutzt 0.764).
 //
-//  MECHANIK (dekodiert aus dem IA-ATR-Model — das mit ATR nichts zu tun
-//  hat, sondern klassische Fibonacci-Retracements auf Maximal-Historie ist;
-//  die blau/orangen Baender des Originals sind ein separates ATR-Trailing-
-//  Trendband und werden bei uns vom Stillhalter Trend Model abgedeckt):
-//   • Level 6 = 1.000 = nachgeführtes ALLZEITHOCH (steigt mit jedem
-//     neuen Hoch mit — dadurch die Treppen-Optik).
-//   • Level 0 = 0.000 = Ausgangstief (Allzeittief der verfügbaren
-//     Historie; bei alten Aktien praktisch null — daher wirkt es wie
-//     'Hoch mal Fibonacci-Faktor'). Wahlweise hart auf 0 setzbar.
-//   • Dazwischen die 5 Standard-Ratios: 0.236 · 0.382 · 0.5 · 0.618 ·
-//     0.786 (= Level 1–5). Darüber als ZIEL-Level die Erweiterungen
-//     der Goldener-Schnitt-Reihe: 1.618 ('Level 7') · 2.618 ('Level 8')
-//     · 4.236 ('Level 9') · 6.854 ('Level 10') — bewusst transparenter,
-//     die Hauptlevel bleiben 0–6.
-//   • Faustformel-Übersetzung der alten %-vom-Hoch-Regel (bei Tief ≈ 0):
-//     0.786 ≈ −21% vom Hoch · 0.618 ≈ −38% · 0.5 = −50% · 0.382 ≈ −62%.
-//  ANZEIGE: Level-Linien in eigenen Farben, rechts Labels mit Ratio,
-//  Preis und Abstand zum aktuellen Kurs in %; Status-Tabelle zeigt die
-//  aktuelle Zone und den nächsten Boden darunter. Alerts beim Bruch
-//  der wichtigen Level und bei neuem Allzeithoch.
-//  HINWEIS: Basis ist die auf TradingView verfügbare Historie des
-//  Symbols — auf Tages-/Wochenchart ist das i. d. R. die volle
-//  Kurshistorie seit Listing.
+//  MECHANIK (dekodiert aus dem IA-ATR-Model): Level 6 = nachgefuehrtes
+//  ALLZEITHOCH inkl. Docht; darunter die Standard-Ratios (s. o.);
+//  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
+//  Anker 0: S5 ≈ −21% vom Hoch · S4 ≈ −38% · S3 = −50% · S2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v1.3", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.0", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
-// ─── Inputs ──────────────────────────────────────────────────────────────────
+// ─── Inputs: Level ───────────────────────────────────────────────────────────
 grp_lv = "LEVEL"
-anchorMode = input.string("Allzeittief (Standard)", "Ausgangspunkt (Level 0)",
-     options = ["Allzeittief (Standard)", "Null"], group = grp_lv,
-     tooltip = "Wo Level 0 verankert wird: 'Allzeittief' = tiefster Kurs der "
-          + "verfügbaren Historie (Original-Verhalten). 'Null' = Level 0 fest "
-          + "bei 0 — bei jungen Aktien mit hohem Ausgabekurs testweise "
-          + "interessant, sonst Standard lassen.")
+anchorMode = input.string("Null (Standard)", "Ausgangspunkt (Level 0 / S0)",
+     options = ["Null (Standard)", "Allzeittief", "Jahrestief", "2-Jahres-Tief", "5-Jahres-Tief", "10-Jahres-Tief"], group = grp_lv,
+     tooltip = "Wo S0 verankert wird. 'Null' = Standard: Die Level haengen nur "
+          + "am Allzeithoch und sind ueberall exakt reproduzierbar. Alternativ "
+          + "ein Tief als Anker: Allzeittief oder das rollierende Tief der "
+          + "letzten 1/2/5/10 Jahre — dann spannen sich die Level zwischen "
+          + "diesem Tief und dem Allzeithoch auf.")
 fibVariant = input.string("Variante A (Standard)", "S5-Berechnung",
      options = ["Variante A (Standard)", "Variante B (Spiegel)"], group = grp_lv,
      tooltip = "Fuer die Marke S5 existieren zwei gebraeuchliche Varianten. "
@@ -82,28 +71,45 @@ showTable  = input.bool(true, "Status-Tabelle anzeigen", group = grp_lv,
      tooltip = "Zeigt, zwischen welchen Leveln der Kurs gerade notiert und "
           + "wo der nächste Boden darunter liegt (Preis + Abstand).")
 
-grp_st = "FARBEN & OPTIK"
+// ─── Inputs: Trailing-Band ───────────────────────────────────────────────────
+grp_tb = "TRAILING-BAND"
+showBand = input.bool(true, "Trailing-Band anzeigen", group = grp_tb,
+     tooltip = "Nachlaufender Stopp im Abstand der aktuellen Schwankungsbreite: "
+          + "Kurs darueber = Band laeuft als Unterstuetzung mit (Aufwaertsmodus), "
+          + "Bruch nach unten = Band klappt auf die Oberseite (Abwaertsmodus).")
+showSigs = input.bool(true, "Buy/Sell-Signale am Band-Wechsel", group = grp_tb,
+     tooltip = "Kleines gruenes Dreieck (Buy) unter der Kerze, wenn das Band in "
+          + "den Aufwaertsmodus klappt · kleines rotes Dreieck (Sell) ueber der "
+          + "Kerze beim Wechsel in den Abwaertsmodus.")
+bandTransp = input.int(80, "Band-Transparenz", minval = 0, maxval = 100, group = grp_tb,
+     tooltip = "0 = kraeftig gefuellt · 100 = Fuellung unsichtbar (Linien und "
+          + "Signale bleiben).")
+clrUp = input.color(#00897B, "Band aufwaerts", group = grp_tb)
+clrDn = input.color(#D81B60, "Band abwaerts",  group = grp_tb)
+
+// ─── Inputs: Farben Level ────────────────────────────────────────────────────
+grp_st = "FARBEN LEVEL"
 clr100 = input.color(color.white,   "S6 — Allzeithoch", group = grp_st)
 clr786 = input.color(#26C6DA,       "S5", group = grp_st)
 clr618 = input.color(#00C853,       "S4", group = grp_st)
 clr500 = input.color(#FFD600,       "S3", group = grp_st)
 clr382 = input.color(#FF9100,       "S2", group = grp_st)
 clr236 = input.color(#FF1744,       "S1", group = grp_st)
-clr000 = input.color(color.gray,    "S0 — Ausgangstief", group = grp_st)
+clr000 = input.color(color.gray,    "S0 — Ausgangspunkt", group = grp_st)
 clrExt = input.color(#AB47BC,       "S7 bis S10 (ueber dem Hoch)", group = grp_st)
 
-// ─── Anker: nachgeführtes Allzeithoch + Ausgangstief ─────────────────────────
+// ─── Anker: Allzeithoch + Tiefs aus der Monats-Historie ─────────────────────
 // Tiefe Historie ueber Monatsdaten (reicht auch auf Intraday-Charts bis zum
 // Listing zurueck); nur BESTAETIGTE Monate ([1] + lookahead) → kein Repaint.
-// Das lokale Chart-Fenster deckt den aktuellen Monat ab.
+// Das lokale Chart-Fenster bzw. der laufende Monat decken die Luecke ab.
 f_anchors() =>
     var float hh = na
     var float ll = na
     hh := na(hh) ? high : math.max(hh, high)
     ll := na(ll) ? low  : math.min(ll, low)
-    [hh[1], ll[1]]
+    [hh[1], ll[1], ta.lowest(low, 12)[1], ta.lowest(low, 24)[1], ta.lowest(low, 60)[1], ta.lowest(low, 120)[1]]
 
-[athHist, atlHist] = request.security(syminfo.tickerid, "M", f_anchors(),
+[athHist, atlHist, lo1y, lo2y, lo5y, lo10y] = request.security(syminfo.tickerid, "M", f_anchors(),
      lookahead = barmerge.lookahead_on)
 
 var float athLoc = na
@@ -111,11 +117,24 @@ var float atlLoc = na
 athLoc := na(athLoc) ? high : math.max(athLoc, high)
 atlLoc := na(atlLoc) ? low  : math.min(atlLoc, low)
 
+// Tief des laufenden Monats (schliesst die Luecke der bestaetigten Monate)
+var float curMoLow = na
+bool newMonth = ta.change(time("M")) != 0
+curMoLow := newMonth or na(curMoLow) ? low : math.min(curMoLow, low)
+
 float ath = math.max(nz(athHist, athLoc), athLoc)
 float atl = math.min(nz(atlHist, atlLoc), atlLoc)
 
-float base = anchorMode == "Null" ? 0.0 : atl
-float rng  = ath - base
+f_rollLow(float loN) => math.min(nz(loN, atl), curMoLow)
+
+float base = switch anchorMode
+    "Allzeittief"    => atl
+    "Jahrestief"     => f_rollLow(lo1y)
+    "2-Jahres-Tief"  => f_rollLow(lo2y)
+    "5-Jahres-Tief"  => f_rollLow(lo5y)
+    "10-Jahres-Tief" => f_rollLow(lo10y)
+    =>                  0.0
+float rng = ath - base
 
 f_lv(float r) => base + r * rng
 
@@ -132,25 +151,42 @@ float lv2618 = showExt ? f_lv(2.618) : na
 float lv4236 = showExt ? f_lv(4.236) : na
 float lv6854 = showExt ? f_lv(6.854) : na
 
-// ─── Level-Linien (Treppen-Verlauf, da sie nur bei neuem Hoch/Tief springen) ─
-plot(lv100,  "S6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 2)
-plot(lv786,  "S5",                color = color.new(clr786, 20), linewidth = 2)
-plot(lv618,  "S4",                color = color.new(clr618, 20), linewidth = 2)
+// ─── Level-Linien (Treppen-Verlauf, da sie nur bei neuem Hoch springen) ──────
+plot(lv100,  "S6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 1)
+plot(lv786,  "S5",                color = color.new(clr786, 20), linewidth = 1)
+plot(lv618,  "S4",                color = color.new(clr618, 20), linewidth = 1)
 plot(lv500,  "S3",                color = color.new(clr500, 30), linewidth = 1)
 plot(lv382,  "S2",                color = color.new(clr382, 30), linewidth = 1)
 plot(lv236,  "S1",                color = color.new(clr236, 30), linewidth = 1)
-plot(lv000,  "S0 (Ausgangstief)", color = color.new(clr000, 50), linewidth = 1)
+plot(lv000,  "S0 (Ausgangspunkt)",color = color.new(clr000, 50), linewidth = 1)
 plot(lv1618, "S7 (Ziel)",         color = color.new(clrExt, 40), linewidth = 1)
 plot(lv2618, "S8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
 plot(lv4236, "S9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
 plot(lv6854, "S10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
+// ─── Trailing-Band (eigenstaendig — der Stillhalter Trend bleibt separat) ────
+[stLine, stDir] = ta.supertrend(3.0, 10)
+float bandEdge = ta.ema(hl2, 8)
+bool upMode  = stDir < 0
+bool flipUp  = ta.change(stDir) < 0
+bool flipDn  = ta.change(stDir) > 0
+
+color bandClr = upMode ? clrUp : clrDn
+p_st   = plot(showBand ? stLine   : na, "Trailing-Stopp", color = color.new(bandClr, 35), linewidth = 1, style = plot.style_linebr)
+p_edge = plot(showBand ? bandEdge : na, "Band-Kante",     color = color.new(bandClr, 75), linewidth = 1)
+fill(p_st, p_edge, color = showBand ? color.new(bandClr, bandTransp) : na, title = "Band-Fuellung")
+
+plotshape(showSigs and flipUp, "Buy (Band klappt aufwaerts)", shape.triangleup, location.belowbar,
+     color.new(color.green, 0), size = size.tiny)
+plotshape(showSigs and flipDn, "Sell (Band klappt abwaerts)", shape.triangledown, location.abovebar,
+     color.new(color.red, 0), size = size.tiny)
+
 // ─── Beschriftung am rechten Rand ────────────────────────────────────────────
 f_pctTxt(float lv) =>
     not showDist or close == 0 ? "" : " · " + (lv >= close ? "+" : "") + str.tostring((lv / close - 1) * 100, "#.#") + "%"
 
-f_lblTxt(string ratio, float lv) =>
-    ratio + " — " + str.tostring(lv, format.mintick) + f_pctTxt(lv)
+f_lblTxt(string nm, float lv) =>
+    nm + " — " + str.tostring(lv, format.mintick) + f_pctTxt(lv)
 
 var array<label> lbls = array.new<label>()
 if barstate.islast and showLabels
@@ -195,6 +231,8 @@ if barstate.islast and showTable
     table.cell(t, 1, 1, floorTxt, text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
+alertcondition(flipUp, "Band-Buy",  "Stillhalter Retracements: Trailing-Band klappt aufwaerts (Buy)")
+alertcondition(flipDn, "Band-Sell", "Stillhalter Retracements: Trailing-Band klappt abwaerts (Sell)")
 alertcondition(ta.crossunder(close, lv786), "Kurs faellt unter S5", "Stillhalter Retracements: Kurs unter S5 gefallen")
 alertcondition(ta.crossunder(close, lv618), "Kurs faellt unter S4", "Stillhalter Retracements: Kurs unter S4 gefallen")
 alertcondition(ta.crossunder(close, lv500), "Kurs faellt unter S3", "Stillhalter Retracements: Kurs unter S3 gefallen")
