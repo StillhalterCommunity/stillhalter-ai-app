@@ -2,12 +2,18 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v1.0
+//  Stillhalter Community® – RETRACEMENTS v1.1
 //  Nachgeführte Retracement-Level vom Allzeittief zum Allzeithoch —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
+//  NEU in v1.1: Umschalter fürs oberste Retracement — 0.786 (klassisch)
+//  oder 0.764 (Spiegel-Variante 1−0.236; die NVDA-Statuszeile des
+//  IA-Originals zeigt 0.764: 162.09/212.16). Standard: 0.786.
+//
 //  MECHANIK (dekodiert aus dem IA-ATR-Model — das mit ATR nichts zu tun
-//  hat, sondern klassische Fibonacci-Retracements auf Maximal-Historie ist):
+//  hat, sondern klassische Fibonacci-Retracements auf Maximal-Historie ist;
+//  die blau/orangen Baender des Originals sind ein separates ATR-Trailing-
+//  Trendband und werden bei uns vom Stillhalter Trend Model abgedeckt):
 //   • Level 6 = 1.000 = nachgeführtes ALLZEITHOCH (steigt mit jedem
 //     neuen Hoch mit — dadurch die Treppen-Optik).
 //   • Level 0 = 0.000 = Ausgangstief (Allzeittief der verfügbaren
@@ -28,7 +34,7 @@
 //  Symbols — auf Tages-/Wochenchart ist das i. d. R. die volle
 //  Kurshistorie seit Listing.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v1.0", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v1.1", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
@@ -39,6 +45,13 @@ anchorMode = input.string("Allzeittief (Standard)", "Ausgangspunkt (Level 0)",
           + "verfügbaren Historie (Original-Verhalten). 'Null' = Level 0 fest "
           + "bei 0 — bei jungen Aktien mit hohem Ausgabekurs testweise "
           + "interessant, sonst Standard lassen.")
+fibVariant = input.string("0.786 (klassisch)", "Oberstes Retracement (Level 5)",
+     options = ["0.786 (klassisch)", "0.764 (Spiegel-Variante)"], group = grp_lv,
+     tooltip = "Das oberste Retracement unter dem Hoch gibt es in zwei "
+          + "Konventionen: 0.786 (klassisch) oder 0.764 (= 1 − 0.236, die "
+          + "Spiegel-Variante mancher Tools). Alle anderen Level sind identisch. "
+          + "Zum Abgleich mit einer Vorlage einfach den Level-5-Wert vergleichen "
+          + "und passend umschalten.")
 showExt    = input.bool(true, "Ziel-Level über dem Hoch (1.618 · 2.618 · 4.236 · 6.854)", group = grp_lv,
      tooltip = "Zeigt die Erweiterungs-Level oberhalb des Allzeithochs — dort "
           + "liegen nach einem Ausbruch die nächsten natürlichen Ziele. Bewusst "
@@ -55,7 +68,7 @@ showTable  = input.bool(true, "Status-Tabelle anzeigen", group = grp_lv,
 
 grp_st = "FARBEN & OPTIK"
 clr100 = input.color(color.white,   "1.000 — Allzeithoch", group = grp_st)
-clr786 = input.color(#26C6DA,       "0.786", group = grp_st)
+clr786 = input.color(#26C6DA,       "Level 5 (0.786/0.764)", group = grp_st)
 clr618 = input.color(#00C853,       "0.618", group = grp_st)
 clr500 = input.color(#FFD600,       "0.500", group = grp_st)
 clr382 = input.color(#FF9100,       "0.382", group = grp_st)
@@ -79,7 +92,9 @@ float lv236  = f_lv(0.236)
 float lv382  = f_lv(0.382)
 float lv500  = f_lv(0.5)
 float lv618  = f_lv(0.618)
-float lv786  = f_lv(0.786)
+float r5     = fibVariant == "0.764 (Spiegel-Variante)" ? 0.764 : 0.786
+string n5    = fibVariant == "0.764 (Spiegel-Variante)" ? "0.764" : "0.786"
+float lv786  = f_lv(r5)
 float lv100  = f_lv(1.0)
 float lv1618 = showExt ? f_lv(1.618) : na
 float lv2618 = showExt ? f_lv(2.618) : na
@@ -88,7 +103,7 @@ float lv6854 = showExt ? f_lv(6.854) : na
 
 // ─── Level-Linien (Treppen-Verlauf, da sie nur bei neuem Hoch/Tief springen) ─
 plot(lv100,  "1.000 (Allzeithoch)", color = color.new(clr100, 20), linewidth = 2)
-plot(lv786,  "0.786",               color = color.new(clr786, 20), linewidth = 2)
+plot(lv786,  "Level 5 (0.786/0.764)", color = color.new(clr786, 20), linewidth = 2)
 plot(lv618,  "0.618",               color = color.new(clr618, 20), linewidth = 2)
 plot(lv500,  "0.500",               color = color.new(clr500, 30), linewidth = 1)
 plot(lv382,  "0.382",               color = color.new(clr382, 30), linewidth = 1)
@@ -111,7 +126,7 @@ if barstate.islast and showLabels
     while array.size(lbls) > 0
         label.delete(array.pop(lbls))
     float[]  lvs  = array.from(lv100, lv786, lv618, lv500, lv382, lv236, lv000)
-    string[] nms  = array.from("1.000", "0.786", "0.618", "0.500", "0.382", "0.236", "0.000")
+    string[] nms  = array.from("1.000", n5, "0.618", "0.500", "0.382", "0.236", "0.000")
     color[]  cls  = array.from(clr100, clr786, clr618, clr500, clr382, clr236, clr000)
     if showExt
         array.unshift(lvs, lv1618), array.unshift(nms, "1.618"), array.unshift(cls, clrExt)
@@ -129,7 +144,7 @@ if barstate.islast and showLabels
 var table t = table.new(position.bottom_right, 2, 2, border_width = 1)
 if barstate.islast and showTable
     float[]  zlvs = array.from(lv000, lv236, lv382, lv500, lv618, lv786, lv100)
-    string[] znms = array.from("0.000", "0.236", "0.382", "0.500", "0.618", "0.786", "1.000")
+    string[] znms = array.from("0.000", "0.236", "0.382", "0.500", "0.618", n5, "1.000")
     if showExt
         array.push(zlvs, lv1618), array.push(znms, "1.618")
         array.push(zlvs, lv2618), array.push(znms, "2.618")
@@ -149,10 +164,10 @@ if barstate.islast and showTable
     table.cell(t, 1, 1, floorTxt, text_color = color.white)
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
-alertcondition(ta.crossunder(close, lv786), "Kurs faellt unter 0.786", "Stillhalter Retracements: Kurs unter das 0.786-Level gefallen")
+alertcondition(ta.crossunder(close, lv786), "Kurs faellt unter Level 5", "Stillhalter Retracements: Kurs unter das oberste Retracement (Level 5) gefallen")
 alertcondition(ta.crossunder(close, lv618), "Kurs faellt unter 0.618", "Stillhalter Retracements: Kurs unter das 0.618-Level gefallen")
 alertcondition(ta.crossunder(close, lv500), "Kurs faellt unter 0.500", "Stillhalter Retracements: Kurs unter das 0.500-Level gefallen")
 alertcondition(ta.crossunder(close, lv382), "Kurs faellt unter 0.382", "Stillhalter Retracements: Kurs unter das 0.382-Level gefallen")
-alertcondition(ta.crossover(close, lv786),  "Kurs erobert 0.786 zurueck", "Stillhalter Retracements: Kurs zurueck ueber dem 0.786-Level")
+alertcondition(ta.crossover(close, lv786),  "Kurs erobert Level 5 zurueck", "Stillhalter Retracements: Kurs zurueck ueber dem obersten Retracement (Level 5)")
 alertcondition(ta.crossover(close, lv618),  "Kurs erobert 0.618 zurueck", "Stillhalter Retracements: Kurs zurueck ueber dem 0.618-Level")
 alertcondition(high >= ath and high > ath[1], "Neues Allzeithoch", "Stillhalter Retracements: neues Allzeithoch — alle Level werden nachgezogen")
