@@ -2,11 +2,19 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.7
+//  Stillhalter Community® – RETRACEMENTS v2.8
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.7 — VIELE UEBERGAENGE wie das Original (dekodiert):
+//  NEU in v2.8 — BAND-FREQUENZ an das Original angepasst:
+//   • Uebergangs-Messung (COHR/NVDA/JLL, 1D ab 2019, Wechsel/Jahr):
+//     Faktor 3.0 ≈ 7-8 · 2.5 ≈ 9-11 · 2.0 ≈ 12-14 · 1.5 ≈ 20-21.
+//     Das Original wirkt deutlich lebendiger als Faktor 3.0 →
+//     'Original' jetzt 10/2.0 (~13 Wechsel/Jahr) und 'Schnell' 7/1.5
+//     (~21/Jahr). 'Normal' (14/4.0) und 'Traege' (21/4.0) bleiben die
+//     qualitaets-kalibrierten Ruhe-Modi. Exakter Fit spaeter moeglich:
+//     konkrete Flip-Daten aus dem Original-Chart nennen.
+//  v2.7 — VIELE UEBERGAENGE wie das Original (dekodiert):
 //   • Erkenntnis aus dem 1:1-Vergleich: Im IA-Original wechselt die
 //     BANDFARBE bei JEDEM Umschwung sofort — die 'Noise Suppression'
 //     filtert nur die Buy/Sell-MARKER. Bei uns filterte sie bisher
@@ -134,7 +142,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.7", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.8", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -314,11 +322,11 @@ plot(lv6854, "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
 // ─── Trailing-Band: geratchte Stopp-Zone (klobige Original-Optik) ────────────
 // Modus-Kalibrierung intern (s. Changelog): ATR-Laenge / Faktor aussen —
-// Schnell 7/2.5 · Original 10/3.0 · Normal 14/4.0 · Traege 21/4.0;
+// Schnell 7/1.5 · Original 10/2.0 · Normal 14/4.0 · Traege 21/4.0;
 // innere Kante = halber Faktor. Flach in Pullbacks (Ratsche),
 // senkrechter Sprung auf die andere Kursseite am Signal.
 int   stLen = bandMode == "Schnell" ? 7 : bandMode == "Original" ? 10 : bandMode == "Traege" ? 21 : 14
-float mFar  = bandMode == "Schnell" ? 2.5 : bandMode == "Original" ? 3.0 : 4.0
+float mFar  = bandMode == "Schnell" ? 1.5 : bandMode == "Original" ? 2.0 : 4.0
 float mNear = mFar / 2
 int   bandK = sigFilter == "Aus" ? 0 : sigFilter == "Mittel" ? 2 : sigFilter == "Hoch" ? 3 : 1
 
