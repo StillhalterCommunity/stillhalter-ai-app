@@ -2,11 +2,20 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.8
+//  Stillhalter Community® – RETRACEMENTS v2.9
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.8 — BAND-FREQUENZ an das Original angepasst:
+//  NEU in v2.9 — SKALA-SCHUTZ (kein Springen des Charts mehr):
+//   • Problem: TradingViews Auto-Skala zieht den Chart so auf, dass
+//     ALLE gezeichneten Linien sichtbar sind — inkl. R0 (bei 0) und
+//     R10 (~6.9x Allzeithoch). Beim Ein-/Ausschalten sprang die Skala.
+//   • Fix: 'Skala schuetzen' (Standard AN) zeichnet nur Level, die
+//     innerhalb eines Naehe-Bereichs um den Kurs liegen (Standard
+//     ±50%). Alle uebrigen Level bleiben als Beschriftung am rechten
+//     Rand sichtbar (Labels beeinflussen die Skala nicht) und tauchen
+//     als Linie automatisch auf, sobald der Kurs in ihre Naehe kommt.
+//  v2.8 — BAND-FREQUENZ an das Original angepasst:
 //   • Uebergangs-Messung (COHR/NVDA/JLL, 1D ab 2019, Wechsel/Jahr):
 //     Faktor 3.0 ≈ 7-8 · 2.5 ≈ 9-11 · 2.0 ≈ 12-14 · 1.5 ≈ 20-21.
 //     Das Original wirkt deutlich lebendiger als Faktor 3.0 →
@@ -142,7 +151,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.8", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.9", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -172,6 +181,17 @@ showDist   = input.bool(true, "Abstand zum Kurs in % anzeigen", group = grp_lv,
 showTable  = input.bool(true, "Status-Tabelle anzeigen", group = grp_lv,
      tooltip = "Zeigt, zwischen welchen Leveln der Kurs gerade notiert und "
           + "wo der nächste Boden darunter liegt (Preis + Abstand).")
+scaleGuard = input.bool(true, "Skala schützen (nur Level nahe am Kurs zeichnen)", group = grp_lv,
+     tooltip = "AN (empfohlen): Es werden nur Level-Linien gezeichnet, die im "
+          + "Naehe-Bereich um den Kurs liegen — die Chart-Skala springt beim "
+          + "Ein-/Ausschalten nicht mehr, weil ferne Level (z. B. Level 0 oder "
+          + "die hohen Ziel-Level) sie nicht mehr aufziehen. Alle Level bleiben "
+          + "als Beschriftung rechts sichtbar und erscheinen als Linie, sobald "
+          + "der Kurs in ihre Naehe kommt.")
+nearPct    = input.int(50, "Nähe-Bereich um den Kurs (%)", minval = 10, maxval = 300, group = grp_lv,
+     tooltip = "Nur fuer 'Skala schuetzen': Level werden gezeichnet, wenn sie "
+          + "hoechstens so viele Prozent ueber oder unter dem aktuellen Kurs "
+          + "liegen. 50% deckt typischerweise die handelsrelevanten Level ab.")
 
 // ─── Inputs: Trailing-Band ───────────────────────────────────────────────────
 grp_tb = "TRAILING-BAND"
@@ -308,17 +328,22 @@ float lv4236 = showExt ? f_lv(4.236) : na
 float lv6854 = showExt ? f_lv(6.854) : na
 
 // ─── Level-Linien (Treppen-Verlauf, da sie nur bei neuem Hoch springen) ──────
-plot(lv100,  "R6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 1)
-plot(lv786,  "R5",                color = color.new(clr786, 20), linewidth = 1)
-plot(lv618,  "R4",                color = color.new(clr618, 20), linewidth = 1)
-plot(lv500,  "R3",                color = color.new(clr500, 30), linewidth = 1)
-plot(lv382,  "R2",                color = color.new(clr382, 30), linewidth = 1)
-plot(lv236,  "R1",                color = color.new(clr236, 30), linewidth = 1)
-plot(lv000,  "R0 (Ausgangspunkt)",color = color.new(clr000, 50), linewidth = 1)
-plot(lv1618, "R7 (Ziel)",         color = color.new(clrExt, 40), linewidth = 1)
-plot(lv2618, "R8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
-plot(lv4236, "R9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
-plot(lv6854, "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
+// Skala-Schutz: ferne Level werden nicht gezeichnet (nur Label rechts),
+// damit die Auto-Skala des Charts nicht aufgezogen wird.
+f_vis(float lv) =>
+    not scaleGuard or (lv >= close * (1 - nearPct / 100.0) and lv <= close * (1 + nearPct / 100.0)) ? lv : na
+
+plot(f_vis(lv100),  "R6 (Allzeithoch)",  color = color.new(clr100, 20), linewidth = 1)
+plot(f_vis(lv786),  "R5",                color = color.new(clr786, 20), linewidth = 1)
+plot(f_vis(lv618),  "R4",                color = color.new(clr618, 20), linewidth = 1)
+plot(f_vis(lv500),  "R3",                color = color.new(clr500, 30), linewidth = 1)
+plot(f_vis(lv382),  "R2",                color = color.new(clr382, 30), linewidth = 1)
+plot(f_vis(lv236),  "R1",                color = color.new(clr236, 30), linewidth = 1)
+plot(f_vis(lv000),  "R0 (Ausgangspunkt)",color = color.new(clr000, 50), linewidth = 1)
+plot(f_vis(lv1618), "R7 (Ziel)",         color = color.new(clrExt, 40), linewidth = 1)
+plot(f_vis(lv2618), "R8 (Ziel)",         color = color.new(clrExt, 50), linewidth = 1)
+plot(f_vis(lv4236), "R9 (Ziel)",         color = color.new(clrExt, 60), linewidth = 1)
+plot(f_vis(lv6854), "R10 (Ziel)",        color = color.new(clrExt, 70), linewidth = 1)
 
 // ─── Trailing-Band: geratchte Stopp-Zone (klobige Original-Optik) ────────────
 // Modus-Kalibrierung intern (s. Changelog): ATR-Laenge / Faktor aussen —
