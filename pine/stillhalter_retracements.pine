@@ -2,11 +2,16 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – RETRACEMENTS v2.9
+//  Stillhalter Community® – RETRACEMENTS v2.10
 //  Nachgeführte Retracement-Level + Trailing-Band mit Buy/Sell-Signalen —
 //  die natürliche Landkarte für Einstiegs-Level des Stillhalters.
 //
-//  NEU in v2.9 — SKALA-SCHUTZ (kein Springen des Charts mehr):
+//  NEU in v2.10 — LEVEL-WERTE privat einblendbar:
+//   • Neuer Schalter 'Level-Werte in Beschriftung (privat)': zeigt die
+//     interne Verhaeltniszahl jedes Levels zusaetzlich im Label (z. B.
+//     'R4 · 0.618 — 146.20 · -30.7%') — als Gedaechtnisstuetze NUR fuer
+//     den eigenen Gebrauch; Standard AUS (Tarnkappe bleibt Standard).
+//  v2.9 — SKALA-SCHUTZ (kein Springen des Charts mehr):
 //   • Problem: TradingViews Auto-Skala zieht den Chart so auf, dass
 //     ALLE gezeichneten Linien sichtbar sind — inkl. R0 (bei 0) und
 //     R10 (~6.9x Allzeithoch). Beim Ein-/Ausschalten sprang die Skala.
@@ -151,7 +156,7 @@
 //  darueber die Ziel-Level der Goldener-Schnitt-Reihe. Faustformel bei
 //  Anker 0: R5 ≈ −21% vom Hoch · R4 ≈ −38% · R3 = −50% · R2 ≈ −62%.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Retracements v2.9", shorttitle = "Stillhalter Retracements",
+indicator("Stillhalter Retracements v2.10", shorttitle = "Stillhalter Retracements",
      overlay = true)
 
 // ─── Inputs: Level ───────────────────────────────────────────────────────────
@@ -192,6 +197,10 @@ nearPct    = input.int(50, "Nähe-Bereich um den Kurs (%)", minval = 10, maxval 
      tooltip = "Nur fuer 'Skala schuetzen': Level werden gezeichnet, wenn sie "
           + "hoechstens so viele Prozent ueber oder unter dem aktuellen Kurs "
           + "liegen. 50% deckt typischerweise die handelsrelevanten Level ab.")
+showRatio  = input.bool(false, "Level-Werte in Beschriftung (privat)", group = grp_lv,
+     tooltip = "Zeigt zusaetzlich die interne Verhaeltniszahl jedes Levels in der "
+          + "Beschriftung — als Gedaechtnisstuetze NUR fuer den eigenen Gebrauch. "
+          + "Vor Screenshots, Streams oder geteilten Charts ausschalten.")
 
 // ─── Inputs: Trailing-Band ───────────────────────────────────────────────────
 grp_tb = "TRAILING-BAND"
@@ -412,16 +421,18 @@ if barstate.islast and showLabels
         label.delete(array.pop(lbls))
     float[]  lvs  = array.from(lv100, lv786, lv618, lv500, lv382, lv236, lv000)
     string[] nms  = array.from("R6", "R5", "R4", "R3", "R2", "R1", "R0")
+    string[] rts  = array.from("1.000", str.tostring(r5, "0.000"), "0.618", "0.500", "0.382", "0.236", "0.000")
     color[]  cls  = array.from(clr100, clr786, clr618, clr500, clr382, clr236, clr000)
     if showExt
-        array.unshift(lvs, lv1618), array.unshift(nms, "R7"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv2618), array.unshift(nms, "R8"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv4236), array.unshift(nms, "R9"), array.unshift(cls, clrExt)
-        array.unshift(lvs, lv6854), array.unshift(nms, "R10"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv1618), array.unshift(nms, "R7"), array.unshift(rts, "1.618"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv2618), array.unshift(nms, "R8"), array.unshift(rts, "2.618"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv4236), array.unshift(nms, "R9"), array.unshift(rts, "4.236"), array.unshift(cls, clrExt)
+        array.unshift(lvs, lv6854), array.unshift(nms, "R10"), array.unshift(rts, "6.854"), array.unshift(cls, clrExt)
     for i = 0 to array.size(lvs) - 1
         float lv = array.get(lvs, i)
         if not na(lv)
-            array.push(lbls, label.new(bar_index + 8, lv, f_lblTxt(array.get(nms, i), lv),
+            string nmTxt = array.get(nms, i) + (showRatio ? " · " + array.get(rts, i) : "")
+            array.push(lbls, label.new(bar_index + 8, lv, f_lblTxt(nmTxt, lv),
                  style = label.style_label_left, color = color.new(color.black, 100),
                  textcolor = array.get(cls, i), size = size.small))
 
