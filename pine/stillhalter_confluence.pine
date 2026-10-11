@@ -2,12 +2,27 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.0.1
+//  Stillhalter Community® – CONFLUENCE v1.1
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //
-//  NEU in v1.0.1 — Fix RE10140 (Plot-Limit 64 ueberschritten):
+//  NEU in v1.1 — Feinschliff nach Feedback:
+//   • R-Level-Linien laufen jetzt ueber den GANZEN Chart (extend.both),
+//     nicht mehr erst ab den letzten 300 Kerzen.
+//   • Volumen-Balken-Fix: Zeilen mit wenig Volumen wurden auf Breite 0
+//     gerundet und fehlten (Mindestbreite 1). Balken haengen jetzt
+//     rechts im freien Randbereich statt ueber den alten Kerzen.
+//   • Standard-Defaults: Trend-Band (Schleier) AN · Dreiecke mit
+//     BUY/SELL-Beschriftung.
+//   • Praezisere Options-Zonen: Cluster-Toleranz 0.5 -> 0.35 x ATR14,
+//     Zonen je Seite 3 -> 2, und ein harter Breiten-Deckel von 0.6 x
+//     ATR14 je Zone — keine superbreiten Baender mehr.
+//   • Zonen-Label eindeutig: '🟢 PUT-Zone ★★ · Strike ≤ 142.50
+//     (12.4% OTM) · 5x' — der OTM-Abstand bezieht sich bei PUT-Zonen
+//     IMMER auf die UNTERKANTE (dort gehoert der Strike drunter),
+//     bei CALL-Zonen auf die OBERKANTE.
+//  v1.0.1 — Fix RE10140 (Plot-Limit 64 ueberschritten):
 //   • Die R-Level werden jetzt als LINIEN-Objekte gezeichnet statt als
 //     Plots — zaehlen nicht gegen Pines 64er-Plot-Limit und beeinflussen
 //     die Chart-Skala gar nicht (kein Skala-Schutz mehr noetig, alle
@@ -122,7 +137,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.0.1", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.1", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_bars_back = 500)
 
@@ -177,7 +192,7 @@ adxFilter = input.bool(false, "Trendstärke-Filter (nur bei laufendem Trend)", g
           + "Seitwärtsphasen aus.")
 
 grpS = "Anzeige"
-labelTxt  = input.string("Ohne Text", "Dreieck-Beschriftung",
+labelTxt  = input.string("BUY/SELL", "Dreieck-Beschriftung",
      options = ["Ohne Text", "UP/DOWN", "BULL/BEAR", "PUT/CALL", "BUY/SELL"], group = grpS,
      tooltip = "Standard: reine Dreiecke ohne Wort (aufgeräumter Chart). Wer eine "
           + "Beschriftung möchte: UP/DOWN, BULL/BEAR, PUT/CALL oder BUY/SELL. "
@@ -191,7 +206,7 @@ weakTransp = input.int(50, "Transparenz schwächere Stufe (%)", minval = 10, max
      tooltip = "Alle Dreiecke haben dieselbe Farbe und Größe. VOLLE Konfluenz = "
           + "kräftig · schwächere Stufe (z. B. 2/3) = halbtransparent, wie ein "
           + "Signal, das gerade in der Entstehung ist.")
-showTrendBand = input.bool(false, "Trend-Band (Schleier) anzeigen", group = grpS,
+showTrendBand = input.bool(true, "Trend-Band (Schleier) anzeigen", group = grpS,
      tooltip = "Färbt den Bereich zwischen schneller und langsamer Trendlinie — in den "
           + "ORIGINALFARBEN des Trend-Model-Indikators. Standard aus — wer das Trend "
           + "Model separat auf dem Chart hat, braucht es doppelt nicht.")
@@ -232,10 +247,9 @@ zoneMonths = input.int(12, "Aktualität: letzter Test max. (Monate)", minval = 3
           + "höchstens so viele Monate zurückliegt — oder der Kurs sie gerade erneut "
           + "testet. Die STÄRKE (Anzahl Berührungen, Sterne) zählt dagegen über die "
           + "gesamte gespeicherte Historie. Empfehlung: 12–24 auf 4h/1D · 36+ auf 1W.")
-zonesPerSide = input.int(3, "Zonen je Seite (max.)", minval = 1, maxval = 6, group = grpZ,
+zonesPerSide = input.int(2, "Zonen je Seite (max.)", minval = 1, maxval = 6, group = grpZ,
      tooltip = "Höchstens so viele Put-Zonen unter und Call-Zonen über dem Kurs. "
-          + "3 = guter Kompromiss aus Vollständigkeit (gerade um den Kurs herum) "
-          + "und aufgeräumtem Chart.")
+          + "2 = Standard (präzise, aufgeräumt) · 3+ für die vollständige Karte.")
 zoneDistMult = input.float(0.3, "Mindestabstand vom Kurs (× ATR14)", minval = 0.0,
      maxval = 3.0, step = 0.1, group = grpZ,
      tooltip = "ATR14 = durchschnittliche Schwankung einer Kerze über die letzten 14 "
@@ -249,11 +263,12 @@ zoneGapMult  = input.float(0.8, "Mindestabstand zwischen Zonen (× ATR14)", minv
      tooltip = "Verhindert, dass zwei Zonen direkt übereinander kleben: Die nächste "
           + "Zone muss mindestens so viele ATR14 von der vorherigen entfernt sein. "
           + "Kleiner = mehr Zonen dicht am Kurs.")
-zoneTolMult  = input.float(0.5, "Cluster-Toleranz (× ATR14)", minval = 0.2, maxval = 1.5,
-     step = 0.1, group = grpZ,
+zoneTolMult  = input.float(0.35, "Cluster-Toleranz (× ATR14)", minval = 0.2, maxval = 1.5,
+     step = 0.05, group = grpZ,
      tooltip = "Pivots, die näher als diese Toleranz beieinander liegen, verschmelzen zu "
           + "EINER Zone — so werden Doppel-/Tripel-Tiefs automatisch als starke Zone "
-          + "erkannt. Größer = breitere Zonen, kleiner = schmalere. (ATR14 = "
+          + "erkannt. 0.35 = Standard (präzise Zonen); größer = breitere Zonen. "
+          + "Zusätzlich gilt ein Breiten-Deckel von 0.6 × ATR14 je Zone. (ATR14 = "
           + "durchschnittliche Kerzen-Schwankung der letzten 14 Kerzen.)")
 
 grpE = "EMA-Levels (20 / 50 / 100 / 200)"
@@ -596,7 +611,7 @@ if barstate.islast
             if not na(rlvV)
                 array.push(rLns, line.new(rX1, rlvV, bar_index, rlvV,
                      color = color.new(array.get(rcl, ri), array.get(rtp, ri)),
-                     width = 1, extend = extend.right))
+                     width = 1, extend = extend.both))
                 string rTxt = array.get(rnm, ri)
                      + (showRetrRatio ? " · " + array.get(rrt, ri) : "")
                      + " — " + str.tostring(rlvV, format.mintick)
@@ -763,15 +778,18 @@ if barstate.islast and showVP and lowestOff > 5
             for r = 0 to vpRows - 1
                 maxV := math.max(maxV, array.get(rowsV, r))
             if maxV > 0
-                int maxW = math.max(4, int(lowestOff * 0.30))
+                // Balken haengen RECHTS im freien Randbereich (ueberdecken
+                // keine Kerzen); Zeilen mit Volumen bekommen mind. Breite 1
+                int maxW = 25
                 for r = 0 to vpRows - 1
-                    int wRow = int(array.get(rowsV, r) / maxV * maxW)
-                    if wRow > 0
+                    float vRow = array.get(rowsV, r)
+                    if vRow > 0
+                        int wRow = math.max(1, int(vRow / maxV * maxW))
                         float yRowLo = rLo + r * step_
                         bool inVA = r >= loR and r <= hiR
-                        color rowCol = r == pocR ? color.new(color.orange, 30) :
-                             inVA ? color.new(#2962FF, 55) : color.new(color.gray, 78)
-                        array.push(vpBoxes, box.new(x1, yRowLo + step_, x1 + wRow, yRowLo,
+                        color rowCol = r == pocR ? color.new(color.orange, 20) :
+                             inVA ? color.new(#2962FF, 45) : color.new(color.gray, 70)
+                        array.push(vpBoxes, box.new(bar_index + 2, yRowLo + step_, bar_index + 2 + wRow, yRowLo,
                              border_color = color.new(color.black, 100), bgcolor = rowCol))
         line.delete(lnPoc)
         line.delete(lnVah)
@@ -782,11 +800,11 @@ if barstate.islast and showVP and lowestOff > 5
         lnPoc := line.new(x1, pocPx, bar_index, pocPx, color = color.new(color.orange, 0),  width = 2)
         lnVah := line.new(x1, vahPx, bar_index, vahPx, color = color.new(color.orange, 45), style = line.style_dashed)
         lnVal := line.new(x1, valPx, bar_index, valPx, color = color.new(color.orange, 45), style = line.style_dashed)
-        lbPoc := label.new(bar_index, pocPx, "POC " + str.tostring(pocPx, format.mintick),
+        lbPoc := label.new(bar_index + 29, pocPx, "POC " + str.tostring(pocPx, format.mintick),
              style = label.style_label_left, color = color.new(color.orange, 80), textcolor = color.white, size = size.small)
-        lbVah := label.new(bar_index, vahPx, "VAH " + str.tostring(vahPx, format.mintick),
+        lbVah := label.new(bar_index + 29, vahPx, "VAH " + str.tostring(vahPx, format.mintick),
              style = label.style_label_left, color = color.new(color.orange, 88), textcolor = color.white, size = size.small)
-        lbVal := label.new(bar_index, valPx, "VAL " + str.tostring(valPx, format.mintick),
+        lbVal := label.new(bar_index + 29, valPx, "VAL " + str.tostring(valPx, format.mintick),
              style = label.style_label_left, color = color.new(color.orange, 88), textcolor = color.white, size = size.small)
 
 // ══════════════ 🟢🔴 OPTIONS-ZONEN (immer sichtbar, anfängertauglich) ══════════════
@@ -944,6 +962,11 @@ if barstate.islast and showZones
                     float midZ = (bHi + bLo) / 2
                     bLo := midZ - 0.075 * atr14
                     bHi := midZ + 0.075 * atr14
+                // Breiten-Deckel: Zone hoechstens 0.6 x ATR14 dick —
+                // symmetrisch um den Kern-Level geklemmt (praezise Strikes)
+                if bHi - bLo > 0.6 * atr14
+                    bLo := best - 0.3 * atr14
+                    bHi := best + 0.3 * atr14
                 // Berührungen ehrlich zählen (Kerzen-Cluster in der Zone) —
                 // die reine Pivot-Zählung unterschätzte um Faktor ~4
                 touches = math.max(f_barTouches(bLo, bHi, tolZ * 0.25), 1)
@@ -983,7 +1006,9 @@ if barstate.islast and showZones
                 // exakte Preise & Begründung nur im Hover-Tooltip
                 string txt = isSup ? "🟢 PUT-Zone " : "🔴 CALL-Zone "
                 txt += isYoung ? "☆ jung" : f_starsTxt(stars)
-                txt += " · " + str.tostring(otmPct, "#.#") + "% OTM"
+                txt += isSup ? " · Strike ≤ " : " · Strike ≥ "
+                txt += str.tostring(strike, format.mintick)
+                txt += " (" + str.tostring(otmPct, "#.#") + "% OTM)"
                 txt += " · " + str.tostring(touches) + "×"
                 string tip = isYoung ? "☆ JUNGES LEVEL — erst 1× berührt bzw. noch nicht als Pivot bestätigt\n" : ""
                 tip += isSup ? "Put-Strike unter " : "Call-Strike über "
