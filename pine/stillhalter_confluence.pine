@@ -2,13 +2,29 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.5.2
+//  Stillhalter Community® – CONFLUENCE v1.6
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
-//  NEU in v1.5.2 — Verstaendlichkeit + Defaults:
+//  NEU in v1.6 — AUTO-TREND (aktienspezifische Anpassung, Beispiel 1):
+//   • Trend Mode 'Auto (aktienspezifisch)' (neuer Standard): Der
+//     Indikator rechnet ALLE vier Trend-Modi (Very Tight bis Very
+//     Loose) parallel und fuehrt fuer jeden einen eigenen Mini-
+//     Short-Put-Backtest (gleiche Regeln wie die grosse Tabelle:
+//     Area-Low-Referenz, Puffer, Verfall, Praemien-Annahme). Auf
+//     jeder Kerze wird der Modus mit dem besten Oe je Trade gewaehlt
+//     — WALK-FORWARD: nur aus der Vergangenheit bis zu dieser Kerze,
+//     nie mit Blick in die Zukunft. Mindestens 8 abgerechnete Trades
+//     noetig, sonst Rueckfall auf Very Tight. Beim Symbolwechsel
+//     justiert sich der Modus automatisch auf die neue Aktie.
+//     Der aktuell gewaehlte Modus steht als Hover an der Trend-Zeile
+//     der Status-Tabelle. Manuelle Modi bleiben unveraendert waehlbar.
+//   • Grundlage fuer weitere Auto-Parameter (Stochastik-Modus,
+//     MACD-Modus, Mindest-Konfluenz) nach gleichem Muster; die grosse
+//     Grid-Suche je Ticker laeuft in der Stillhalter-AI-App.
+//  v1.5.2 — Verstaendlichkeit + Defaults:
 //   • Mindest-Konfluenz Standard 4 (von 4) — nur volle Konfluenz
 //     zeigt standardmaessig ein Dreieck.
 //   • Staffel-Zeilen klar beschriftet: 'min. 2 von 4' usw. — mit
@@ -232,17 +248,24 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.5.2", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.6", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
 // ══════════════════════════ INPUTS ══════════════════════════
 grpT = "Trend Model"
-trendMode = input.string("Very Tight", "Trend Mode",
-     options = ["Very Tight", "Tight", "Loose", "Very Loose"], group = grpT,
+trendMode = input.string("Auto (aktienspezifisch)", "Trend Mode",
+     options = ["Auto (aktienspezifisch)", "Very Tight", "Tight", "Loose", "Very Loose"], group = grpT,
      tooltip = "Empfindlichkeit des Stillhalter Trend Models: Very Tight reagiert am "
-          + "schnellsten auf Trendwechsel (Standard), Very Loose am trägsten "
-          + "(weniger, dafür stabilere Signale).")
+          + "schnellsten auf Trendwechsel, Very Loose am trägsten (weniger, dafür "
+          + "stabilere Signale). AUTO (Standard) = der Indikator testet alle vier "
+          + "Modi laufend auf GENAU DIESER Aktie (eigener Mini-Short-Put-Backtest "
+          + "je Modus, gleiche Regeln wie die Backtest-Tabelle) und nutzt den "
+          + "Modus mit dem besten Ø je Trade — Walk-Forward: Auf jeder Kerze "
+          + "zählt nur die Vergangenheit bis zu dieser Kerze, kein Blick in die "
+          + "Zukunft. Erst ab 8 abgerechneten Trades je Modus; vorher gilt Very "
+          + "Tight. Der aktuell gewählte Modus steht als Hover an der Trend-Zeile "
+          + "der Status-Tabelle.")
 
 grpC = "Confluence"
 confWin  = input.int(4, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
@@ -556,11 +579,74 @@ stochSmooth = 3
 mrLen       = 40
 
 // ══════════════════════════ 1) TREND MODEL ══════════════════════════
-fastLen = trendMode == "Very Tight" ? 2 : trendMode == "Tight" ? 4 : trendMode == "Loose" ? 6 : 13
-slowLen = trendMode == "Very Tight" ? 9 : trendMode == "Tight" ? 16 : trendMode == "Loose" ? 28 : 35
+// Alle vier Modi laufen PARALLEL — Grundlage fuer den Auto-Modus.
+f_fridayAfter(int t0) =>
+    int tt = t0
+    while dayofweek(tt) != dayofweek.friday
+        tt += 86400000
+    tt
 
-trendFast = ta.ema(close, fastLen)
-trendSlow = ta.ema(close, slowLen)
+tF0 = ta.ema(close, 2)
+tS0 = ta.ema(close, 9)    // Very Tight
+tF1 = ta.ema(close, 4)
+tS1 = ta.ema(close, 16)   // Tight
+tF2 = ta.ema(close, 6)
+tS2 = ta.ema(close, 28)   // Loose
+tF3 = ta.ema(close, 13)
+tS3 = ta.ema(close, 35)   // Very Loose
+bool tB0 = tF0 > tS0
+bool tB1 = tF1 > tS1
+bool tB2 = tF2 > tS2
+bool tB3 = tF3 > tS3
+bool tEu0 = tB0 and not tB0[1]
+bool tEu1 = tB1 and not tB1[1]
+bool tEu2 = tB2 and not tB2[1]
+bool tEu3 = tB3 and not tB3[1]
+
+// AUTO-MODUS: je Modus ein Mini-Short-Put-Backtest (gleiche Regeln wie
+// die grosse Tabelle: Area-Low-Referenz − Puffer, Verfall 1. Freitag
+// nach >= minCalDays, Praemien-Annahme). Auswahl WALK-FORWARD: Auf jeder
+// Kerze gewinnt der Modus mit dem besten Oe je Trade — berechnet NUR aus
+// der Vergangenheit bis zu dieser Kerze (kein Blick in die Zukunft).
+float autoKRef = ta.lowest(low, refLen) * (1 - strikeBufPct / 100)
+var array<bool>  tmOn = array.new_bool(4, false)
+var array<float> tmK  = array.new_float(4, na)
+var array<int>   tmX  = array.new_int(4, 0)
+var array<int>   tmN  = array.new_int(4, 0)
+var array<float> tmEq = array.new_float(4, 1.0)
+array<bool> tmEvtU = array.from(tEu0, tEu1, tEu2, tEu3)
+for m = 0 to 3
+    // 1) offenen Put dieses Modus am Verfall abrechnen
+    if array.get(tmOn, m) and time >= array.get(tmX, m)
+        float retM = premPct / 100 + math.min(0.0, close / array.get(tmK, m) - 1)
+        array.set(tmEq, m, array.get(tmEq, m) * (1 + retM))
+        array.set(tmN, m, array.get(tmN, m) + 1)
+        array.set(tmOn, m, false)
+    // 2) neues Kauf-Ereignis dieses Modus -> neuer Put
+    if array.get(tmEvtU, m) and not array.get(tmOn, m)
+        array.set(tmOn, m, true)
+        array.set(tmK, m, autoKRef)
+        array.set(tmX, m, f_fridayAfter(time + minCalDays * 86400000))
+// Walk-Forward-Auswahl (Mindestens 8 Trades, sonst Very Tight bzw.
+// bisheriger Gewinner)
+var int tmSel = 0
+int   tmBestIdx = tmSel
+float tmBest = -1.0e9
+for m = 0 to 3
+    if array.get(tmN, m) >= 8
+        float gM = math.pow(array.get(tmEq, m), 1.0 / array.get(tmN, m)) - 1
+        if gM > tmBest
+            tmBest := gM
+            tmBestIdx := m
+tmSel := tmBestIdx
+
+bool autoTrend = trendMode == "Auto (aktienspezifisch)"
+int  manSel = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 1 : trendMode == "Loose" ? 2 : 3
+int  tmUse  = autoTrend ? tmSel : manSel
+string tmName = tmUse == 0 ? "Very Tight" : tmUse == 1 ? "Tight" : tmUse == 2 ? "Loose" : "Very Loose"
+
+trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tF3
+trendSlow = tmUse == 0 ? tS0 : tmUse == 1 ? tS1 : tmUse == 2 ? tS2 : tS3
 bullTrend = trendFast > trendSlow
 bearTrend = trendFast < trendSlow
 
@@ -1390,12 +1476,6 @@ if barstate.islast and showZones
 // Schlusskurs der Signalkerze (Bar Close).
 inWindow = time >= btFrom and time <= btTo
 
-f_fridayAfter(int t0) =>
-    int tt = t0
-    while dayofweek(tt) != dayofweek.friday
-        tt += 86400000
-    tt
-
 bool  refEng   = strikeRef == "Schlusskurs (eng)"
 float btRefLo  = refEng ? close : ta.lowest(low, refLen)
 float btRefHi  = refEng ? close : ta.highest(high, refLen)
@@ -1604,7 +1684,10 @@ if barstate.islast and showTable
     table.cell(t, 1, 0, str.tostring(buyScore) + "▲ / " + str.tostring(sellScore) + "▼ von " + str.tostring(nComp),
          text_color = color.white, bgcolor = color.new(color.black, 20))
     if useTrend
-        table.cell(t, 0, 1, "Trend", text_color = color.white)
+        table.cell(t, 0, 1, autoTrend ? "Trend (Auto)" : "Trend", text_color = color.white,
+             tooltip = autoTrend ? "Auto-Modus aktiv — aktuell gewählt: '" + tmName
+                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 1, f_mark(trendBuyOK) + " / " + f_mark(trendSellOK), text_color = color.white)
     if useMACD
         table.cell(t, 0, 2, "MACD Pro", text_color = color.white)
