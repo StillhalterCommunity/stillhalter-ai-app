@@ -2,13 +2,35 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.6
+//  Stillhalter Community® – CONFLUENCE v1.6.1
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
-//  NEU in v1.6 — AUTO-TREND (aktienspezifische Anpassung, Beispiel 1):
+//  NEU in v1.6.1 — REALISTISCHE PRAEMIEN + FLIESSENDER AUTO-MODUS:
+//   • PRAEMIEN-MODELL 'Volatilitaetsbasiert' (neuer Standard): Die
+//     Praemie je Trade wird aus der tatsaechlichen Schwankung der
+//     Aktie (historische Vol, 30 Kerzen, annualisiert, x IV-Aufschlag),
+//     dem Strike-Abstand und der Restlaufzeit geschaetzt (Options-
+//     preis-Naeherung nach Black-Scholes, r=0). Weiter entfernte
+//     Strikes bringen realistisch WENIGER Praemie, volatile Aktien
+//     MEHR — damit ist das Puffer-Tuning ehrlich: Der ROI explodiert
+//     nicht mehr, wenn man den Puffer aufdreht (die alte konstante
+//     Annahme schrieb auch einem −10%-Strike 1% gut, den es am Markt
+//     nie gaebe). 'Konstant' bleibt waehlbar fuer reine Zeilen-
+//     Vergleiche.
+//   • AUTO-MODUS FLIESSEND: Die Trend-Auswahl laeuft jetzt ueber eine
+//     8-STUFIGE LEITER von EMA-Paaren zwischen Very Tight und Very
+//     Loose (statt nur 4 Modi) — quasi stufenlos. Zusaetzlich gibt es
+//     'Auto (aktienspezifisch)' jetzt auch fuer den MACD-MODUS
+//     (Kreuzung vs. Frueh) und den STOCHASTIK-MODUS (Dual vs. Single),
+//     alle drei Standard AN. Auswahl wie gehabt WALK-FORWARD ueber
+//     eigene Mini-Short-Put-Backtests (jetzt mit dem realistischen
+//     Praemien-Modell) — der Backtest zeigt die beste Konfiguration
+//     aus der Vergangenheit dieser Aktie, ohne Blick in die Zukunft.
+//     Hover an den Zeilen der Status-Tabelle zeigt die aktuelle Wahl.
+//  v1.6 — AUTO-TREND (aktienspezifische Anpassung, Beispiel 1):
 //   • Trend Mode 'Auto (aktienspezifisch)' (neuer Standard): Der
 //     Indikator rechnet ALLE vier Trend-Modi (Very Tight bis Very
 //     Loose) parallel und fuehrt fuer jeden einen eigenen Mini-
@@ -248,7 +270,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.6", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.6.1", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
@@ -258,13 +280,14 @@ trendMode = input.string("Auto (aktienspezifisch)", "Trend Mode",
      options = ["Auto (aktienspezifisch)", "Very Tight", "Tight", "Loose", "Very Loose"], group = grpT,
      tooltip = "Empfindlichkeit des Stillhalter Trend Models: Very Tight reagiert am "
           + "schnellsten auf Trendwechsel, Very Loose am trägsten (weniger, dafür "
-          + "stabilere Signale). AUTO (Standard) = der Indikator testet alle vier "
-          + "Modi laufend auf GENAU DIESER Aktie (eigener Mini-Short-Put-Backtest "
-          + "je Modus, gleiche Regeln wie die Backtest-Tabelle) und nutzt den "
-          + "Modus mit dem besten Ø je Trade — Walk-Forward: Auf jeder Kerze "
+          + "stabilere Signale). AUTO (Standard) = FLIESSEND: Der Indikator testet "
+          + "laufend eine 8-stufige Leiter von Trendlinien-Paaren zwischen Very "
+          + "Tight und Very Loose auf GENAU DIESER Aktie (eigener Mini-Short-Put-"
+          + "Backtest je Stufe, gleiche Regeln wie die Backtest-Tabelle) und nutzt "
+          + "die Stufe mit dem besten Ø je Trade — Walk-Forward: Auf jeder Kerze "
           + "zählt nur die Vergangenheit bis zu dieser Kerze, kein Blick in die "
-          + "Zukunft. Erst ab 8 abgerechneten Trades je Modus; vorher gilt Very "
-          + "Tight. Der aktuell gewählte Modus steht als Hover an der Trend-Zeile "
+          + "Zukunft. Erst ab 8 abgerechneten Trades je Stufe; vorher gilt Very "
+          + "Tight. Die aktuell gewählte Stufe steht als Hover an der Trend-Zeile "
           + "der Status-Tabelle.")
 
 grpC = "Confluence"
@@ -279,20 +302,26 @@ minScore = input.int(4, "Mindest-Konfluenz für Dreieck", minval = 1, maxval = 6
           + "Dreieck erscheint. Standard 4 (von 4) = nur volle Konfluenz · "
           + "3 = selektiv · 2 = früh und häufig. Die Basis passt sich "
           + "automatisch an die gewählten Komponenten an ('x von n').")
-stochMode = input.string("Single (nur schnelle Linie)", "Stochastik-Modus",
-     options = ["Dual (klassisch)", "Single (nur schnelle Linie)"], group = grpC,
-     tooltip = "Dual (Standard) = beide Stochastik-Linien müssen den überdehnten "
-          + "Bereich bestätigen — sehr selektiv, die klassische Stillhalter-Logik. "
+stochMode = input.string("Auto (aktienspezifisch)", "Stochastik-Modus",
+     options = ["Auto (aktienspezifisch)", "Dual (klassisch)", "Single (nur schnelle Linie)"], group = grpC,
+     tooltip = "Dual = beide Stochastik-Linien müssen den überdehnten Bereich "
+          + "bestätigen — sehr selektiv, die klassische Stillhalter-Logik. "
           + "Single = nur die schnelle Linie muss aus der Überdehnung drehen — "
-          + "erfasst laut Studie deutlich mehr Kurstiefs bei ähnlicher Qualität "
-          + "(das Rauschen filtert die Konfluenz).")
-macdMode  = input.string("Kreuzung (klassisch)", "MACD-Modus",
-     options = ["Kreuzung (klassisch)", "Früh (Histogramm dreht)"], group = grpC,
+          + "erfasst laut Studie deutlich mehr Kurstiefs bei ähnlicher Qualität. "
+          + "AUTO (Standard) = der Indikator testet beide Varianten laufend auf "
+          + "dieser Aktie (eigener Mini-Short-Put-Backtest, Walk-Forward ohne "
+          + "Blick in die Zukunft) und nutzt die bessere — Hover an der "
+          + "Stochastik-Zeile der Status-Tabelle zeigt die aktuelle Wahl.")
+macdMode  = input.string("Auto (aktienspezifisch)", "MACD-Modus",
+     options = ["Auto (aktienspezifisch)", "Kreuzung (klassisch)", "Früh (Histogramm dreht)"], group = grpC,
      tooltip = "Kreuzung = Histogramm-Nulldurchgang (MACD kreuzt Signallinie) — der "
           + "klassische Bestätiger, im Median 4 Kerzen nach dem Tief. "
           + "Früh = das Histogramm DREHT unter Null nach oben (Momentum-Wende vor "
           + "der Kreuzung) — im Median nur 1 Kerze nach dem Tief, dafür etwas mehr "
-          + "Rauschen. Fürs frühere Timing: Früh + Mindest-Konfluenz 2.")
+          + "Rauschen. AUTO (Standard) = der Indikator testet beide Varianten "
+          + "laufend auf dieser Aktie (eigener Mini-Short-Put-Backtest, "
+          + "Walk-Forward ohne Blick in die Zukunft) und nutzt die bessere — "
+          + "Hover an der MACD-Zeile der Status-Tabelle zeigt die aktuelle Wahl.")
 
 grpX = "Komponenten der Konfluenz (einzeln schaltbar)"
 useTrend  = input.bool(true, "Trend Model einbeziehen", group = grpX,
@@ -543,14 +572,29 @@ strikeBufPct = input.float(2.0, "Strike-Puffer (%)", minval = 0.0,
           + "(Put) bzw. ÜBER dem Area High (Call). Mehr Puffer = höhere "
           + "Trefferquote bei weniger Prämie; der Standardwert ist datenbasiert "
           + "kalibriert.")
-premPct    = input.float(1.0, "Prämien-Annahme je Trade (% vom Strike)", minval = 0.1,
+premModel  = input.string("Volatilitätsbasiert (empfohlen)", "Prämien-Modell",
+     options = ["Volatilitätsbasiert (empfohlen)", "Konstant (% vom Strike)"], group = grpB,
+     tooltip = "TradingView kennt keine historischen Optionspreise — die Prämie je "
+          + "Trade wird deshalb geschätzt. VOLATILITÄTSBASIERT (Standard): aus der "
+          + "tatsächlichen Schwankung der Aktie (historische Volatilität der "
+          + "letzten 30 Kerzen × IV-Aufschlag), dem Abstand des Strikes und der "
+          + "Restlaufzeit (Optionspreis-Näherung). Weiter entfernte Strikes "
+          + "bringen realistisch WENIGER Prämie, volatile Aktien MEHR — nur damit "
+          + "ist das Puffer-Tuning ehrlich: Der ROI explodiert nicht mehr, wenn "
+          + "man den Puffer aufdreht. KONSTANT: einfache feste Annahme — nur zum "
+          + "Vergleich der Zeilen untereinander geeignet, NICHT zum Puffer-Tuning.")
+premIvMult = input.float(1.2, "IV-Aufschlag (× historische Volatilität)", minval = 0.8,
+     maxval = 2.0, step = 0.1, group = grpB,
+     tooltip = "Nur für das volatilitätsbasierte Modell: Optionsmärkte preisen "
+          + "meist etwas mehr Schwankung ein, als historisch gemessen wird. "
+          + "1.2 = 20% Aufschlag auf die historische Volatilität (typische "
+          + "Größenordnung). Höher = optimistischere Prämien.")
+premPct    = input.float(1.0, "Prämie (nur Modell 'Konstant', % vom Strike)", minval = 0.1,
      maxval = 5.0, step = 0.1, group = grpB,
-     tooltip = "TradingView kennt keine historischen Optionspreise — für den ROI "
-          + "wird deshalb vereinfacht angenommen, dass jeder Trade so viel Prämie "
-          + "einbringt (in % des Strikes). Bei einer Strike-Verletzung am Verfall "
-          + "wird die Verletzungstiefe abgezogen. Win = Trade endet netto im "
-          + "Plus. Die Annahme ist bewusst konstant, damit die Zeilen fair "
-          + "vergleichbar bleiben.")
+     tooltip = "Nur für das konstante Prämien-Modell: Jeder Trade bringt pauschal "
+          + "so viel Prämie (in % des Strikes). Bei einer Strike-Verletzung am "
+          + "Verfall wird die Verletzungstiefe abgezogen; Win = Trade endet "
+          + "netto im Plus.")
 minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5,
      maxval = 45, group = grpB,
      tooltip = "Der Verfall ist der erste FREITAG, der mindestens so viele "
@@ -578,75 +622,122 @@ stochLen    = 14
 stochSmooth = 3
 mrLen       = 40
 
-// ══════════════════════════ 1) TREND MODEL ══════════════════════════
-// Alle vier Modi laufen PARALLEL — Grundlage fuer den Auto-Modus.
+// ══════════ PRAEMIEN-MODELL + WALK-FORWARD-WERKZEUG (fuer alle BTs) ══════════
 f_fridayAfter(int t0) =>
     int tt = t0
     while dayofweek(tt) != dayofweek.friday
         tt += 86400000
     tt
 
+// Volatilitaetsbasierte Praemien-Schaetzung: historische Vol (30 Kerzen,
+// annualisiert) x IV-Aufschlag, Optionspreis-Naeherung (Black-Scholes,
+// r=0, kumulative Normalverteilung logistisch angenaehert). Ergebnis in
+// % vom Strike, Mindest-Praemie 0.02% (Bid-Untergrenze).
+bool premConst = premModel == "Konstant (% vom Strike)"
+float logRet = math.log(close / nz(close[1], close))
+float hvAnn  = ta.stdev(logRet, 30) * math.sqrt(31536000.0 / timeframe.in_seconds())
+float hvEff  = math.max(nz(hvAnn, 0.30), 0.08) * premIvMult
+
+f_cnd(float x) =>
+    1.0 / (1.0 + math.exp(-1.702 * x))
+
+f_optPremPct(float S, float K, float vol, float days, bool isPut) =>
+    float T  = math.max(days, 1.0) / 365.0
+    float v  = math.max(vol, 0.05) * math.sqrt(T)
+    float d1 = (math.log(S / K) + v * v / 2) / v
+    float d2 = d1 - v
+    float pr = isPut ? K * f_cnd(-d2) - S * f_cnd(-d1) : S * f_cnd(d1) - K * f_cnd(d2)
+    math.max(pr / K * 100, 0.02)
+
+// Referenz-Strike fuer alle Auto-Mini-Backtests (Area Low − Puffer)
+float autoKRef = ta.lowest(low, refLen) * (1 - strikeBufPct / 100)
+
+// Walk-Forward-Mini-Short-Put-Backtest je Signalreihe: liefert [Anzahl
+// Trades, normiertes Konto]. Jede Aufrufstelle hat ihren eigenen
+// Zustand (Pine-Funktionsinstanzen) — gleiche Regeln wie die grosse
+// Tabelle, Praemie nach gewaehltem Modell.
+f_wfStats(bool entryEvt) =>
+    var bool  wOn = false
+    var float wK  = na
+    var int   wX  = 0
+    var float wPr = 0.0
+    var int   wN  = 0
+    var float wEq = 1.0
+    if wOn and time >= wX
+        wEq := wEq * (1 + wPr / 100 + math.min(0.0, close / wK - 1))
+        wN  += 1
+        wOn := false
+    if entryEvt and not wOn
+        wOn := true
+        wK  := autoKRef
+        int wXn = f_fridayAfter(time + minCalDays * 86400000)
+        wX  := wXn
+        wPr := premConst ? premPct : f_optPremPct(close, wK, hvEff, (wXn - time) / 86400000.0, true)
+    [wN, wEq]
+
+// Guete einer Signalreihe = Oe je Trade (geometrisch); erst ab 8 Trades
+f_wfScore(int n, float eq) =>
+    n >= 8 ? math.pow(eq, 1.0 / n) - 1 : -1.0e9
+
+// ══════════════════════════ 1) TREND MODEL ══════════════════════════
+// FLIESSENDE LEITER: 8 Trendlinien-Paare zwischen Very Tight und Very
+// Loose laufen parallel — der Auto-Modus waehlt je Kerze die Stufe mit
+// dem besten Oe je Trade (Walk-Forward, nur Vergangenheit).
 tF0 = ta.ema(close, 2)
 tS0 = ta.ema(close, 9)    // Very Tight
-tF1 = ta.ema(close, 4)
-tS1 = ta.ema(close, 16)   // Tight
-tF2 = ta.ema(close, 6)
-tS2 = ta.ema(close, 28)   // Loose
-tF3 = ta.ema(close, 13)
-tS3 = ta.ema(close, 35)   // Very Loose
+tF1 = ta.ema(close, 3)
+tS1 = ta.ema(close, 12)
+tF2 = ta.ema(close, 4)
+tS2 = ta.ema(close, 16)   // Tight
+tF3 = ta.ema(close, 5)
+tS3 = ta.ema(close, 21)
+tF4 = ta.ema(close, 6)
+tS4 = ta.ema(close, 28)   // Loose
+tF5 = ta.ema(close, 8)
+tS5 = ta.ema(close, 31)
+tF6 = ta.ema(close, 10)
+tS6 = ta.ema(close, 33)
+tF7 = ta.ema(close, 13)
+tS7 = ta.ema(close, 35)   // Very Loose
 bool tB0 = tF0 > tS0
 bool tB1 = tF1 > tS1
 bool tB2 = tF2 > tS2
 bool tB3 = tF3 > tS3
-bool tEu0 = tB0 and not tB0[1]
-bool tEu1 = tB1 and not tB1[1]
-bool tEu2 = tB2 and not tB2[1]
-bool tEu3 = tB3 and not tB3[1]
-
-// AUTO-MODUS: je Modus ein Mini-Short-Put-Backtest (gleiche Regeln wie
-// die grosse Tabelle: Area-Low-Referenz − Puffer, Verfall 1. Freitag
-// nach >= minCalDays, Praemien-Annahme). Auswahl WALK-FORWARD: Auf jeder
-// Kerze gewinnt der Modus mit dem besten Oe je Trade — berechnet NUR aus
-// der Vergangenheit bis zu dieser Kerze (kein Blick in die Zukunft).
-float autoKRef = ta.lowest(low, refLen) * (1 - strikeBufPct / 100)
-var array<bool>  tmOn = array.new_bool(4, false)
-var array<float> tmK  = array.new_float(4, na)
-var array<int>   tmX  = array.new_int(4, 0)
-var array<int>   tmN  = array.new_int(4, 0)
-var array<float> tmEq = array.new_float(4, 1.0)
-array<bool> tmEvtU = array.from(tEu0, tEu1, tEu2, tEu3)
-for m = 0 to 3
-    // 1) offenen Put dieses Modus am Verfall abrechnen
-    if array.get(tmOn, m) and time >= array.get(tmX, m)
-        float retM = premPct / 100 + math.min(0.0, close / array.get(tmK, m) - 1)
-        array.set(tmEq, m, array.get(tmEq, m) * (1 + retM))
-        array.set(tmN, m, array.get(tmN, m) + 1)
-        array.set(tmOn, m, false)
-    // 2) neues Kauf-Ereignis dieses Modus -> neuer Put
-    if array.get(tmEvtU, m) and not array.get(tmOn, m)
-        array.set(tmOn, m, true)
-        array.set(tmK, m, autoKRef)
-        array.set(tmX, m, f_fridayAfter(time + minCalDays * 86400000))
-// Walk-Forward-Auswahl (Mindestens 8 Trades, sonst Very Tight bzw.
-// bisheriger Gewinner)
+bool tB4 = tF4 > tS4
+bool tB5 = tF5 > tS5
+bool tB6 = tF6 > tS6
+bool tB7 = tF7 > tS7
+[tN0, tQ0] = f_wfStats(tB0 and not tB0[1])
+[tN1, tQ1] = f_wfStats(tB1 and not tB1[1])
+[tN2, tQ2] = f_wfStats(tB2 and not tB2[1])
+[tN3, tQ3] = f_wfStats(tB3 and not tB3[1])
+[tN4, tQ4] = f_wfStats(tB4 and not tB4[1])
+[tN5, tQ5] = f_wfStats(tB5 and not tB5[1])
+[tN6, tQ6] = f_wfStats(tB6 and not tB6[1])
+[tN7, tQ7] = f_wfStats(tB7 and not tB7[1])
 var int tmSel = 0
 int   tmBestIdx = tmSel
 float tmBest = -1.0e9
-for m = 0 to 3
-    if array.get(tmN, m) >= 8
-        float gM = math.pow(array.get(tmEq, m), 1.0 / array.get(tmN, m)) - 1
-        if gM > tmBest
-            tmBest := gM
-            tmBestIdx := m
+float[] tmScores = array.from(f_wfScore(tN0, tQ0), f_wfScore(tN1, tQ1), f_wfScore(tN2, tQ2), f_wfScore(tN3, tQ3),
+     f_wfScore(tN4, tQ4), f_wfScore(tN5, tQ5), f_wfScore(tN6, tQ6), f_wfScore(tN7, tQ7))
+for m = 0 to 7
+    float gM = array.get(tmScores, m)
+    if gM > -1.0e8 and gM > tmBest
+        tmBest := gM
+        tmBestIdx := m
 tmSel := tmBestIdx
 
 bool autoTrend = trendMode == "Auto (aktienspezifisch)"
-int  manSel = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 1 : trendMode == "Loose" ? 2 : 3
+int  manSel = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 2 : trendMode == "Loose" ? 4 : 7
 int  tmUse  = autoTrend ? tmSel : manSel
-string tmName = tmUse == 0 ? "Very Tight" : tmUse == 1 ? "Tight" : tmUse == 2 ? "Loose" : "Very Loose"
+string tmName = tmUse == 0 ? "EMA 2/9 (Very Tight)" : tmUse == 1 ? "EMA 3/12" : tmUse == 2 ? "EMA 4/16 (Tight)" :
+     tmUse == 3 ? "EMA 5/21" : tmUse == 4 ? "EMA 6/28 (Loose)" : tmUse == 5 ? "EMA 8/31" :
+     tmUse == 6 ? "EMA 10/33" : "EMA 13/35 (Very Loose)"
 
-trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tF3
-trendSlow = tmUse == 0 ? tS0 : tmUse == 1 ? tS1 : tmUse == 2 ? tS2 : tS3
+trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tmUse == 3 ? tF3 :
+     tmUse == 4 ? tF4 : tmUse == 5 ? tF5 : tmUse == 6 ? tF6 : tF7
+trendSlow = tmUse == 0 ? tS0 : tmUse == 1 ? tS1 : tmUse == 2 ? tS2 : tmUse == 3 ? tS3 :
+     tmUse == 4 ? tS4 : tmUse == 5 ? tS5 : tmUse == 6 ? tS6 : tS7
 bullTrend = trendFast > trendSlow
 bearTrend = trendFast < trendSlow
 
@@ -658,19 +749,41 @@ macdLine = ta.ema(close, 10) - ta.ema(close, 35)
 sigLine  = ta.ema(macdLine, 5)
 hist     = macdLine - sigLine
 
-macdFrueh = macdMode == "Früh (Histogramm dreht)"
-// Früh-Modus: Histogramm dreht unter Null nach oben (Momentum-Wende) —
+// Beide Varianten parallel; Auto waehlt walk-forward die bessere.
+// Frueh-Modus: Histogramm dreht unter Null nach oben (Momentum-Wende) —
 // kommt der Kreuzung im Median 3 Kerzen zuvor
-macdBuyEvt  = macdFrueh ? (hist > hist[1] and hist[1] <= hist[2] and hist < 0) : ta.crossover(hist, 0)
-macdSellEvt = macdFrueh ? (hist < hist[1] and hist[1] >= hist[2] and hist > 0) : ta.crossunder(hist, 0)
+bool mdBuyCross  = ta.crossover(hist, 0)
+bool mdSellCross = ta.crossunder(hist, 0)
+bool mdBuyFrueh  = hist > hist[1] and hist[1] <= hist[2] and hist < 0
+bool mdSellFrueh = hist < hist[1] and hist[1] >= hist[2] and hist > 0
+[mdN0, mdQ0] = f_wfStats(mdBuyCross)
+[mdN1, mdQ1] = f_wfStats(mdBuyFrueh)
+var int mdSel = 0
+mdSel := f_wfScore(mdN1, mdQ1) > math.max(f_wfScore(mdN0, mdQ0), -1.0e8) ? 1 : f_wfScore(mdN0, mdQ0) > -1.0e8 ? 0 : mdSel
+bool autoMacd = macdMode == "Auto (aktienspezifisch)"
+macdFrueh = autoMacd ? mdSel == 1 : macdMode == "Früh (Histogramm dreht)"
+string mdName = macdFrueh ? "Früh (Histogramm dreht)" : "Kreuzung (klassisch)"
+macdBuyEvt  = macdFrueh ? mdBuyFrueh : mdBuyCross
+macdSellEvt = macdFrueh ? mdSellFrueh : mdSellCross
 
 // ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
 k1 = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
 k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
 
-dualStoch = stochMode == "Dual (klassisch)"
-stochBuyEvt  = ta.crossover(k1, osLevel)  and (not dualStoch or k2 < osLevel)
-stochSellEvt = ta.crossunder(k1, obLevel) and (not dualStoch or k2 > obLevel)
+// Beide Varianten parallel; Auto waehlt walk-forward die bessere.
+bool stBuyDual  = ta.crossover(k1, osLevel)  and k2 < osLevel
+bool stSellDual = ta.crossunder(k1, obLevel) and k2 > obLevel
+bool stBuySing  = ta.crossover(k1, osLevel)
+bool stSellSing = ta.crossunder(k1, obLevel)
+[stN0, stQ0] = f_wfStats(stBuyDual)
+[stN1, stQ1] = f_wfStats(stBuySing)
+var int stSel = 1
+stSel := f_wfScore(stN0, stQ0) > math.max(f_wfScore(stN1, stQ1), -1.0e8) ? 0 : f_wfScore(stN1, stQ1) > -1.0e8 ? 1 : stSel
+bool autoStoch = stochMode == "Auto (aktienspezifisch)"
+dualStoch = autoStoch ? stSel == 0 : stochMode == "Dual (klassisch)"
+string stName = dualStoch ? "Dual (klassisch)" : "Single (schnelle Linie)"
+stochBuyEvt  = dualStoch ? stBuyDual : stBuySing
+stochSellEvt = dualStoch ? stSellDual : stSellSing
 
 // ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
 rsi = ta.rsi(close, 14)
@@ -1517,11 +1630,13 @@ var array<float> stDD = array.new_float(NSLOT, 0.0)
 var array<bool>  spOn  = array.new_bool(NSLOT, false)
 var array<float> spK   = array.new_float(NSLOT, na)
 var array<int>   spX   = array.new_int(NSLOT, 0)
+var array<float> spPr  = array.new_float(NSLOT, 0.0)
 var array<bool>  spPd  = array.new_bool(NSLOT, false)
 var array<float> spPdK = array.new_float(NSLOT, na)
 var array<bool>  scOn  = array.new_bool(NSLOT, false)
 var array<float> scK   = array.new_float(NSLOT, na)
 var array<int>   scX   = array.new_int(NSLOT, 0)
+var array<float> scPr  = array.new_float(NSLOT, 0.0)
 var array<bool>  scPd  = array.new_bool(NSLOT, false)
 var array<float> scPdK = array.new_float(NSLOT, na)
 // Aktien-Slots
@@ -1568,42 +1683,54 @@ if enableBT
                     array.set(akPS, sl, true)
     else
         for sl = 0 to NSLOT - 1
-            // 1) Offene Optionen am Verfall abrechnen
+            // 1) Offene Optionen am Verfall abrechnen (mit der beim
+            //    Einstieg festgehaltenen Praemie)
             if array.get(spOn, sl) and time >= array.get(spX, sl)
-                f_book(sl, premPct / 100 + math.min(0.0, close / array.get(spK, sl) - 1))
+                f_book(sl, array.get(spPr, sl) / 100 + math.min(0.0, close / array.get(spK, sl) - 1))
                 array.set(spOn, sl, false)
             if array.get(scOn, sl) and time >= array.get(scX, sl)
-                f_book(sl, premPct / 100 + math.min(0.0, 1 - close / array.get(scK, sl)))
+                f_book(sl, array.get(scPr, sl) / 100 + math.min(0.0, 1 - close / array.get(scK, sl)))
                 array.set(scOn, sl, false)
-            // 2) Bar-Open-Modus: Pendings der Vorkerze jetzt eröffnen
+            // 2) Bar-Close-Modus: Pendings der Vorkerze jetzt eröffnen
+            //    (Praemie zum Ausfuehrungszeitpunkt, S = Eroeffnungskurs)
             if array.get(spPd, sl)
                 if not array.get(spOn, sl)
+                    float kPd = array.get(spPdK, sl)
+                    int   xPd = f_fridayAfter(time + minCalDays * 86400000)
                     array.set(spOn, sl, true)
-                    array.set(spK, sl, array.get(spPdK, sl))
-                    array.set(spX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                    array.set(spK, sl, kPd)
+                    array.set(spX, sl, xPd)
+                    array.set(spPr, sl, premConst ? premPct : f_optPremPct(open, kPd, hvEff, (xPd - time) / 86400000.0, true))
                 array.set(spPd, sl, false)
             if array.get(scPd, sl)
                 if not array.get(scOn, sl)
+                    float kCd = array.get(scPdK, sl)
+                    int   xCd = f_fridayAfter(time + minCalDays * 86400000)
                     array.set(scOn, sl, true)
-                    array.set(scK, sl, array.get(scPdK, sl))
-                    array.set(scX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                    array.set(scK, sl, kCd)
+                    array.set(scX, sl, xCd)
+                    array.set(scPr, sl, premConst ? premPct : f_optPremPct(open, kCd, hvEff, (xCd - time) / 86400000.0, false))
                 array.set(scPd, sl, false)
             // 3) Neue Signale dieser Kerze
             if inWindow and wantPut and array.get(slotBuy, sl) and not array.get(spOn, sl) and not array.get(spPd, sl)
                 float kP = btRefLo * (1 - strikeBufPct / 100)
                 if execClose
+                    int xPn = f_fridayAfter(time + minCalDays * 86400000)
                     array.set(spOn, sl, true)
                     array.set(spK, sl, kP)
-                    array.set(spX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                    array.set(spX, sl, xPn)
+                    array.set(spPr, sl, premConst ? premPct : f_optPremPct(close, kP, hvEff, (xPn - time) / 86400000.0, true))
                 else
                     array.set(spPd, sl, true)
                     array.set(spPdK, sl, kP)
             if inWindow and wantCall and array.get(slotSell, sl) and not array.get(scOn, sl) and not array.get(scPd, sl)
                 float kC = btRefHi * (1 + strikeBufPct / 100)
                 if execClose
+                    int xCn = f_fridayAfter(time + minCalDays * 86400000)
                     array.set(scOn, sl, true)
                     array.set(scK, sl, kC)
-                    array.set(scX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                    array.set(scX, sl, xCn)
+                    array.set(scPr, sl, premConst ? premPct : f_optPremPct(close, kC, hvEff, (xCn - time) / 86400000.0, false))
                 else
                     array.set(scPd, sl, true)
                     array.set(scPdK, sl, kC)
@@ -1669,9 +1796,11 @@ if barstate.islast and enableBT
     if not aktMode
         string refTxt = refEng ? "Close" : wantPut and wantCall ? "Area Lo/Hi" : wantPut ? "Area Low" : "Area High"
         string bufSgn = wantPut and wantCall ? "±" : wantPut ? "−" : "+"
+        string premTxt = premConst ? "Präm. " + str.tostring(premPct, "#.#") + "%" :
+             "Präm. Vol-Modell ×" + str.tostring(premIvMult, "#.#")
         f_cell(0, rowI, "Regel", false)
         table.cell(bt, 1, rowI, refTxt + " " + bufSgn + str.tostring(strikeBufPct, "#.#") + "% · 1.Fr ≥"
-             + str.tostring(minCalDays) + "T · Präm. " + str.tostring(premPct, "#.#") + "%",
+             + str.tostring(minCalDays) + "T · " + premTxt,
              text_color = color.new(color.white, 20), text_size = size.tiny, text_halign = text.align_left)
         table.merge_cells(bt, 1, rowI, 4, rowI)
 
@@ -1690,10 +1819,16 @@ if barstate.islast and showTable
                   + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 1, f_mark(trendBuyOK) + " / " + f_mark(trendSellOK), text_color = color.white)
     if useMACD
-        table.cell(t, 0, 2, "MACD Pro", text_color = color.white)
+        table.cell(t, 0, 2, autoMacd ? "MACD (Auto)" : "MACD Pro", text_color = color.white,
+             tooltip = autoMacd ? "Auto-Modus aktiv — aktuell gewählt: '" + mdName
+                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 2, f_mark(macdBuyOK) + " / " + f_mark(macdSellOK), text_color = color.white)
     if useStoch
-        table.cell(t, 0, 3, "Dual Stoch", text_color = color.white)
+        table.cell(t, 0, 3, autoStoch ? "Stoch (Auto)" : "Dual Stoch", text_color = color.white,
+             tooltip = autoStoch ? "Auto-Modus aktiv — aktuell gewählt: '" + stName
+                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 3, f_mark(stochBuyOK) + " / " + f_mark(stochSellOK), text_color = color.white)
     if useRSI
         table.cell(t, 0, 4, "RSI", text_color = color.white)
