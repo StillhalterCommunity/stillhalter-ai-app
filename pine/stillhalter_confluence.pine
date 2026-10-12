@@ -2,13 +2,32 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.3
+//  Stillhalter Community® – CONFLUENCE v1.4
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
-//  NEU in v1.3 — STAFFEL-BACKTEST (Unsicherheits-Reduktion je Stufe):
+//  NEU in v1.4 — KOMPAKTE STAFFEL, SHORT OPTIONS, AUSFUEHRUNGS-WAHL:
+//   • Tabelle KOMPAKT umgebaut: oben eine Zeile je EINZEL-Indikator
+//     (Trend · MACD · Stoch · MR · ggf. RSI/Supp.), darunter KUMULIERT
+//     '>=2/4 · >=3/4 · 4/4' (mindestens s Komponenten, nicht exakt s) —
+//     so ist die Unsicherheits-Reduktion je zusaetzlicher Bestaetigung
+//     direkt ablesbar. Kleine Schrift, kurze Spalten (n/Win/ROI/Max DD).
+//   • SHORT CALLS + KOMBINATION: Options-Seite waehlbar — Short Put,
+//     Short Call oder 'Beide (Short Options)'. Calls spiegeln die Puts:
+//     Strike ueber dem Area High (N-Kerzen-Hoch) + Puffer, Einstieg am
+//     DOWN-Signal der jeweiligen Zeile.
+//   • ROI jetzt auch im Options-Modus: ueber eine PRAEMIEN-ANNAHME
+//     (einstellbar, % vom Strike je Trade), da TradingView keine
+//     historischen Optionspreise kennt. Verlust = Strike-Verletzung am
+//     Verfall; Win = Trade endet netto im Plus. 'Max DD' = maximaler
+//     Drawdown der Stufen-Equity (ersetzt 'Schlimmste Verletzung').
+//   • AUSFUEHRUNG waehlbar: 'Naechste Eroeffnung' (Bar Open,
+//     realistisch, Standard) oder 'Schlusskurs der Signalkerze'
+//     (Bar Close — wer kurz vor Handelsschluss ausfuehrt).
+//   • Regel-Zeile verkuerzt: 'Area Low −2% · 1.Fr >=10T · Praem. 1%'.
+//  v1.3 — STAFFEL-BACKTEST (Unsicherheits-Reduktion je Stufe):
 //   • Die Backtest-Tabelle oben rechts zeigt jetzt JE KONFLUENZ-STUFE
 //     (Score 1 bis alle aktiven Komponenten), wie verlaesslich die
 //     Signale waren — damit beantwortet sie direkt: Wie stark
@@ -171,7 +190,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.3", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.4", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
@@ -409,40 +428,61 @@ enableBT   = input.bool(true, "Backtest aktivieren (Tabelle oben rechts)", group
           + "Unsicherheit reduziert. Gehandelt wird jedes Kauf-Ereignis mit GENAU "
           + "dieser Stufe, unabhängig von der Dreieck-Schwelle (kein Blick in "
           + "die Zukunft).")
-btMode     = input.string("Stillhalter (Short Put)", "🎩 Backtest-Modus",
-     options = ["Stillhalter (Short Put)", "Aktie (Long)"], group = grpB,
-     tooltip = "Stillhalter = nach jedem Kauf-Ereignis wird ein Short Put simuliert: "
-          + "Strike unter der gewählten Referenz (siehe unten), Verfall am ersten "
-          + "Freitag nach der Mindest-Laufzeit — die Tabelle zeigt je Stufe die "
-          + "VERFALLSQUOTE, deine wichtigste Kennzahl. "
-          + "Aktie = klassischer Long-Roundtrip je Stufe: Einstieg zur nächsten "
-          + "Eröffnung nach dem Kauf-Ereignis, Ausstieg zur nächsten Eröffnung "
-          + "nach dem SELL-Dreieck des Charts.")
-strikeRef  = input.string("Tief der letzten N Kerzen (defensiv)", "Strike-Referenz",
-     options = ["Tief der letzten N Kerzen (defensiv)", "Schlusskurs (eng)"], group = grpB,
-     tooltip = "Worauf sich der Strike-Puffer bezieht. Das N-Kerzen-Tief ist die "
-          + "defensive Variante (Strike unter dem jüngsten Boden — wie beim "
-          + "Mean-Reversion-Indikator das Episodentief). Der Schlusskurs ist die "
-          + "enge Variante (mehr Prämie, weniger Abstand) — hier zeigt sich am "
-          + "deutlichsten, ob mehr Konfluenz wirklich mehr Sicherheit bringt.")
-refLen     = input.int(10, "N für das Referenz-Tief (Kerzen)", minval = 1, maxval = 60, group = grpB,
-     tooltip = "Nur für die Referenz 'Tief der letzten N Kerzen': über wie viele "
-          + "Kerzen zurück das Tief gesucht wird. 10 = das Tief der letzten zwei "
-          + "Handelswochen (auf Tageskerzen).")
-strikeBufPct = input.float(2.0, "Strike-Puffer unter der Referenz (%)", minval = 0.0,
+btMode     = input.string("Stillhalter (Short Options)", "🎩 Backtest-Modus",
+     options = ["Stillhalter (Short Options)", "Aktie (Long)"], group = grpB,
+     tooltip = "Stillhalter = nach jedem Signal der Zeile wird eine Short-Option "
+          + "simuliert (Seite unten wählbar): Strike mit Puffer jenseits der "
+          + "Referenz, Verfall am ersten Freitag nach der Mindest-Laufzeit. "
+          + "Aktie = klassischer Long-Roundtrip je Zeile: Einstieg am Kauf-Signal, "
+          + "Ausstieg am Verkaufs-Signal derselben Zeile.")
+btSide     = input.string("Short Put", "Options-Seite",
+     options = ["Short Put", "Short Call", "Beide (Short Options)"], group = grpB,
+     tooltip = "Short Put = Einstieg an den KAUF-Signalen (Strike unter dem Area "
+          + "Low). Short Call = Einstieg an den VERKAUFS-Signalen (Strike über "
+          + "dem Area High). Beide = beide Seiten parallel — die klassische "
+          + "Stillhalter-Kombination; Kennzahlen je Zeile zusammengefasst.")
+strikeRef  = input.string("Area Low/High (N-Kerzen-Extrem)", "Strike-Referenz",
+     options = ["Area Low/High (N-Kerzen-Extrem)", "Schlusskurs (eng)"], group = grpB,
+     tooltip = "Worauf sich der Strike-Puffer bezieht. Area Low/High = das Tief "
+          + "bzw. Hoch der letzten N Kerzen (defensiv — Strike jenseits des "
+          + "jüngsten Extrems). Schlusskurs = die enge Variante (mehr Prämie, "
+          + "weniger Abstand) — hier zeigt sich am deutlichsten, ob mehr "
+          + "Konfluenz wirklich mehr Sicherheit bringt.")
+refLen     = input.int(10, "N für Area Low/High (Kerzen)", minval = 1, maxval = 60, group = grpB,
+     tooltip = "Über wie viele Kerzen zurück das Area Low (Tief) bzw. Area High "
+          + "(Hoch) gesucht wird. 10 = die letzten zwei Handelswochen auf "
+          + "Tageskerzen.")
+strikeBufPct = input.float(2.0, "Strike-Puffer (%)", minval = 0.0,
      maxval = 10.0, step = 0.5, group = grpB,
-     tooltip = "Der simulierte Strike liegt so viele Prozent UNTER der gewählten "
-          + "Referenz. Mehr Puffer = höhere Trefferquote bei weniger Prämie; der "
-          + "Standardwert ist datenbasiert kalibriert.")
+     tooltip = "Der simulierte Strike liegt so viele Prozent UNTER dem Area Low "
+          + "(Put) bzw. ÜBER dem Area High (Call). Mehr Puffer = höhere "
+          + "Trefferquote bei weniger Prämie; der Standardwert ist datenbasiert "
+          + "kalibriert.")
+premPct    = input.float(1.0, "Prämien-Annahme je Trade (% vom Strike)", minval = 0.1,
+     maxval = 5.0, step = 0.1, group = grpB,
+     tooltip = "TradingView kennt keine historischen Optionspreise — für den ROI "
+          + "wird deshalb vereinfacht angenommen, dass jeder Trade so viel Prämie "
+          + "einbringt (in % des Strikes). Bei einer Strike-Verletzung am Verfall "
+          + "wird die Verletzungstiefe abgezogen. Win = Trade endet netto im "
+          + "Plus. Die Annahme ist bewusst konstant, damit die Zeilen fair "
+          + "vergleichbar bleiben.")
 minCalDays = input.int(10, "Verfall: erster Freitag nach mind. (Kalendertagen)", minval = 5,
      maxval = 45, group = grpB,
      tooltip = "Der Verfall ist der erste FREITAG, der mindestens so viele "
           + "Kalendertage nach dem Einstieg liegt. Standard 10 = in der Regel der "
           + "Freitag der übernächsten Woche. Kürzere Laufzeiten sind für diesen "
           + "Ansatz tendenziell vorteilhaft.")
+btEntry    = input.string("Nächste Eröffnung (Bar Open)", "Ausführung",
+     options = ["Nächste Eröffnung (Bar Open)", "Schlusskurs der Signalkerze (Bar Close)"], group = grpB,
+     tooltip = "Bar Open (Standard, realistisch) = das Signal entsteht mit "
+          + "Kerzenschluss, gehandelt wird zur Eröffnung der NÄCHSTEN Kerze. "
+          + "Bar Close = Ausführung noch zum Schlusskurs der Signalkerze — für "
+          + "alle, die kurz vor Handelsschluss ausführen (vgl. Auslöse-Level im "
+          + "Mean-Reversion-Indikator). Kein Blick in die Zukunft: Auch Bar "
+          + "Close nutzt nur Werte, die bei Kerzenschluss feststehen.")
 btFrom     = input.time(timestamp("2020-01-01T00:00:00"), "Backtest Start", group = grpB)
 btTo       = input.time(timestamp("2099-01-01T00:00:00"), "Backtest Ende",  group = grpB)
-initialCapital = input.float(10000, "Startkapital (Aktien-Modus, je Stufe)", minval = 1, group = grpB)
+initialCapital = input.float(10000, "Startkapital (je Zeile)", minval = 1, group = grpB)
 
 // ── Interne Kalibrierung (datenbasiert optimiert; bewusst KEINE Eingaben) ──
 osLevel     = 25
@@ -1266,15 +1306,19 @@ if barstate.islast and showZones
                      tooltip = tip))
                 boundary := isSup ? bLo : bHi
 
-// ══════════ BACKTEST — STAFFEL: VERLÄSSLICHKEIT JE KONFLUENZ-STUFE ══════════
-// Jede Stufe s (Score 1 .. nComp) wird UNABHÄNGIG simuliert: gehandelt
-// wird jedes Kauf-Ereignis, dessen Score am Ereignis-Bar GENAU s ist —
-// unabhängig von der Dreieck-Schwelle. So zeigt die Tabelle ehrlich,
-// wie stark jede zusätzliche Bestätigung die Unsicherheit reduziert.
-// Stillhalter: Short Put (Strike = Referenz − Puffer, Verfall 1. Freitag
-// nach ≥ minCalDays Kalendertagen; Win = Schluss am Verfall ≥ Strike).
-// Aktie: Einstieg nächste Eröffnung nach dem Kauf-Ereignis der Stufe,
-// Ausstieg nächste Eröffnung nach dem SELL-Dreieck des Charts.
+// ══════ BACKTEST — EINZEL-INDIKATOREN + KUMULIERTE KONFLUENZ ══════
+// Obere Zeilen: jeder Indikator ALLEIN (sein eigenes Kauf-/Verkaufs-
+// Ereignis). Untere Zeilen: KUMULIERT — mindestens 2/3/4/... Komponenten
+// gleichzeitig (>=, nicht exakt). So ist direkt ablesbar, wie jede
+// zusaetzliche Bestaetigung die Unsicherheit reduziert.
+// Stillhalter: Short Put (Strike unter Area Low − Puffer am Kauf-Signal),
+// Short Call (ueber Area High + Puffer am Verkaufs-Signal) oder beide;
+// Verfall 1. Freitag nach >= minCalDays. ROI ueber die Praemien-Annahme
+// (premPct % vom Strike je Trade), Verlust = Strike-Verletzung am
+// Verfall; Win = Trade endet netto im Plus.
+// Aktie: Long-Roundtrip je Zeile (Kauf-Signal -> Verkaufs-Signal).
+// Ausfuehrung je nach Einstellung: naechste Eroeffnung (Bar Open) oder
+// Schlusskurs der Signalkerze (Bar Close).
 inWindow = time >= btFrom and time <= btTo
 
 f_fridayAfter(int t0) =>
@@ -1283,115 +1327,177 @@ f_fridayAfter(int t0) =>
         tt += 86400000
     tt
 
-float btRefPx = strikeRef == "Schlusskurs (eng)" ? close : ta.lowest(low, refLen)
+bool  refEng   = strikeRef == "Schlusskurs (eng)"
+float btRefLo  = refEng ? close : ta.lowest(low, refLen)
+float btRefHi  = refEng ? close : ta.highest(high, refLen)
+bool  wantPut  = btSide != "Short Call"
+bool  wantCall = btSide != "Short Put"
+bool  aktMode  = btMode == "Aktie (Long)"
+bool  execClose = btEntry == "Schlusskurs der Signalkerze (Bar Close)"
 
-int MAXS = 6
-// Stillhalter-Staffel (je Stufe ein offener Short Put)
-var array<bool>  spOpenA   = array.new_bool(MAXS + 1, false)
-var array<float> spStrikeA = array.new_float(MAXS + 1, na)
-var array<int>   spExpA    = array.new_int(MAXS + 1, 0)
-var array<int>   spTrA     = array.new_int(MAXS + 1, 0)
-var array<int>   spWinA    = array.new_int(MAXS + 1, 0)
-var array<float> spWorstA  = array.new_float(MAXS + 1, 0.0)
-// Aktien-Staffel (je Stufe eine Position + eigenes Kapital)
-var array<bool>  eqPendB = array.new_bool(MAXS + 1, false)
-var array<bool>  eqPendS = array.new_bool(MAXS + 1, false)
-var array<bool>  eqInPos = array.new_bool(MAXS + 1, false)
-var array<float> eqEntry = array.new_float(MAXS + 1, na)
-var array<float> eqEq    = array.new_float(MAXS + 1, na)
-var array<float> eqPeak  = array.new_float(MAXS + 1, 0.0)
-var array<float> eqDD    = array.new_float(MAXS + 1, 0.0)
-var array<int>   eqTrA   = array.new_int(MAXS + 1, 0)
-var array<int>   eqWinA  = array.new_int(MAXS + 1, 0)
+// Slots: 0 Trend · 1 MACD · 2 Stoch · 3 RSI · 4 MR · 5 Support-Qual. ·
+// 6..10 kumuliert (Score >= 2 .. >= 6)
+int NSLOT = 11
+array<bool> slotBuy  = array.new_bool(NSLOT, false)
+array<bool> slotSell = array.new_bool(NSLOT, false)
+array.set(slotBuy, 0, trendBuyEvt)
+array.set(slotSell, 0, trendSellEvt)
+array.set(slotBuy, 1, macdBuyEvt)
+array.set(slotSell, 1, macdSellEvt)
+array.set(slotBuy, 2, stochBuyEvt)
+array.set(slotSell, 2, stochSellEvt)
+array.set(slotBuy, 3, useRSI and rsiBuyEvt)
+array.set(slotSell, 3, useRSI and rsiSellEvt)
+array.set(slotBuy, 4, useMR and mrSigUp)
+array.set(slotSell, 4, useMR and mrSigDn)
+array.set(slotBuy, 5, qsBuyRaw)
+array.set(slotSell, 5, qsSellRaw)
+for sc = 2 to 6
+    array.set(slotBuy,  4 + sc, buyEvtNow  and adxOK and buyScore  >= sc)
+    array.set(slotSell, 4 + sc, sellEvtNow and adxOK and sellScore >= sc)
+
+// Kennzahlen je Zeile (Equity-basiert: Win = netto im Plus)
+var array<int>   stTr = array.new_int(NSLOT, 0)
+var array<int>   stWin = array.new_int(NSLOT, 0)
+var array<float> stEq = array.new_float(NSLOT, na)
+var array<float> stPk = array.new_float(NSLOT, 0.0)
+var array<float> stDD = array.new_float(NSLOT, 0.0)
+// Short-Put- / Short-Call-Slots (je Zeile max. 1 offen je Seite)
+var array<bool>  spOn  = array.new_bool(NSLOT, false)
+var array<float> spK   = array.new_float(NSLOT, na)
+var array<int>   spX   = array.new_int(NSLOT, 0)
+var array<bool>  spPd  = array.new_bool(NSLOT, false)
+var array<float> spPdK = array.new_float(NSLOT, na)
+var array<bool>  scOn  = array.new_bool(NSLOT, false)
+var array<float> scK   = array.new_float(NSLOT, na)
+var array<int>   scX   = array.new_int(NSLOT, 0)
+var array<bool>  scPd  = array.new_bool(NSLOT, false)
+var array<float> scPdK = array.new_float(NSLOT, na)
+// Aktien-Slots
+var array<bool>  akPB = array.new_bool(NSLOT, false)
+var array<bool>  akPS = array.new_bool(NSLOT, false)
+var array<bool>  akIn = array.new_bool(NSLOT, false)
+var array<float> akEn = array.new_float(NSLOT, na)
+
+f_book(int sl, float ret) =>
+    float eqv = nz(array.get(stEq, sl), initialCapital) * (1 + ret)
+    array.set(stEq, sl, eqv)
+    float pk = math.max(math.max(array.get(stPk, sl), initialCapital), eqv)
+    array.set(stPk, sl, pk)
+    array.set(stDD, sl, math.max(array.get(stDD, sl), pk > 0 ? (pk - eqv) / pk * 100 : 0.0))
+    array.set(stTr, sl, array.get(stTr, sl) + 1)
+    if ret > 0
+        array.set(stWin, sl, array.get(stWin, sl) + 1)
 
 if enableBT
-    // 1) Pendings der Vorkerze zur ERÖFFNUNG ausführen (Aktien-Staffel,
-    //    kein Blick in die Zukunft)
-    for s = 1 to MAXS
-        if array.get(eqPendB, s) and not array.get(eqInPos, s)
-            array.set(eqInPos, s, true)
-            array.set(eqEntry, s, open)
-            array.set(eqPendB, s, false)
-        if array.get(eqPendS, s)
-            if array.get(eqInPos, s)
-                float pnl = (open - array.get(eqEntry, s)) / array.get(eqEntry, s)
-                float eqv = nz(array.get(eqEq, s), initialCapital) * (1 + pnl)
-                array.set(eqEq, s, eqv)
-                float pk = math.max(math.max(array.get(eqPeak, s), initialCapital), eqv)
-                array.set(eqPeak, s, pk)
-                array.set(eqDD, s, math.max(array.get(eqDD, s), pk > 0 ? (pk - eqv) / pk * 100 : 0.0))
-                array.set(eqTrA, s, array.get(eqTrA, s) + 1)
-                if pnl > 0
-                    array.set(eqWinA, s, array.get(eqWinA, s) + 1)
-                array.set(eqInPos, s, false)
-            array.set(eqPendS, s, false)
-    // 2) Offene Short Puts am Verfall abrechnen
-    for s = 1 to MAXS
-        if array.get(spOpenA, s) and time >= array.get(spExpA, s)
-            array.set(spTrA, s, array.get(spTrA, s) + 1)
-            if close >= array.get(spStrikeA, s)
-                array.set(spWinA, s, array.get(spWinA, s) + 1)
-            else
-                array.set(spWorstA, s, math.min(array.get(spWorstA, s), (close / array.get(spStrikeA, s) - 1) * 100))
-            array.set(spOpenA, s, false)
-    // 3) Neue Kauf-Ereignisse dieser Kerze in ihre Stufe einsortieren
-    if inWindow and buyEvtNow and adxOK and buyScore >= 1
-        int sB = math.min(buyScore, MAXS)
-        if not array.get(spOpenA, sB)
-            array.set(spOpenA, sB, true)
-            array.set(spStrikeA, sB, btRefPx * (1 - strikeBufPct / 100))
-            array.set(spExpA, sB, f_fridayAfter(time + minCalDays * 86400000))
-        if not array.get(eqInPos, sB) and not array.get(eqPendB, sB)
-            array.set(eqPendB, sB, true)
-    // 4) SELL-Dreieck des Charts = Ausstiegssignal für ALLE Aktien-Stufen
-    if inWindow and sellTrigger
-        for s = 1 to MAXS
-            if array.get(eqInPos, s) and not array.get(eqPendS, s)
-                array.set(eqPendS, s, true)
-
-// ── Staffel-Tabelle oben rechts ──
-var table bt = table.new(position.top_right, 5, 9, border_width = 1)
-if barstate.islast and enableBT
-    bool spMode = btMode == "Stillhalter (Short Put)"
-    color hdBg = color.new(color.black, 20)
-    table.cell(bt, 0, 0, "Score", text_color = color.white, bgcolor = hdBg)
-    if spMode
-        table.cell(bt, 1, 0, "Short Puts", text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 2, 0, "Win Rate",   text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 3, 0, "Schlimmste Verletzung", text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 4, 0, "",           text_color = color.white, bgcolor = hdBg)
+    if aktMode
+        for sl = 0 to NSLOT - 1
+            // Bar-Open-Modus: Pendings der Vorkerze zur Eröffnung ausführen
+            if array.get(akPB, sl) and not array.get(akIn, sl)
+                array.set(akIn, sl, true)
+                array.set(akEn, sl, open)
+                array.set(akPB, sl, false)
+            if array.get(akPS, sl)
+                if array.get(akIn, sl)
+                    f_book(sl, (open - array.get(akEn, sl)) / array.get(akEn, sl))
+                    array.set(akIn, sl, false)
+                array.set(akPS, sl, false)
+            // Neue Signale dieser Kerze
+            if inWindow and array.get(slotBuy, sl) and not array.get(akIn, sl) and not array.get(akPB, sl)
+                if execClose
+                    array.set(akIn, sl, true)
+                    array.set(akEn, sl, close)
+                else
+                    array.set(akPB, sl, true)
+            if inWindow and array.get(slotSell, sl) and array.get(akIn, sl)
+                if execClose
+                    f_book(sl, (close - array.get(akEn, sl)) / array.get(akEn, sl))
+                    array.set(akIn, sl, false)
+                else
+                    array.set(akPS, sl, true)
     else
-        table.cell(bt, 1, 0, "Trades",  text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 2, 0, "Winrate", text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 3, 0, "ROI",     text_color = color.white, bgcolor = hdBg)
-        table.cell(bt, 4, 0, "Max DD",  text_color = color.white, bgcolor = hdBg)
-    for s = 1 to nComp
-        string scoreTxt = str.tostring(s) + " von " + str.tostring(nComp)
-        table.cell(bt, 0, s, scoreTxt, text_color = color.white)
-        if spMode
-            int   trS = array.get(spTrA, s)
-            float wrS = trS > 0 ? array.get(spWinA, s) * 100.0 / trS : na
-            float woS = array.get(spWorstA, s)
-            table.cell(bt, 1, s, str.tostring(trS) + (array.get(spOpenA, s) ? " (+1)" : ""), text_color = color.white)
-            table.cell(bt, 2, s, na(wrS) ? "–" : str.tostring(wrS, "#.#") + " %", text_color = color.white)
-            table.cell(bt, 3, s, woS < 0 ? str.tostring(woS, "#.#") + " %" : "–", text_color = color.white)
-            table.cell(bt, 4, s, "", text_color = color.white)
-        else
-            int   trS = array.get(eqTrA, s)
-            float wrS = trS > 0 ? array.get(eqWinA, s) * 100.0 / trS : na
-            float roS = not na(array.get(eqEq, s)) ? (array.get(eqEq, s) / initialCapital - 1) * 100 : na
-            table.cell(bt, 1, s, str.tostring(trS) + (array.get(eqInPos, s) ? " (+1)" : ""), text_color = color.white)
-            table.cell(bt, 2, s, na(wrS) ? "–" : str.tostring(wrS, "#.#") + " %", text_color = color.white)
-            table.cell(bt, 3, s, na(roS) ? "–" : str.tostring(roS, "#.#") + " %", text_color = color.white)
-            table.cell(bt, 4, s, array.get(eqTrA, s) > 0 ? str.tostring(array.get(eqDD, s), "#.#") + " %" : "–", text_color = color.white)
-    // Regel-Zeile (nur Stillhalter-Modus)
-    if spMode
-        string refTxt = strikeRef == "Schlusskurs (eng)" ? "Schlusskurs" : str.tostring(refLen) + "-Kerzen-Tief"
-        table.cell(bt, 0, nComp + 1, "Regel", text_color = color.white)
-        table.cell(bt, 1, nComp + 1, "Strike = " + refTxt + (strikeBufPct > 0 ? " −" + str.tostring(strikeBufPct, "#.#") + " %" : ""), text_color = color.white)
-        table.cell(bt, 2, nComp + 1, "Verfall:", text_color = color.white)
-        table.cell(bt, 3, nComp + 1, "1. Freitag nach ≥ " + str.tostring(minCalDays) + " Tagen", text_color = color.white)
-        table.cell(bt, 4, nComp + 1, "", text_color = color.white)
+        for sl = 0 to NSLOT - 1
+            // 1) Offene Optionen am Verfall abrechnen
+            if array.get(spOn, sl) and time >= array.get(spX, sl)
+                f_book(sl, premPct / 100 + math.min(0.0, close / array.get(spK, sl) - 1))
+                array.set(spOn, sl, false)
+            if array.get(scOn, sl) and time >= array.get(scX, sl)
+                f_book(sl, premPct / 100 + math.min(0.0, 1 - close / array.get(scK, sl)))
+                array.set(scOn, sl, false)
+            // 2) Bar-Open-Modus: Pendings der Vorkerze jetzt eröffnen
+            if array.get(spPd, sl)
+                if not array.get(spOn, sl)
+                    array.set(spOn, sl, true)
+                    array.set(spK, sl, array.get(spPdK, sl))
+                    array.set(spX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                array.set(spPd, sl, false)
+            if array.get(scPd, sl)
+                if not array.get(scOn, sl)
+                    array.set(scOn, sl, true)
+                    array.set(scK, sl, array.get(scPdK, sl))
+                    array.set(scX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                array.set(scPd, sl, false)
+            // 3) Neue Signale dieser Kerze
+            if inWindow and wantPut and array.get(slotBuy, sl) and not array.get(spOn, sl) and not array.get(spPd, sl)
+                float kP = btRefLo * (1 - strikeBufPct / 100)
+                if execClose
+                    array.set(spOn, sl, true)
+                    array.set(spK, sl, kP)
+                    array.set(spX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                else
+                    array.set(spPd, sl, true)
+                    array.set(spPdK, sl, kP)
+            if inWindow and wantCall and array.get(slotSell, sl) and not array.get(scOn, sl) and not array.get(scPd, sl)
+                float kC = btRefHi * (1 + strikeBufPct / 100)
+                if execClose
+                    array.set(scOn, sl, true)
+                    array.set(scK, sl, kC)
+                    array.set(scX, sl, f_fridayAfter(time + minCalDays * 86400000))
+                else
+                    array.set(scPd, sl, true)
+                    array.set(scPdK, sl, kC)
+
+// ── Kompakte Staffel-Tabelle oben rechts ──
+var table bt = table.new(position.top_right, 5, 14, border_width = 1)
+
+f_cell(int cCol, int cRow, string txt, bool hd) =>
+    table.cell(bt, cCol, cRow, txt, text_color = color.white, text_size = size.small,
+         bgcolor = hd ? color.new(color.black, 20) : na)
+
+if barstate.islast and enableBT
+    string hd0 = aktMode ? "Aktie (Long)" : wantPut and wantCall ? "Short Options" : wantPut ? "Short Put" : "Short Call"
+    f_cell(0, 0, hd0, true)
+    f_cell(1, 0, "n", true)
+    f_cell(2, 0, "Win", true)
+    f_cell(3, 0, "ROI", true)
+    f_cell(4, 0, "Max DD", true)
+    int rowI = 1
+    for sl = 0 to NSLOT - 1
+        bool showRow = sl == 0 or sl == 1 or sl == 2 or (sl == 3 and useRSI) or (sl == 4 and useMR)
+             or (sl == 5 and useQS) or (sl >= 6 and sl - 4 <= nComp)
+        if showRow
+            string nm = sl == 0 ? "Trend" : sl == 1 ? "MACD" : sl == 2 ? "Stoch" :
+                 sl == 3 ? "RSI" : sl == 4 ? "MR" : sl == 5 ? "Supp." :
+                 (sl - 4 == nComp ? str.tostring(nComp) + "/" + str.tostring(nComp) :
+                 "≥" + str.tostring(sl - 4) + "/" + str.tostring(nComp))
+            int   trS = array.get(stTr, sl)
+            float wrS = trS > 0 ? array.get(stWin, sl) * 100.0 / trS : na
+            float roS = not na(array.get(stEq, sl)) ? (array.get(stEq, sl) / initialCapital - 1) * 100 : na
+            f_cell(0, rowI, nm, sl >= 6)
+            f_cell(1, rowI, str.tostring(trS), false)
+            f_cell(2, rowI, na(wrS) ? "–" : str.tostring(wrS, "#.#") + "%", false)
+            f_cell(3, rowI, na(roS) ? "–" : str.tostring(roS, "#.#") + "%", false)
+            f_cell(4, rowI, trS > 0 ? str.tostring(array.get(stDD, sl), "#.#") + "%" : "–", false)
+            rowI += 1
+    // kurze Regel-Zeile (nur Options-Modus)
+    if not aktMode
+        string refTxt = refEng ? "Close" : wantPut and wantCall ? "Area Lo/Hi" : wantPut ? "Area Low" : "Area High"
+        string bufSgn = wantPut and wantCall ? "±" : wantPut ? "−" : "+"
+        f_cell(0, rowI, "Regel", false)
+        table.cell(bt, 1, rowI, refTxt + " " + bufSgn + str.tostring(strikeBufPct, "#.#") + "% · 1.Fr ≥"
+             + str.tostring(minCalDays) + "T · Präm. " + str.tostring(premPct, "#.#") + "%",
+             text_color = color.new(color.white, 20), text_size = size.tiny, text_halign = text.align_left)
+        table.merge_cells(bt, 1, rowI, 4, rowI)
 
 // ══════════════════════════ STATUS-TABELLE ══════════════════════════
 var table t = table.new(position.bottom_right, 2, 8, border_width = 1)
