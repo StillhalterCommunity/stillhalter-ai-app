@@ -67,12 +67,15 @@ with st.sidebar:
     )
 
     if "Watchlist" in analyse_universe:
+        # Version beachten: Q3 2026 = aktuelle Liste, Q1 2026 = Vorgänger
+        from data.watchlist import parse_watchlist
+        _wl_ana = parse_watchlist("Q1 2026" if "Q1 2026" in analyse_universe else "Q3 2026")
         sector_sel = st.selectbox(
             "Sektor",
-            list(WATCHLIST.keys()),
+            list(_wl_ana.keys()),
             format_func=lambda s: f"{SECTOR_ICONS.get(s,'')} {s.split('.',1)[-1].strip().split('(')[0].strip()}",
         )
-        ticker_list = WATCHLIST.get(sector_sel, [])
+        ticker_list = _wl_ana.get(sector_sel, [])
     else:
         sector_sel = ""
         ticker_list = sorted(get_universe_tickers(analyse_universe))

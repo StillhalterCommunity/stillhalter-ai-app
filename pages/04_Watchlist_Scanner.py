@@ -120,7 +120,7 @@ with h2:
     st.markdown(
         f'<div class="sc-page-title">Watchlist Scanner</div>'
         f'<div class="sc-page-subtitle"><span class="{mkt_class}">{market_status_text()}</span>'
-        f' &nbsp;·&nbsp; Watchlist 225 · S&amp;P 500 · Nasdaq 100 · Short Strangle</div>',
+        f' &nbsp;·&nbsp; Watchlist Q3 2026 ({len(ALL_TICKERS)}) · S&amp;P 500 · Nasdaq 100 · Short Strangle</div>',
         unsafe_allow_html=True
     )
 
@@ -316,9 +316,13 @@ with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ *
             key="scan_universe",
         )
     with urow[1]:
-        # Sektor nur für eigene Watchlist verfügbar
+        # Sektor nur für eigene Watchlist verfügbar (Version beachten:
+        # Q3 2026 = aktuelle Liste, Q1 2026 = Vorgänger)
         if "Watchlist" in scan_universe:
-            sector_opts = ["Alle Sektoren (225)"] + list(WATCHLIST.keys())
+            from data.watchlist import parse_watchlist
+            _wl_scan = parse_watchlist("Q1 2026" if "Q1 2026" in scan_universe else "Q3 2026")
+            _wl_n = UNIVERSE_COUNTS.get(scan_universe, len(ALL_TICKERS))
+            sector_opts = [f"Alle Sektoren ({_wl_n})"] + list(_wl_scan.keys())
             scan_sector = st.selectbox(
                 "Sektor",
                 sector_opts,
@@ -328,6 +332,7 @@ with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ *
                 ),
             )
         else:
+            _wl_scan = WATCHLIST
             scan_sector = "Alle Sektoren"
             st.selectbox("Sektor", ["Alle Komponenten"], disabled=True,
                          help="Sektor-Filter nur für eigene Watchlist verfügbar")
@@ -335,9 +340,9 @@ with st.expander(("🛠️ PROFESSIONAL — " if not IS_PRO else "") + "⚙️ *
     # Tickers bestimmen
     if "Watchlist" in scan_universe:
         if "Alle" in scan_sector:
-            scan_tickers_universe = ALL_TICKERS
+            scan_tickers_universe = get_universe_tickers(scan_universe)
         else:
-            scan_tickers_universe = WATCHLIST.get(scan_sector, [])
+            scan_tickers_universe = _wl_scan.get(scan_sector, [])
     else:
         scan_tickers_universe = get_universe_tickers(scan_universe)
 

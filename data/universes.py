@@ -89,26 +89,42 @@ SP500 = sorted(list(dict.fromkeys(SP500)))
 def get_universe_tickers(universe: str) -> List[str]:
     """
     Gibt Ticker-Liste für ein Universum zurück.
-    universe: "Watchlist (225)", "S&P 500 (~400)", "Nasdaq 100 (101)"
+    universe: eine der UNIVERSE_OPTIONS (oder ein Präfix davon, z. B.
+    "Nasdaq 100" / "S&P 500" / "Watchlist ... Q1 2026 ...").
     """
-    from data.watchlist import ALL_TICKERS
+    from data.watchlist import ALL_TICKERS, ALL_TICKERS_Q1
 
     if universe.startswith("Nasdaq"):
         return NASDAQ_100
     elif universe.startswith("S&P"):
         return SP500
+    elif "Q1 2026" in universe:
+        return ALL_TICKERS_Q1
     else:
+        # Standard: aktuelle Watchlist (Q3 2026)
         return ALL_TICKERS
 
 
+def _watchlist_counts():
+    from data.watchlist import ALL_TICKERS, ALL_TICKERS_Q1
+    return len(ALL_TICKERS), len(ALL_TICKERS_Q1)
+
+
+_N_Q3, _N_Q1 = _watchlist_counts()
+
+WATCHLIST_Q3_LABEL = f"Watchlist — 10WC & Masterclass Q3 2026 ({_N_Q3})"
+WATCHLIST_Q1_LABEL = f"Watchlist — 10WC & Masterclass Q1 2026 ({_N_Q1})"
+
 UNIVERSE_OPTIONS = [
-    "Watchlist — 10WC & Masterclass (225)",
+    WATCHLIST_Q3_LABEL,
+    WATCHLIST_Q1_LABEL,
     "S&P 500 (~400 Komponenten)",
     "Nasdaq 100 (101 Komponenten)",
 ]
 
 UNIVERSE_COUNTS = {
-    "Watchlist — 10WC & Masterclass (225)": 225,
-    "S&P 500 (~400 Komponenten)":           len(SP500),
-    "Nasdaq 100 (101 Komponenten)":          len(NASDAQ_100),
+    WATCHLIST_Q3_LABEL:            _N_Q3,
+    WATCHLIST_Q1_LABEL:            _N_Q1,
+    "S&P 500 (~400 Komponenten)":  len(SP500),
+    "Nasdaq 100 (101 Komponenten)": len(NASDAQ_100),
 }

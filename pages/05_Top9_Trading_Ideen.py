@@ -496,7 +496,7 @@ with st.expander(_qs_label, expanded=_qs_expanded):
         else:
             st.markdown("**Noch kein Scan gespeichert** — starte einen Komplett-Scan um die Top 9 zu befüllen.")
         st.caption(
-            "Scannt alle ~225 Watchlist-Aktien · Short PUT (DTE 7–180) + Covered Call (DTE 3–180) · Dauer ca. 4–8 Minuten"
+            "Scannt alle ~285 Watchlist-Aktien (Q3 2026) · Short PUT (DTE 7–180) + Covered Call (DTE 3–180) · Dauer ca. 4–8 Minuten"
         )
     with sq2:
         st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)

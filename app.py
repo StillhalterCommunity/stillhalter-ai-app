@@ -551,7 +551,7 @@ with c3:
           "#9ca3af", "pages/03_Aktienanalyse.py", "📊", "Aktienanalyse")
 with c4:
     _card("4", "WATCHLIST SCANNER",
-          "225 Aktien · CRV-Score · Cash Covered Puts · Covered Calls · Bubble-Chart · CSV",
+          "285 Aktien (Q3 2026) · CRV-Score · Cash Covered Puts · Covered Calls · Bubble-Chart · CSV",
           "#d4a843", "pages/04_Watchlist_Scanner.py", "🔍", "Watchlist Scanner")
 
 st.html('<div class="gold-line" style="margin:18px 0"></div>')
