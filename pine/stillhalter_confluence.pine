@@ -2,12 +2,28 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.7
+//  Stillhalter Community® – CONFLUENCE v1.8
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
+//  NEU in v1.8 — GEMEINSAME AUTO-OPTIMIERUNG (Konfluenz-Ziel):
+//   • Neuer Schalter 'Auto-Modi gemeinsam optimieren' (Standard AN):
+//     Die Auto-Modi von Trend, Stochastik und MACD werden nicht mehr
+//     EINZELN gewaehlt, sondern als KOMBINATION — getestet werden alle
+//     32 Kombinationen (8 Trend-Stufen x Dual/Single x Kreuzung/Frueh)
+//     im Walk-Forward-Short-Put-Backtest ihres GEMEINSAMEN Konfluenz-
+//     Signals (Score >= Mindest-Konfluenz, inkl. Mean Reversion).
+//     Es gewinnt die Kombination mit dem besten Oe je Trade; eine
+//     Kombination, deren Komponenten sich zeitlich so verschieben,
+//     dass kaum gemeinsame Signale entstehen (< 8 Trades), kann NICHT
+//     gewinnen — genau das verhindert, dass einzeln optimale Modi
+//     die 4-von-4-Konfluenz aushungern. Faellt keine Kombination ueber
+//     die Mindest-Tradezahl, greift die bisherige Einzel-Optimierung.
+//     Manuell gesetzte Modi bleiben fest (die Suche laeuft dann nur
+//     ueber die verbleibenden Auto-Modi). Mean Reversion bleibt
+//     bewusst fix (synchron zum Einzel-Indikator).
 //  NEU in v1.7 — UNSICHERHEITS-KASKADE (Modell vs. gemessen):
 //   • Neue Tabelle unten links (abschaltbar): je aktive Komponente die
 //     GEMESSENE Trefferquote (Win = Konfidenz, Unsicherheit = 100−Win,
@@ -300,7 +316,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.7", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.8", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
@@ -352,6 +368,17 @@ macdMode  = input.string("Auto (aktienspezifisch)", "MACD-Modus",
           + "laufend auf dieser Aktie (eigener Mini-Short-Put-Backtest, "
           + "Walk-Forward ohne Blick in die Zukunft) und nutzt die bessere — "
           + "Hover an der MACD-Zeile der Status-Tabelle zeigt die aktuelle Wahl.")
+jointOpt  = input.bool(true, "Auto-Modi gemeinsam optimieren (Konfluenz-Ziel)", group = grpC,
+     tooltip = "AN (Standard): Die Auto-Modi von Trend, Stochastik und MACD werden "
+          + "GEMEINSAM gewählt — getestet werden alle Kombinationen (8 Trend-"
+          + "Stufen × Dual/Single × Kreuzung/Früh) im Walk-Forward-Short-Put-"
+          + "Backtest ihres GEMEINSAMEN Konfluenz-Signals (Score ≥ Mindest-"
+          + "Konfluenz, inkl. Mean Reversion). Kombinationen, deren Komponenten "
+          + "kaum noch gemeinsam feuern (< 8 gemeinsame Trades), können nicht "
+          + "gewinnen — das verhindert, dass einzeln optimale Modi die "
+          + "4-von-4-Konfluenz aushungern. AUS: jeder Auto-Modus optimiert nur "
+          + "sich selbst. Manuell gesetzte Modi bleiben in beiden Fällen fest; "
+          + "Mean Reversion bleibt bewusst fix (synchron zum Einzel-Indikator).")
 
 grpX = "Komponenten der Konfluenz (einzeln schaltbar)"
 useTrend  = input.bool(true, "Trend Model einbeziehen", group = grpX,
@@ -746,14 +773,22 @@ bool tB4 = tF4 > tS4
 bool tB5 = tF5 > tS5
 bool tB6 = tF6 > tS6
 bool tB7 = tF7 > tS7
-[tN0, tQ0] = f_wfStats(tB0 and not tB0[1])
-[tN1, tQ1] = f_wfStats(tB1 and not tB1[1])
-[tN2, tQ2] = f_wfStats(tB2 and not tB2[1])
-[tN3, tQ3] = f_wfStats(tB3 and not tB3[1])
-[tN4, tQ4] = f_wfStats(tB4 and not tB4[1])
-[tN5, tQ5] = f_wfStats(tB5 and not tB5[1])
-[tN6, tQ6] = f_wfStats(tB6 and not tB6[1])
-[tN7, tQ7] = f_wfStats(tB7 and not tB7[1])
+bool tEu0 = tB0 and not tB0[1]
+bool tEu1 = tB1 and not tB1[1]
+bool tEu2 = tB2 and not tB2[1]
+bool tEu3 = tB3 and not tB3[1]
+bool tEu4 = tB4 and not tB4[1]
+bool tEu5 = tB5 and not tB5[1]
+bool tEu6 = tB6 and not tB6[1]
+bool tEu7 = tB7 and not tB7[1]
+[tN0, tQ0] = f_wfStats(tEu0)
+[tN1, tQ1] = f_wfStats(tEu1)
+[tN2, tQ2] = f_wfStats(tEu2)
+[tN3, tQ3] = f_wfStats(tEu3)
+[tN4, tQ4] = f_wfStats(tEu4)
+[tN5, tQ5] = f_wfStats(tEu5)
+[tN6, tQ6] = f_wfStats(tEu6)
+[tN7, tQ7] = f_wfStats(tEu7)
 var int tmSel = 0
 int   tmBestIdx = tmSel
 float tmBest = -1.0e9
@@ -766,22 +801,8 @@ for m = 0 to 7
         tmBestIdx := m
 tmSel := tmBestIdx
 
-bool autoTrend = trendMode == "Auto (aktienspezifisch)"
-int  manSel = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 2 : trendMode == "Loose" ? 4 : 7
-int  tmUse  = autoTrend ? tmSel : manSel
-string tmName = tmUse == 0 ? "EMA 2/9 (Very Tight)" : tmUse == 1 ? "EMA 3/12" : tmUse == 2 ? "EMA 4/16 (Tight)" :
-     tmUse == 3 ? "EMA 5/21" : tmUse == 4 ? "EMA 6/28 (Loose)" : tmUse == 5 ? "EMA 8/31" :
-     tmUse == 6 ? "EMA 10/33" : "EMA 13/35 (Very Loose)"
-
-trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tmUse == 3 ? tF3 :
-     tmUse == 4 ? tF4 : tmUse == 5 ? tF5 : tmUse == 6 ? tF6 : tF7
-trendSlow = tmUse == 0 ? tS0 : tmUse == 1 ? tS1 : tmUse == 2 ? tS2 : tmUse == 3 ? tS3 :
-     tmUse == 4 ? tS4 : tmUse == 5 ? tS5 : tmUse == 6 ? tS6 : tS7
-bullTrend = trendFast > trendSlow
-bearTrend = trendFast < trendSlow
-
-trendBuyEvt  = bullTrend and not bullTrend[1]
-trendSellEvt = bearTrend and not bearTrend[1]
+// (endgueltige Modus-Wahl erfolgt nach der Mean Reversion —
+// gemeinsam mit Stochastik/MACD, siehe 'AUTO-AUSWAHL')
 
 // ══════════════════════════ 2) MACD PRO (10/35/5) ══════════════════════════
 macdLine = ta.ema(close, 10) - ta.ema(close, 35)
@@ -799,11 +820,6 @@ bool mdSellFrueh = hist < hist[1] and hist[1] >= hist[2] and hist > 0
 [mdN1, mdQ1] = f_wfStats(mdBuyFrueh)
 var int mdSel = 0
 mdSel := f_wfScore(mdN1, mdQ1) > math.max(f_wfScore(mdN0, mdQ0), -1.0e8) ? 1 : f_wfScore(mdN0, mdQ0) > -1.0e8 ? 0 : mdSel
-bool autoMacd = macdMode == "Auto (aktienspezifisch)"
-macdFrueh = autoMacd ? mdSel == 1 : macdMode == "Früh (Histogramm dreht)"
-string mdName = macdFrueh ? "Früh (Histogramm dreht)" : "Kreuzung (klassisch)"
-macdBuyEvt  = macdFrueh ? mdBuyFrueh : mdBuyCross
-macdSellEvt = macdFrueh ? mdSellFrueh : mdSellCross
 
 // ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
 k1 = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
@@ -818,11 +834,6 @@ bool stSellSing = ta.crossunder(k1, obLevel)
 [stN1, stQ1] = f_wfStats(stBuySing)
 var int stSel = 1
 stSel := f_wfScore(stN0, stQ0) > math.max(f_wfScore(stN1, stQ1), -1.0e8) ? 0 : f_wfScore(stN1, stQ1) > -1.0e8 ? 1 : stSel
-bool autoStoch = stochMode == "Auto (aktienspezifisch)"
-dualStoch = autoStoch ? stSel == 0 : stochMode == "Dual (klassisch)"
-string stName = dualStoch ? "Dual (klassisch)" : "Single (schnelle Linie)"
-stochBuyEvt  = dualStoch ? stBuyDual : stBuySing
-stochSellEvt = dualStoch ? stSellDual : stSellSing
 
 // ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
 rsi = ta.rsi(close, 14)
@@ -895,6 +906,168 @@ if mrSigDn
     mrLastSStg := mrStgS
 mrBuyEvt  = useMR and mrSigUp
 mrSellEvt = useMR and mrSigDn
+
+// ══════ AUTO-AUSWAHL: EINZELN ODER GEMEINSAM (Konfluenz-Ziel) ══════
+// Standard: GEMEINSAME Optimierung — alle 32 Kombinationen aus
+// Trend-Stufe x Stochastik-Variante x MACD-Variante werden am
+// GEMEINSAMEN Konfluenz-Signal gemessen (Score >= Mindest-Konfluenz,
+// inkl. der fixen Mean Reversion), Walk-Forward wie gehabt. So kann
+// keine einzeln 'optimale' Einstellung die gemeinsamen Signale
+// aushungern: Kombinationen mit < 8 gemeinsamen Trades scheiden aus.
+bool autoTrend = trendMode == "Auto (aktienspezifisch)"
+bool autoMacd  = macdMode == "Auto (aktienspezifisch)"
+bool autoStoch = stochMode == "Auto (aktienspezifisch)"
+int  manSel      = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 2 : trendMode == "Loose" ? 4 : 7
+int  manStochIdx = stochMode == "Dual (klassisch)" ? 0 : 1
+int  manMacdIdx  = macdMode == "Früh (Histogramm dreht)" ? 1 : 0
+
+// Fenster-Zustaende je Variante (fuer den gemeinsamen Score)
+int sTu0 = nz(ta.barssince(tEu0), 99999)
+int sTu1 = nz(ta.barssince(tEu1), 99999)
+int sTu2 = nz(ta.barssince(tEu2), 99999)
+int sTu3 = nz(ta.barssince(tEu3), 99999)
+int sTu4 = nz(ta.barssince(tEu4), 99999)
+int sTu5 = nz(ta.barssince(tEu5), 99999)
+int sTu6 = nz(ta.barssince(tEu6), 99999)
+int sTu7 = nz(ta.barssince(tEu7), 99999)
+int sMd0 = nz(ta.barssince(mdBuyCross), 99999)
+int sMd1 = nz(ta.barssince(mdBuyFrueh), 99999)
+int sSt0 = nz(ta.barssince(stBuyDual), 99999)
+int sSt1 = nz(ta.barssince(stBuySing), 99999)
+int sMrJ = nz(ta.barssince(mrSigUp), 99999)
+bool tOK0j = tB0 and sTu0 < confWin
+bool tOK1j = tB1 and sTu1 < confWin
+bool tOK2j = tB2 and sTu2 < confWin
+bool tOK3j = tB3 and sTu3 < confWin
+bool tOK4j = tB4 and sTu4 < confWin
+bool tOK5j = tB5 and sTu5 < confWin
+bool tOK6j = tB6 and sTu6 < confWin
+bool tOK7j = tB7 and sTu7 < confWin
+bool mdOK0j = hist > 0 and sMd0 < confWin
+bool mdOK1j = hist > hist[1] and sMd1 < confWin
+bool stOK0j = sSt0 < confWin
+bool stOK1j = sSt1 < confWin
+bool mrOKj  = useMR and sMrJ < confWin
+bool mrEvtJ = useMR and mrSigUp
+int  nTimJ  = 3 + (useMR ? 1 : 0)
+int  kJoint = math.min(minScore, nTimJ)
+
+// 32 Kombinations-Signale (Index = TrendStufe*4 + Stoch*2 + MACD)
+bool jE0 = (tEu0 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE1 = (tEu0 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE2 = (tEu0 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE3 = (tEu0 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE4 = (tEu1 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE5 = (tEu1 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE6 = (tEu1 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE7 = (tEu1 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE8 = (tEu2 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE9 = (tEu2 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE10 = (tEu2 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE11 = (tEu2 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE12 = (tEu3 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE13 = (tEu3 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE14 = (tEu3 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE15 = (tEu3 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE16 = (tEu4 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE17 = (tEu4 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE18 = (tEu4 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE19 = (tEu4 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE20 = (tEu5 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE21 = (tEu5 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE22 = (tEu5 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE23 = (tEu5 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE24 = (tEu6 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE25 = (tEu6 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE26 = (tEu6 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE27 = (tEu6 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE28 = (tEu7 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE29 = (tEu7 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE30 = (tEu7 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE31 = (tEu7 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+[jN0, jQ0] = f_wfStats(jE0)
+[jN1, jQ1] = f_wfStats(jE1)
+[jN2, jQ2] = f_wfStats(jE2)
+[jN3, jQ3] = f_wfStats(jE3)
+[jN4, jQ4] = f_wfStats(jE4)
+[jN5, jQ5] = f_wfStats(jE5)
+[jN6, jQ6] = f_wfStats(jE6)
+[jN7, jQ7] = f_wfStats(jE7)
+[jN8, jQ8] = f_wfStats(jE8)
+[jN9, jQ9] = f_wfStats(jE9)
+[jN10, jQ10] = f_wfStats(jE10)
+[jN11, jQ11] = f_wfStats(jE11)
+[jN12, jQ12] = f_wfStats(jE12)
+[jN13, jQ13] = f_wfStats(jE13)
+[jN14, jQ14] = f_wfStats(jE14)
+[jN15, jQ15] = f_wfStats(jE15)
+[jN16, jQ16] = f_wfStats(jE16)
+[jN17, jQ17] = f_wfStats(jE17)
+[jN18, jQ18] = f_wfStats(jE18)
+[jN19, jQ19] = f_wfStats(jE19)
+[jN20, jQ20] = f_wfStats(jE20)
+[jN21, jQ21] = f_wfStats(jE21)
+[jN22, jQ22] = f_wfStats(jE22)
+[jN23, jQ23] = f_wfStats(jE23)
+[jN24, jQ24] = f_wfStats(jE24)
+[jN25, jQ25] = f_wfStats(jE25)
+[jN26, jQ26] = f_wfStats(jE26)
+[jN27, jQ27] = f_wfStats(jE27)
+[jN28, jQ28] = f_wfStats(jE28)
+[jN29, jQ29] = f_wfStats(jE29)
+[jN30, jQ30] = f_wfStats(jE30)
+[jN31, jQ31] = f_wfStats(jE31)
+var int jSel = 0
+float[] jScores = array.from(f_wfScore(jN0, jQ0), f_wfScore(jN1, jQ1), f_wfScore(jN2, jQ2), f_wfScore(jN3, jQ3),
+     f_wfScore(jN4, jQ4), f_wfScore(jN5, jQ5), f_wfScore(jN6, jQ6), f_wfScore(jN7, jQ7),
+     f_wfScore(jN8, jQ8), f_wfScore(jN9, jQ9), f_wfScore(jN10, jQ10), f_wfScore(jN11, jQ11),
+     f_wfScore(jN12, jQ12), f_wfScore(jN13, jQ13), f_wfScore(jN14, jQ14), f_wfScore(jN15, jQ15),
+     f_wfScore(jN16, jQ16), f_wfScore(jN17, jQ17), f_wfScore(jN18, jQ18), f_wfScore(jN19, jQ19),
+     f_wfScore(jN20, jQ20), f_wfScore(jN21, jQ21), f_wfScore(jN22, jQ22), f_wfScore(jN23, jQ23),
+     f_wfScore(jN24, jQ24), f_wfScore(jN25, jQ25), f_wfScore(jN26, jQ26), f_wfScore(jN27, jQ27),
+     f_wfScore(jN28, jQ28), f_wfScore(jN29, jQ29), f_wfScore(jN30, jQ30), f_wfScore(jN31, jQ31))
+int   jBest = jSel
+float jB = -1.0e9
+for ji = 0 to 31
+    int jm0 = int(ji / 4)
+    int jr0 = ji % 4
+    int js0 = int(jr0 / 2)
+    int jv0 = jr0 % 2
+    if (autoTrend or jm0 == manSel) and (autoStoch or js0 == manStochIdx) and (autoMacd or jv0 == manMacdIdx)
+        float gJ = array.get(jScores, ji)
+        if gJ > -1.0e8 and gJ > jB
+            jB := gJ
+            jBest := ji
+jSel := jBest
+bool jValid   = jB > -1.0e8
+bool useJoint = jointOpt and jValid
+int  jm = int(jSel / 4)
+int  js = int((jSel % 4) / 2)
+int  jv = jSel % 2
+string jointTag = useJoint ? " · gemeinsam optimiert (Konfluenz-Ziel)" : ""
+
+// ── endgueltige Modus-Wahl ──
+int tmUse = autoTrend ? (useJoint ? jm : tmSel) : manSel
+macdFrueh = autoMacd ? ((useJoint ? jv : mdSel) == 1) : macdMode == "Früh (Histogramm dreht)"
+dualStoch = autoStoch ? ((useJoint ? js : stSel) == 0) : stochMode == "Dual (klassisch)"
+string tmName = tmUse == 0 ? "EMA 2/9 (Very Tight)" : tmUse == 1 ? "EMA 3/12" : tmUse == 2 ? "EMA 4/16 (Tight)" :
+     tmUse == 3 ? "EMA 5/21" : tmUse == 4 ? "EMA 6/28 (Loose)" : tmUse == 5 ? "EMA 8/31" :
+     tmUse == 6 ? "EMA 10/33" : "EMA 13/35 (Very Loose)"
+string mdName = macdFrueh ? "Früh (Histogramm dreht)" : "Kreuzung (klassisch)"
+string stName = dualStoch ? "Dual (klassisch)" : "Single (schnelle Linie)"
+
+trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tmUse == 3 ? tF3 :
+     tmUse == 4 ? tF4 : tmUse == 5 ? tF5 : tmUse == 6 ? tF6 : tF7
+trendSlow = tmUse == 0 ? tS0 : tmUse == 1 ? tS1 : tmUse == 2 ? tS2 : tmUse == 3 ? tS3 :
+     tmUse == 4 ? tS4 : tmUse == 5 ? tS5 : tmUse == 6 ? tS6 : tS7
+bullTrend = trendFast > trendSlow
+bearTrend = trendFast < trendSlow
+trendBuyEvt  = bullTrend and not bullTrend[1]
+trendSellEvt = bearTrend and not bearTrend[1]
+macdBuyEvt  = macdFrueh ? mdBuyFrueh : mdBuyCross
+macdSellEvt = macdFrueh ? mdSellFrueh : mdSellCross
+stochBuyEvt  = dualStoch ? stBuyDual : stBuySing
+stochSellEvt = dualStoch ? stSellDual : stSellSing
 
 // ── MR-ANZEIGE ──────────────────────────────────────────────────────────────
 // Overlay AUS: kleine farbige Punkte am Wende-Signal (wie bisher).
@@ -1948,19 +2121,19 @@ if barstate.islast and showTable
     if useTrend
         table.cell(t, 0, 1, autoTrend ? "Trend (Auto)" : "Trend", text_color = color.white,
              tooltip = autoTrend ? "Auto-Modus aktiv — aktuell gewählt: '" + tmName
-                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "'" + jointTag + " (bester Ø je Trade der bisherigen Historie dieser Aktie, "
                   + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 1, f_mark(trendBuyOK) + " / " + f_mark(trendSellOK), text_color = color.white)
     if useMACD
         table.cell(t, 0, 2, autoMacd ? "MACD (Auto)" : "MACD Pro", text_color = color.white,
              tooltip = autoMacd ? "Auto-Modus aktiv — aktuell gewählt: '" + mdName
-                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "'" + jointTag + " (bester Ø je Trade der bisherigen Historie dieser Aktie, "
                   + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 2, f_mark(macdBuyOK) + " / " + f_mark(macdSellOK), text_color = color.white)
     if useStoch
         table.cell(t, 0, 3, autoStoch ? "Stoch (Auto)" : "Dual Stoch", text_color = color.white,
              tooltip = autoStoch ? "Auto-Modus aktiv — aktuell gewählt: '" + stName
-                  + "' (bester Ø je Trade der bisherigen Historie dieser Aktie, "
+                  + "'" + jointTag + " (bester Ø je Trade der bisherigen Historie dieser Aktie, "
                   + "Walk-Forward ohne Blick in die Zukunft)." : "")
         table.cell(t, 1, 3, f_mark(stochBuyOK) + " / " + f_mark(stochSellOK), text_color = color.white)
     if useRSI
