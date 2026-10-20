@@ -2,12 +2,30 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.6.2
+//  Stillhalter Community® – CONFLUENCE v1.7
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
+//  NEU in v1.7 — UNSICHERHEITS-KASKADE (Modell vs. gemessen):
+//   • Neue Tabelle unten links (abschaltbar): je aktive Komponente die
+//     GEMESSENE Trefferquote (Win = Konfidenz, Unsicherheit = 100−Win,
+//     aus dem eigenen Short-Put-Backtest der Zeile) und die gemessene
+//     SIGNAL-UEBERLAPPUNG mit den vorherigen Komponenten (Anteil der
+//     Signale innerhalb des Konfluenz-Fensters nach einem frueheren
+//     Signal).
+//   • Spalte MODELL: kumulierte Konfidenz nach dem Multiplikations-
+//     prinzip (Rest-Unsicherheit x Rest-Unsicherheit, gedaempft um die
+//     gemessene Ueberlappung) — die bekannte 'Unsicherheit gegen null'-
+//     Rechnung. Sie gilt NUR, wenn die Fehler der Komponenten
+//     unabhaengig sind.
+//   • Spalte GEMESSEN: die echte Trefferquote, wenn wirklich k
+//     Komponenten gleichzeitig standen ('min. k von n'-Zeilen der
+//     Staffel). Die Luecke zwischen MODELL und GEMESSEN ist die
+//     ehrliche Antwort: So viel der versprochenen Unsicherheits-
+//     Reduktion frisst die Korrelation der Komponenten wieder auf
+//     (alle irren gemeinsam am selben V-Boden).
 //  NEU in v1.6.2 — SCHWELLEN-ALERTS (Watchlist-Alarme):
 //   • Je Konfluenz-Schwelle eine EIGENE Alarm-Bedingung: 'UP/DOWN —
 //     min. 2 / min. 3 / min. 4 Komponenten' und 'ALLE aktiven
@@ -282,7 +300,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.6.2", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.7", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
@@ -427,6 +445,15 @@ colTrendDown = input.color(color.new(#ffff99, 0), "Trend-Band abwärts", group =
 showTable = input.bool(true, "Status-Tabelle anzeigen", group = grpS,
      tooltip = "Kleine Übersicht unten rechts: welche Komponente aktuell auf UP (▲) "
           + "bzw. DOWN (▼) steht.")
+showCascade = input.bool(true, "Unsicherheits-Kaskade anzeigen (unten links)", group = grpS,
+     tooltip = "Zeigt je aktiver Komponente die gemessene Trefferquote (Win = "
+          + "Konfidenz, Unsicherheit = 100% − Win) und wie die Kombination die "
+          + "Unsicherheit senkt — doppelt: MODELL = Multiplikation der Rest-"
+          + "Unsicherheiten, gedämpft um die gemessene Signal-Überlappung "
+          + "(gültig NUR bei unabhängigen Fehlern) · GEMESSEN = echte Win Rate, "
+          + "wenn wirklich k Komponenten gleichzeitig standen. Eine große Lücke "
+          + "zwischen Modell und Messung heißt: Die Komponenten irren gemeinsam "
+          + "— die Unsicherheit lässt sich real nicht auf null multiplizieren.")
 
 grpSR = "S/R-Pivots (Basis der Options-Zonen)"
 pivLb     = input.int(6, "Pivot-Länge", minval = 3, maxval = 30, group = grpSR,
@@ -1815,6 +1842,100 @@ if barstate.islast and enableBT
              + str.tostring(minCalDays) + "T · " + premTxt,
              text_color = color.new(color.white, 20), text_size = size.tiny, text_halign = text.align_left)
         table.merge_cells(bt, 1, rowI, 4, rowI)
+
+// ══════ UNSICHERHEITS-KASKADE (Modell vs. gemessen) ══════
+// Ueberlappungs-Zaehler: Anteil der Kauf-Signale einer Komponente, die
+// innerhalb des Konfluenz-Fensters NACH einem Signal einer frueheren
+// Komponente kamen (feste Reihenfolge: Trend, MACD, Stoch, RSI, MR,
+// Support-Qual.). Das ist das Pendant zur Spalte 'Indicator Confluence'
+// — hier aber GEMESSEN statt geschaetzt.
+var array<int> ovN = array.new_int(6, 0)
+var array<int> ovH = array.new_int(6, 0)
+if enableBT and inWindow
+    if useTrend and trendBuyEvt
+        array.set(ovN, 0, array.get(ovN, 0) + 1)
+    if useMACD and macdBuyEvt
+        array.set(ovN, 1, array.get(ovN, 1) + 1)
+        if useTrend and sinceTrendBuy < confWin
+            array.set(ovH, 1, array.get(ovH, 1) + 1)
+    if useStoch and stochBuyEvt
+        array.set(ovN, 2, array.get(ovN, 2) + 1)
+        if (useTrend and sinceTrendBuy < confWin) or (useMACD and sinceMacdBuy < confWin)
+            array.set(ovH, 2, array.get(ovH, 2) + 1)
+    if useRSI and rsiBuyEvt
+        array.set(ovN, 3, array.get(ovN, 3) + 1)
+        if (useTrend and sinceTrendBuy < confWin) or (useMACD and sinceMacdBuy < confWin) or (useStoch and sinceStochBuy < confWin)
+            array.set(ovH, 3, array.get(ovH, 3) + 1)
+    if useMR and mrSigUp
+        array.set(ovN, 4, array.get(ovN, 4) + 1)
+        if (useTrend and sinceTrendBuy < confWin) or (useMACD and sinceMacdBuy < confWin) or (useStoch and sinceStochBuy < confWin) or (useRSI and sinceRsiBuy < confWin)
+            array.set(ovH, 4, array.get(ovH, 4) + 1)
+    if useQS and qsBuyRaw
+        array.set(ovN, 5, array.get(ovN, 5) + 1)
+        if (useTrend and sinceTrendBuy < confWin) or (useMACD and sinceMacdBuy < confWin) or (useStoch and sinceStochBuy < confWin) or (useRSI and sinceRsiBuy < confWin) or (useMR and sinceMrBuy < confWin)
+            array.set(ovH, 5, array.get(ovH, 5) + 1)
+
+var table kc = table.new(position.bottom_left, 6, 8, border_width = 1)
+if barstate.islast and enableBT and showCascade
+    color kBg = color.new(color.black, 20)
+    table.cell(kc, 0, 0, "Kaskade", text_color = color.white, text_size = size.small, bgcolor = kBg,
+         tooltip = "Unsicherheits-Kaskade: Win = gemessene Trefferquote der Komponente "
+              + "allein (Short-Put-Backtest, Regeln wie die Staffel-Tabelle). "
+              + "MODELL = kumulierte Konfidenz nach dem Multiplikationsprinzip "
+              + "(Rest-Unsicherheit × Rest-Unsicherheit, gedämpft um die gemessene "
+              + "Überlappung) — gilt nur bei unabhängigen Fehlern. GEMESSEN = echte "
+              + "Win Rate der 'min. k von n'-Staffel. Lücke = Korrelation der Fehler.")
+    table.cell(kc, 1, 0, "Win",      text_color = color.white, text_size = size.small, bgcolor = kBg)
+    table.cell(kc, 2, 0, "Unsich.",  text_color = color.white, text_size = size.small, bgcolor = kBg)
+    table.cell(kc, 3, 0, "Überl.",   text_color = color.white, text_size = size.small, bgcolor = kBg,
+         tooltip = "Gemessene Signal-Überlappung: Anteil der Signale dieser Komponente, "
+              + "die innerhalb des Konfluenz-Fensters nach einem Signal einer "
+              + "FRÜHEREN Zeile kamen (Pendant zu 'Indicator Confluence' — gemessen "
+              + "statt geschätzt).")
+    table.cell(kc, 4, 0, "Modell",   text_color = color.white, text_size = size.small, bgcolor = kBg)
+    table.cell(kc, 5, 0, "Gemessen", text_color = color.white, text_size = size.small, bgcolor = kBg,
+         tooltip = "Echte Trefferquote, wenn wirklich k Komponenten gleichzeitig "
+              + "standen ('min. k von n' der Staffel-Tabelle, beliebige Kombination). "
+              + "Zeile 1 = die Komponente allein.")
+    float cumU = 100.0
+    bool  cumOk = false
+    int   kPos = 0
+    int   kRow = 1
+    for c = 0 to 5
+        bool actC = c == 0 ? useTrend : c == 1 ? useMACD : c == 2 ? useStoch : c == 3 ? useRSI : c == 4 ? useMR : useQS
+        if actC
+            kPos += 1
+            string nmC = c == 0 ? "Trend" : c == 1 ? "MACD" : c == 2 ? "Stoch" : c == 3 ? "RSI" : c == 4 ? "MR" : "Supp."
+            int   nC  = array.get(stTr, c)
+            float wrC = nC > 0 ? array.get(stWin, c) * 100.0 / nC : na
+            float ovC = kPos == 1 ? 0.0 : (array.get(ovN, c) > 0 ? array.get(ovH, c) * 100.0 / array.get(ovN, c) : na)
+            bool  okC = nC >= 10 and not na(wrC)
+            if okC
+                if not cumOk
+                    cumU  := 100.0 - wrC
+                    cumOk := true
+                else
+                    cumU := cumU * (1 - wrC / 100 * (1 - nz(ovC, 0) / 100))
+            // GEMESSEN: Zeile 1 = eigene WR · ab Zeile 2 = 'min. k von n'
+            float measWr = na
+            int   measN  = 0
+            if kPos == 1
+                measWr := wrC
+                measN  := nC
+            else if kPos <= 6
+                measN  := array.get(stTr, 4 + kPos)
+                measWr := measN > 0 ? array.get(stWin, 4 + kPos) * 100.0 / measN : na
+            table.cell(kc, 0, kRow, nmC, text_color = color.white, text_size = size.small)
+            table.cell(kc, 1, kRow, na(wrC) ? "–" : str.tostring(wrC, "#.#") + "%", text_color = color.white, text_size = size.small)
+            table.cell(kc, 2, kRow, na(wrC) ? "–" : str.tostring(100 - wrC, "#.#") + "%", text_color = color.white, text_size = size.small)
+            table.cell(kc, 3, kRow, kPos == 1 ? "·" : na(ovC) ? "–" : str.tostring(ovC, "#") + "%", text_color = color.white, text_size = size.small)
+            table.cell(kc, 4, kRow, cumOk and okC ? str.tostring(100 - cumU, "#.#") + "%" : nC < 10 ? "n<10" : "–",
+                 text_color = color.white, text_size = size.small,
+                 bgcolor = cumOk and okC ? color.new(color.teal, 80) : na)
+            table.cell(kc, 5, kRow, na(measWr) ? "–" : str.tostring(measWr, "#.#") + "% (" + str.tostring(measN) + ")",
+                 text_color = color.white, text_size = size.small,
+                 bgcolor = not na(measWr) ? color.new(color.olive, 80) : na)
+            kRow += 1
 
 // ══════════════════════════ STATUS-TABELLE ══════════════════════════
 var table t = table.new(position.bottom_right, 2, 8, border_width = 1)
