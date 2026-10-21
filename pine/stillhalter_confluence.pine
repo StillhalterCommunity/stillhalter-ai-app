@@ -2,12 +2,30 @@
 // © Stillhalter Community
 //@version=6
 // ─────────────────────────────────────────────────────────────────────────────
-//  Stillhalter Community® – CONFLUENCE v1.8
+//  Stillhalter Community® – CONFLUENCE v1.9
 //  Kombiniert: Stillhalter Trend Model · Stillhalter MACD Pro (10/35/5)
 //              · Stillhalter Dual Stochastic (14,3,3 + 35,10,5)
 //  Optional:   RSI (30/70) · Mean Reversion (Z-Score) · ADX-Filter
 //              · Unterstuetzungs-Qualitaet (R-Level + Volumen)
 //
+//  NEU in v1.9 — PARAMETER-LEITERN + MASTER-SCHALTER:
+//   • Auto justiert jetzt auch die FEINEINSTELLUNG der Indikatoren je
+//     Aktie: Stochastik (schnelle Linie 14/3 · 10/5 · 21/5) und MACD
+//     (10/35/5 · 8/21/5 · 12/26/9) laufen als 3-stufige Parameter-
+//     Leitern parallel; je Logik (Dual/Single bzw. Kreuzung/Frueh)
+//     waehlt ein eigener Walk-Forward-Mini-Backtest laufend den
+//     Parametersatz mit dem besten Oe je Trade. Der Trend hat seine
+//     Leiter (8 Trendlinien-Paare) bereits seit v1.6.
+//   • Die gemeinsame Optimierung (v1.8) nutzt je Logik automatisch den
+//     aktuell besten Parametersatz — die 32 Struktur-Kombinationen
+//     bleiben, die Feineinstellung laeuft als Meta-Ebene mit (ehrlich:
+//     Auswahl auf jeder Kerze nur aus der Vergangenheit).
+//   • Neuer MASTER-SCHALTER 'Auto-Funktionen aktiv': AUS = alles fest —
+//     manuell gewaehlte Modi gelten, Auto-Modi fallen auf den Klassiker
+//     zurueck (Trend Very Tight · Stoch Single 14/3 · MACD Kreuzung
+//     10/35/5). Alle kuenftigen Funktionen respektieren den Schalter.
+//   • Manuell gewaehlte Modi laufen IMMER mit der klassischen
+//     Feineinstellung — nichts verstellt sich hinter dem Ruecken.
 //  NEU in v1.8 — GEMEINSAME AUTO-OPTIMIERUNG (Konfluenz-Ziel):
 //   • Neuer Schalter 'Auto-Modi gemeinsam optimieren' (Standard AN):
 //     Die Auto-Modi von Trend, Stochastik und MACD werden nicht mehr
@@ -316,7 +334,7 @@
 //  v0.9.1: knallige 2-Stufen-Dreiecke, Volumenprofil (Fixed Range,
 //     lokales Tief → heute) mit POC/VAH/VAL, paarweise VA.
 // ─────────────────────────────────────────────────────────────────────────────
-indicator("Stillhalter Confluence v1.8", shorttitle = "Stillhalter Confluence",
+indicator("Stillhalter Confluence v1.9", shorttitle = "Stillhalter Confluence",
      overlay = true, max_labels_count = 500, max_lines_count = 50,
      max_boxes_count = 130, max_polylines_count = 20, max_bars_back = 500)
 
@@ -337,6 +355,16 @@ trendMode = input.string("Auto (aktienspezifisch)", "Trend Mode",
           + "der Status-Tabelle.")
 
 grpC = "Confluence"
+autoOn = input.bool(true, "Auto-Funktionen aktiv (Master-Schalter)", group = grpC,
+     tooltip = "Zentraler Schalter für ALLE Auto-Funktionen dieses Indikators. "
+          + "AN (Standard): Auf 'Auto' gestellte Modi wählen je Aktie Modus UND "
+          + "Feineinstellung selbst (Walk-Forward-Mini-Backtests, kein Blick in "
+          + "die Zukunft), inklusive der gemeinsamen Optimierung. AUS: Der "
+          + "Indikator läuft vollständig mit festen Einstellungen — manuell "
+          + "gewählte Modi gelten weiter, auf 'Auto' stehende Modi fallen auf "
+          + "den Klassiker zurück (Trend Very Tight · Stochastik Single 14/3 · "
+          + "MACD Kreuzung 10/35/5). Ideal zum direkten Vergleich: Was trägt "
+          + "die Automatik wirklich bei?")
 confWin  = input.int(4, "Konfluenz-Fenster (Kerzen)", minval = 1, maxval = 20, group = grpC,
      tooltip = "Wie lange ein Komponenten-Signal als 'frisch' zählt. Standard 4 — aus "
           + "einer Studie über 120 echte Kurstiefs: Stochastik reagiert im Median 2, "
@@ -357,7 +385,10 @@ stochMode = input.string("Auto (aktienspezifisch)", "Stochastik-Modus",
           + "AUTO (Standard) = der Indikator testet beide Varianten laufend auf "
           + "dieser Aktie (eigener Mini-Short-Put-Backtest, Walk-Forward ohne "
           + "Blick in die Zukunft) und nutzt die bessere — Hover an der "
-          + "Stochastik-Zeile der Status-Tabelle zeigt die aktuelle Wahl.")
+          + "Stochastik-Zeile der Status-Tabelle zeigt die aktuelle Wahl. "
+          + "Im Auto-Modus wird zusätzlich die FEINEINSTELLUNG der schnellen "
+          + "Linie aus einer 3-stufigen Leiter gewählt (14/3 · 10/5 · 21/5) — "
+          + "je Logik der Parametersatz mit dem besten Ø je Trade.")
 macdMode  = input.string("Auto (aktienspezifisch)", "MACD-Modus",
      options = ["Auto (aktienspezifisch)", "Kreuzung (klassisch)", "Früh (Histogramm dreht)"], group = grpC,
      tooltip = "Kreuzung = Histogramm-Nulldurchgang (MACD kreuzt Signallinie) — der "
@@ -367,7 +398,10 @@ macdMode  = input.string("Auto (aktienspezifisch)", "MACD-Modus",
           + "Rauschen. AUTO (Standard) = der Indikator testet beide Varianten "
           + "laufend auf dieser Aktie (eigener Mini-Short-Put-Backtest, "
           + "Walk-Forward ohne Blick in die Zukunft) und nutzt die bessere — "
-          + "Hover an der MACD-Zeile der Status-Tabelle zeigt die aktuelle Wahl.")
+          + "Hover an der MACD-Zeile der Status-Tabelle zeigt die aktuelle "
+          + "Wahl. Im Auto-Modus wird zusätzlich die FEINEINSTELLUNG aus "
+          + "einer 3-stufigen Leiter gewählt (10/35/5 · 8/21/5 · 12/26/9) — "
+          + "je Logik der Parametersatz mit dem besten Ø je Trade.")
 jointOpt  = input.bool(true, "Auto-Modi gemeinsam optimieren (Konfluenz-Ziel)", group = grpC,
      tooltip = "AN (Standard): Die Auto-Modi von Trend, Stochastik und MACD werden "
           + "GEMEINSAM gewählt — getestet werden alle Kombinationen (8 Trend-"
@@ -378,7 +412,9 @@ jointOpt  = input.bool(true, "Auto-Modi gemeinsam optimieren (Konfluenz-Ziel)", 
           + "gewinnen — das verhindert, dass einzeln optimale Modi die "
           + "4-von-4-Konfluenz aushungern. AUS: jeder Auto-Modus optimiert nur "
           + "sich selbst. Manuell gesetzte Modi bleiben in beiden Fällen fest; "
-          + "Mean Reversion bleibt bewusst fix (synchron zum Einzel-Indikator).")
+          + "Mean Reversion bleibt bewusst fix (synchron zum Einzel-Indikator). "
+          + "Die Feineinstellungen (Parameter-Leitern) laufen dabei mit: Jede "
+          + "Logik nutzt stets ihren aktuell besten Parametersatz.")
 
 grpX = "Komponenten der Konfluenz (einzeln schaltbar)"
 useTrend  = input.bool(true, "Trend Model einbeziehen", group = grpX,
@@ -387,7 +423,8 @@ useTrend  = input.bool(true, "Trend Model einbeziehen", group = grpX,
           + "löst es Dreiecke aus. Der Trendschleier (Anzeige) wird separat "
           + "unter 'Anzeige' geschaltet.")
 useMACD   = input.bool(true, "MACD Pro einbeziehen", group = grpX,
-     tooltip = "Zählt den Stillhalter MACD Pro (10/35/5) als Konfluenz-Komponente. "
+     tooltip = "Zählt den Stillhalter MACD Pro als Konfluenz-Komponente (Standard "
+          + "10/35/5, im Auto-Modus je Aktie feinjustiert). "
           + "Aus = er zählt weder für den Score noch löst er Dreiecke aus.")
 useStoch  = input.bool(true, "Dual Stochastik einbeziehen", group = grpX,
      tooltip = "Zählt die Stillhalter Dual Stochastik als Konfluenz-Komponente. "
@@ -804,36 +841,125 @@ tmSel := tmBestIdx
 // (endgueltige Modus-Wahl erfolgt nach der Mean Reversion —
 // gemeinsam mit Stochastik/MACD, siehe 'AUTO-AUSWAHL')
 
-// ══════════════════════════ 2) MACD PRO (10/35/5) ══════════════════════════
-macdLine = ta.ema(close, 10) - ta.ema(close, 35)
-sigLine  = ta.ema(macdLine, 5)
-hist     = macdLine - sigLine
+// ══════════ 2) MACD PRO — PARAMETER-LEITER (Auto-Feinjustierung) ══════════
+// Drei Parametersaetze laufen parallel: A = Stillhalter Pro 10/35/5
+// (Klassiker), B = 8/21/5 (schneller), C = 12/26/9 (Standard-MACD,
+// traeger). Der Auto-Modus waehlt je Logik (Kreuzung/Frueh) laufend den
+// Parametersatz mit dem besten Oe je Trade — Walk-Forward, nur
+// Vergangenheit. Manuell oder Master-Schalter AUS = fest 10/35/5.
+float macdA = ta.ema(close, 10) - ta.ema(close, 35)
+float sigA  = ta.ema(macdA, 5)
+float histA = macdA - sigA
+float macdB = ta.ema(close, 8) - ta.ema(close, 21)
+float sigB  = ta.ema(macdB, 5)
+float histB = macdB - sigB
+float macdC = ta.ema(close, 12) - ta.ema(close, 26)
+float sigC  = ta.ema(macdC, 9)
+float histC = macdC - sigC
 
-// Beide Varianten parallel; Auto waehlt walk-forward die bessere.
+bool mdBuyCrossA  = ta.crossover(histA, 0)
+bool mdBuyCrossB  = ta.crossover(histB, 0)
+bool mdBuyCrossC  = ta.crossover(histC, 0)
+bool mdSellCrossA = ta.crossunder(histA, 0)
+bool mdSellCrossB = ta.crossunder(histB, 0)
+bool mdSellCrossC = ta.crossunder(histC, 0)
 // Frueh-Modus: Histogramm dreht unter Null nach oben (Momentum-Wende) —
 // kommt der Kreuzung im Median 3 Kerzen zuvor
-bool mdBuyCross  = ta.crossover(hist, 0)
-bool mdSellCross = ta.crossunder(hist, 0)
-bool mdBuyFrueh  = hist > hist[1] and hist[1] <= hist[2] and hist < 0
-bool mdSellFrueh = hist < hist[1] and hist[1] >= hist[2] and hist > 0
-[mdN0, mdQ0] = f_wfStats(mdBuyCross)
-[mdN1, mdQ1] = f_wfStats(mdBuyFrueh)
+bool mdBuyFruehA  = histA > histA[1] and histA[1] <= histA[2] and histA < 0
+bool mdBuyFruehB  = histB > histB[1] and histB[1] <= histB[2] and histB < 0
+bool mdBuyFruehC  = histC > histC[1] and histC[1] <= histC[2] and histC < 0
+bool mdSellFruehA = histA < histA[1] and histA[1] >= histA[2] and histA > 0
+bool mdSellFruehB = histB < histB[1] and histB[1] >= histB[2] and histB > 0
+bool mdSellFruehC = histC < histC[1] and histC[1] >= histC[2] and histC > 0
+
+[mKnA, mKqA] = f_wfStats(mdBuyCrossA)
+[mKnB, mKqB] = f_wfStats(mdBuyCrossB)
+[mKnC, mKqC] = f_wfStats(mdBuyCrossC)
+[mFnA, mFqA] = f_wfStats(mdBuyFruehA)
+[mFnB, mFqB] = f_wfStats(mdBuyFruehB)
+[mFnC, mFqC] = f_wfStats(mdBuyFruehC)
+var int pMdK = 0
+var int pMdF = 0
+float[] mdKScores = array.from(f_wfScore(mKnA, mKqA), f_wfScore(mKnB, mKqB), f_wfScore(mKnC, mKqC))
+float[] mdFScores = array.from(f_wfScore(mFnA, mFqA), f_wfScore(mFnB, mFqB), f_wfScore(mFnC, mFqC))
+int   pMdKb = pMdK
+float mdKB  = -1.0e9
+int   pMdFb = pMdF
+float mdFB  = -1.0e9
+for pim = 0 to 2
+    float gK = array.get(mdKScores, pim)
+    if gK > -1.0e8 and gK > mdKB
+        mdKB  := gK
+        pMdKb := pim
+    float gF = array.get(mdFScores, pim)
+    if gF > -1.0e8 and gF > mdFB
+        mdFB  := gF
+        pMdFb := pim
+pMdK := pMdKb
+pMdF := pMdFb
+// Logik-Wahl (Einzel-Optimierung/Fallback): beste Kreuzung vs. bestes Frueh
 var int mdSel = 0
-mdSel := f_wfScore(mdN1, mdQ1) > math.max(f_wfScore(mdN0, mdQ0), -1.0e8) ? 1 : f_wfScore(mdN0, mdQ0) > -1.0e8 ? 0 : mdSel
+mdSel := mdFB > math.max(mdKB, -1.0e8) ? 1 : mdKB > -1.0e8 ? 0 : mdSel
+// aktuell gewaehlte Serien je Logik (fuer die gemeinsame Optimierung)
+bool  mdBuyCrossSel = pMdK == 0 ? mdBuyCrossA : pMdK == 1 ? mdBuyCrossB : mdBuyCrossC
+bool  mdBuyFruehSel = pMdF == 0 ? mdBuyFruehA : pMdF == 1 ? mdBuyFruehB : mdBuyFruehC
+float histKSel = pMdK == 0 ? histA : pMdK == 1 ? histB : histC
+float histFSel = pMdF == 0 ? histA : pMdF == 1 ? histB : histC
 
-// ══════════════════════════ 3) DUAL STOCHASTIC ══════════════════════════
-k1 = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
-k2 = ta.sma(ta.stoch(close, high, low, 35), 10)
+// ══════════ 3) DUAL STOCHASTIC — PARAMETER-LEITER (Auto-Feinjustierung) ══════════
+// Drei Parametersaetze fuer die schnelle Linie: A = 14/3 (Klassiker),
+// B = 10/5 (schneller, geglaettet), C = 21/5 (traeger, ruhiger). Die
+// langsame Bestaetigungslinie (35/10) bleibt fest — sie definiert die
+// Dual-Logik. Auswahl je Logik (Dual/Single) walk-forward wie beim MACD.
+k1a = ta.sma(ta.stoch(close, high, low, stochLen), stochSmooth)
+k1b = ta.sma(ta.stoch(close, high, low, 10), 5)
+k1c = ta.sma(ta.stoch(close, high, low, 21), 5)
+k2  = ta.sma(ta.stoch(close, high, low, 35), 10)
 
-// Beide Varianten parallel; Auto waehlt walk-forward die bessere.
-bool stBuyDual  = ta.crossover(k1, osLevel)  and k2 < osLevel
-bool stSellDual = ta.crossunder(k1, obLevel) and k2 > obLevel
-bool stBuySing  = ta.crossover(k1, osLevel)
-bool stSellSing = ta.crossunder(k1, obLevel)
-[stN0, stQ0] = f_wfStats(stBuyDual)
-[stN1, stQ1] = f_wfStats(stBuySing)
+bool stBuyDualA  = ta.crossover(k1a, osLevel)  and k2 < osLevel
+bool stBuyDualB  = ta.crossover(k1b, osLevel)  and k2 < osLevel
+bool stBuyDualC  = ta.crossover(k1c, osLevel)  and k2 < osLevel
+bool stSellDualA = ta.crossunder(k1a, obLevel) and k2 > obLevel
+bool stSellDualB = ta.crossunder(k1b, obLevel) and k2 > obLevel
+bool stSellDualC = ta.crossunder(k1c, obLevel) and k2 > obLevel
+bool stBuySingA  = ta.crossover(k1a, osLevel)
+bool stBuySingB  = ta.crossover(k1b, osLevel)
+bool stBuySingC  = ta.crossover(k1c, osLevel)
+bool stSellSingA = ta.crossunder(k1a, obLevel)
+bool stSellSingB = ta.crossunder(k1b, obLevel)
+bool stSellSingC = ta.crossunder(k1c, obLevel)
+
+[sDnA, sDqA] = f_wfStats(stBuyDualA)
+[sDnB, sDqB] = f_wfStats(stBuyDualB)
+[sDnC, sDqC] = f_wfStats(stBuyDualC)
+[sSnA, sSqA] = f_wfStats(stBuySingA)
+[sSnB, sSqB] = f_wfStats(stBuySingB)
+[sSnC, sSqC] = f_wfStats(stBuySingC)
+var int pStD = 0
+var int pStS = 0
+float[] stDScores = array.from(f_wfScore(sDnA, sDqA), f_wfScore(sDnB, sDqB), f_wfScore(sDnC, sDqC))
+float[] stSScores = array.from(f_wfScore(sSnA, sSqA), f_wfScore(sSnB, sSqB), f_wfScore(sSnC, sSqC))
+int   pStDb = pStD
+float stDB  = -1.0e9
+int   pStSb = pStS
+float stSB  = -1.0e9
+for pis = 0 to 2
+    float gD = array.get(stDScores, pis)
+    if gD > -1.0e8 and gD > stDB
+        stDB  := gD
+        pStDb := pis
+    float gS = array.get(stSScores, pis)
+    if gS > -1.0e8 and gS > stSB
+        stSB  := gS
+        pStSb := pis
+pStD := pStDb
+pStS := pStSb
+// Logik-Wahl (Einzel-Optimierung/Fallback): bestes Dual vs. bestes Single
 var int stSel = 1
-stSel := f_wfScore(stN0, stQ0) > math.max(f_wfScore(stN1, stQ1), -1.0e8) ? 0 : f_wfScore(stN1, stQ1) > -1.0e8 ? 1 : stSel
+stSel := stDB > math.max(stSB, -1.0e8) ? 0 : stSB > -1.0e8 ? 1 : stSel
+// aktuell gewaehlte Serien je Logik (fuer die gemeinsame Optimierung)
+bool stBuyDualSel = pStD == 0 ? stBuyDualA : pStD == 1 ? stBuyDualB : stBuyDualC
+bool stBuySingSel = pStS == 0 ? stBuySingA : pStS == 1 ? stBuySingB : stBuySingC
 
 // ══════════════════════════ 4) OPTIONAL: RSI ══════════════════════════
 rsi = ta.rsi(close, 14)
@@ -914,10 +1040,14 @@ mrSellEvt = useMR and mrSigDn
 // inkl. der fixen Mean Reversion), Walk-Forward wie gehabt. So kann
 // keine einzeln 'optimale' Einstellung die gemeinsamen Signale
 // aushungern: Kombinationen mit < 8 gemeinsamen Trades scheiden aus.
-bool autoTrend = trendMode == "Auto (aktienspezifisch)"
-bool autoMacd  = macdMode == "Auto (aktienspezifisch)"
-bool autoStoch = stochMode == "Auto (aktienspezifisch)"
-int  manSel      = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 2 : trendMode == "Loose" ? 4 : 7
+// Die Parameter-Leitern (v1.9) laufen als Meta-Ebene mit: Jede Logik
+// nutzt stets ihren aktuell besten Parametersatz (walk-forward).
+bool autoTrend = autoOn and trendMode == "Auto (aktienspezifisch)"
+bool autoMacd  = autoOn and macdMode == "Auto (aktienspezifisch)"
+bool autoStoch = autoOn and stochMode == "Auto (aktienspezifisch)"
+// Feste Zuordnung manueller Modi; Master AUS + Modus 'Auto' faellt auf
+// den Klassiker zurueck (Trend Very Tight · Stoch Single · MACD Kreuzung)
+int  manSel      = trendMode == "Very Tight" ? 0 : trendMode == "Tight" ? 2 : trendMode == "Loose" ? 4 : trendMode == "Very Loose" ? 7 : 0
 int  manStochIdx = stochMode == "Dual (klassisch)" ? 0 : 1
 int  manMacdIdx  = macdMode == "Früh (Histogramm dreht)" ? 1 : 0
 
@@ -930,10 +1060,23 @@ int sTu4 = nz(ta.barssince(tEu4), 99999)
 int sTu5 = nz(ta.barssince(tEu5), 99999)
 int sTu6 = nz(ta.barssince(tEu6), 99999)
 int sTu7 = nz(ta.barssince(tEu7), 99999)
-int sMd0 = nz(ta.barssince(mdBuyCross), 99999)
-int sMd1 = nz(ta.barssince(mdBuyFrueh), 99999)
-int sSt0 = nz(ta.barssince(stBuyDual), 99999)
-int sSt1 = nz(ta.barssince(stBuySing), 99999)
+int sMdKA = nz(ta.barssince(mdBuyCrossA), 99999)
+int sMdKB = nz(ta.barssince(mdBuyCrossB), 99999)
+int sMdKC = nz(ta.barssince(mdBuyCrossC), 99999)
+int sMdFA = nz(ta.barssince(mdBuyFruehA), 99999)
+int sMdFB = nz(ta.barssince(mdBuyFruehB), 99999)
+int sMdFC = nz(ta.barssince(mdBuyFruehC), 99999)
+int sStDA = nz(ta.barssince(stBuyDualA), 99999)
+int sStDB = nz(ta.barssince(stBuyDualB), 99999)
+int sStDC = nz(ta.barssince(stBuyDualC), 99999)
+int sStSA = nz(ta.barssince(stBuySingA), 99999)
+int sStSB = nz(ta.barssince(stBuySingB), 99999)
+int sStSC = nz(ta.barssince(stBuySingC), 99999)
+// Fenster-Zustand der je Logik AKTUELL gewaehlten Feineinstellung
+int sMdK = pMdK == 0 ? sMdKA : pMdK == 1 ? sMdKB : sMdKC
+int sMdF = pMdF == 0 ? sMdFA : pMdF == 1 ? sMdFB : sMdFC
+int sStD = pStD == 0 ? sStDA : pStD == 1 ? sStDB : sStDC
+int sStS = pStS == 0 ? sStSA : pStS == 1 ? sStSB : sStSC
 int sMrJ = nz(ta.barssince(mrSigUp), 99999)
 bool tOK0j = tB0 and sTu0 < confWin
 bool tOK1j = tB1 and sTu1 < confWin
@@ -943,48 +1086,48 @@ bool tOK4j = tB4 and sTu4 < confWin
 bool tOK5j = tB5 and sTu5 < confWin
 bool tOK6j = tB6 and sTu6 < confWin
 bool tOK7j = tB7 and sTu7 < confWin
-bool mdOK0j = hist > 0 and sMd0 < confWin
-bool mdOK1j = hist > hist[1] and sMd1 < confWin
-bool stOK0j = sSt0 < confWin
-bool stOK1j = sSt1 < confWin
+bool mdOK0j = histKSel > 0 and sMdK < confWin
+bool mdOK1j = histFSel > histFSel[1] and sMdF < confWin
+bool stOK0j = sStD < confWin
+bool stOK1j = sStS < confWin
 bool mrOKj  = useMR and sMrJ < confWin
 bool mrEvtJ = useMR and mrSigUp
 int  nTimJ  = 3 + (useMR ? 1 : 0)
 int  kJoint = math.min(minScore, nTimJ)
 
 // 32 Kombinations-Signale (Index = TrendStufe*4 + Stoch*2 + MACD)
-bool jE0 = (tEu0 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE1 = (tEu0 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE2 = (tEu0 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE3 = (tEu0 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE4 = (tEu1 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE5 = (tEu1 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE6 = (tEu1 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE7 = (tEu1 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE8 = (tEu2 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE9 = (tEu2 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE10 = (tEu2 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE11 = (tEu2 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE12 = (tEu3 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE13 = (tEu3 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE14 = (tEu3 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE15 = (tEu3 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE16 = (tEu4 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE17 = (tEu4 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE18 = (tEu4 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE19 = (tEu4 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE20 = (tEu5 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE21 = (tEu5 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE22 = (tEu5 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE23 = (tEu5 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE24 = (tEu6 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE25 = (tEu6 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE26 = (tEu6 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE27 = (tEu6 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE28 = (tEu7 or stBuyDual or mdBuyCross or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE29 = (tEu7 or stBuyDual or mdBuyFrueh or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE30 = (tEu7 or stBuySing or mdBuyCross or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
-bool jE31 = (tEu7 or stBuySing or mdBuyFrueh or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE0 = (tEu0 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE1 = (tEu0 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE2 = (tEu0 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE3 = (tEu0 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK0j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE4 = (tEu1 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE5 = (tEu1 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE6 = (tEu1 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE7 = (tEu1 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK1j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE8 = (tEu2 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE9 = (tEu2 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE10 = (tEu2 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE11 = (tEu2 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK2j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE12 = (tEu3 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE13 = (tEu3 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE14 = (tEu3 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE15 = (tEu3 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK3j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE16 = (tEu4 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE17 = (tEu4 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE18 = (tEu4 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE19 = (tEu4 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK4j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE20 = (tEu5 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE21 = (tEu5 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE22 = (tEu5 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE23 = (tEu5 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK5j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE24 = (tEu6 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE25 = (tEu6 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE26 = (tEu6 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE27 = (tEu6 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK6j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE28 = (tEu7 or stBuyDualSel or mdBuyCrossSel or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE29 = (tEu7 or stBuyDualSel or mdBuyFruehSel or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK0j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE30 = (tEu7 or stBuySingSel or mdBuyCrossSel or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK0j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
+bool jE31 = (tEu7 or stBuySingSel or mdBuyFruehSel or mrEvtJ) and ((tOK7j ? 1 : 0) + (stOK1j ? 1 : 0) + (mdOK1j ? 1 : 0) + (mrOKj ? 1 : 0)) >= kJoint
 [jN0, jQ0] = f_wfStats(jE0)
 [jN1, jQ1] = f_wfStats(jE1)
 [jN2, jQ2] = f_wfStats(jE2)
@@ -1040,7 +1183,7 @@ for ji = 0 to 31
             jBest := ji
 jSel := jBest
 bool jValid   = jB > -1.0e8
-bool useJoint = jointOpt and jValid
+bool useJoint = jointOpt and autoOn and jValid
 int  jm = int(jSel / 4)
 int  js = int((jSel % 4) / 2)
 int  jv = jSel % 2
@@ -1050,11 +1193,17 @@ string jointTag = useJoint ? " · gemeinsam optimiert (Konfluenz-Ziel)" : ""
 int tmUse = autoTrend ? (useJoint ? jm : tmSel) : manSel
 macdFrueh = autoMacd ? ((useJoint ? jv : mdSel) == 1) : macdMode == "Früh (Histogramm dreht)"
 dualStoch = autoStoch ? ((useJoint ? js : stSel) == 0) : stochMode == "Dual (klassisch)"
+// Feineinstellung (Parameter-Leiter): nur im Auto-Modus — manuell oder
+// Master AUS laeuft der Klassiker (Stoch 14/3 · MACD 10/35/5)
+int stP = autoStoch ? (dualStoch ? pStD : pStS) : 0
+int mdP = autoMacd ? (macdFrueh ? pMdF : pMdK) : 0
 string tmName = tmUse == 0 ? "EMA 2/9 (Very Tight)" : tmUse == 1 ? "EMA 3/12" : tmUse == 2 ? "EMA 4/16 (Tight)" :
      tmUse == 3 ? "EMA 5/21" : tmUse == 4 ? "EMA 6/28 (Loose)" : tmUse == 5 ? "EMA 8/31" :
      tmUse == 6 ? "EMA 10/33" : "EMA 13/35 (Very Loose)"
-string mdName = macdFrueh ? "Früh (Histogramm dreht)" : "Kreuzung (klassisch)"
-string stName = dualStoch ? "Dual (klassisch)" : "Single (schnelle Linie)"
+string mdName = (macdFrueh ? "Früh (Histogramm dreht)" : "Kreuzung (klassisch)")
+     + " · " + (mdP == 0 ? "10/35/5" : mdP == 1 ? "8/21/5" : "12/26/9")
+string stName = (dualStoch ? "Dual (klassisch)" : "Single (schnelle Linie)")
+     + " · " + (stP == 0 ? "14/3" : stP == 1 ? "10/5" : "21/5")
 
 trendFast = tmUse == 0 ? tF0 : tmUse == 1 ? tF1 : tmUse == 2 ? tF2 : tmUse == 3 ? tF3 :
      tmUse == 4 ? tF4 : tmUse == 5 ? tF5 : tmUse == 6 ? tF6 : tF7
@@ -1064,10 +1213,16 @@ bullTrend = trendFast > trendSlow
 bearTrend = trendFast < trendSlow
 trendBuyEvt  = bullTrend and not bullTrend[1]
 trendSellEvt = bearTrend and not bearTrend[1]
-macdBuyEvt  = macdFrueh ? mdBuyFrueh : mdBuyCross
-macdSellEvt = macdFrueh ? mdSellFrueh : mdSellCross
-stochBuyEvt  = dualStoch ? stBuyDual : stBuySing
-stochSellEvt = dualStoch ? stSellDual : stSellSing
+macdBuyEvt  = macdFrueh ? (mdP == 0 ? mdBuyFruehA : mdP == 1 ? mdBuyFruehB : mdBuyFruehC) :
+     (mdP == 0 ? mdBuyCrossA : mdP == 1 ? mdBuyCrossB : mdBuyCrossC)
+macdSellEvt = macdFrueh ? (mdP == 0 ? mdSellFruehA : mdP == 1 ? mdSellFruehB : mdSellFruehC) :
+     (mdP == 0 ? mdSellCrossA : mdP == 1 ? mdSellCrossB : mdSellCrossC)
+stochBuyEvt  = dualStoch ? (stP == 0 ? stBuyDualA : stP == 1 ? stBuyDualB : stBuyDualC) :
+     (stP == 0 ? stBuySingA : stP == 1 ? stBuySingB : stBuySingC)
+stochSellEvt = dualStoch ? (stP == 0 ? stSellDualA : stP == 1 ? stSellDualB : stSellDualC) :
+     (stP == 0 ? stSellSingA : stP == 1 ? stSellSingB : stSellSingC)
+// Histogramm der final gewaehlten MACD-Feineinstellung (fuer das Scoring)
+float histUse = mdP == 0 ? histA : mdP == 1 ? histB : histC
 
 // ── MR-ANZEIGE ──────────────────────────────────────────────────────────────
 // Overlay AUS: kleine farbige Punkte am Wende-Signal (wie bisher).
@@ -1230,14 +1385,14 @@ sinceQsBuy     = nz(ta.barssince(qsBuyRaw),      99999)
 sinceQsSell    = nz(ta.barssince(qsSellRaw),     99999)
 
 trendBuyOK = useTrend and bullTrend and sinceTrendBuy < confWin
-macdBuyOK  = useMACD and (macdFrueh ? hist > hist[1] : hist > 0)  and sinceMacdBuy  < confWin
+macdBuyOK  = useMACD and (macdFrueh ? histUse > histUse[1] : histUse > 0)  and sinceMacdBuy  < confWin
 stochBuyOK = useStoch and sinceStochBuy < confWin
 rsiBuyOK   = useRSI and sinceRsiBuy < confWin
 mrBuyOK    = useMR and sinceMrBuy < confWin
 qsBuyOK    = useQS and sinceQsBuy < confWin
 
 trendSellOK = useTrend and bearTrend and sinceTrendSell < confWin
-macdSellOK = useMACD and (macdFrueh ? hist < hist[1] : hist < 0)  and sinceMacdSell < confWin
+macdSellOK = useMACD and (macdFrueh ? histUse < histUse[1] : histUse < 0)  and sinceMacdSell < confWin
 stochSellOK = useStoch and sinceStochSell < confWin
 rsiSellOK   = useRSI and sinceRsiSell < confWin
 mrSellOK   = useMR and sinceMrSell < confWin
